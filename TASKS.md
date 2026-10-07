@@ -32,7 +32,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `migration/src/`, `src/models/_entities/`.
   - Verify: `cargo loco db migrate` and `cargo loco db reset` succeed. `cargo loco db entities` produces no diff.
 
-- [ ] **Task 4a**: WebSocket spike.
+- [x] **Task 4a**: WebSocket spike.
   - What: throwaway route proving a Loco/axum WebSocket handler plus HTMX ws extension can broadcast server-rendered HTML to two browsers. Record findings in `docs/notes/websocket-spike.md`, then delete the route.
   - Files: `src/controllers/spike.rs` (temporary), `docs/notes/`.
   - Verify: a message sent in one tab appears in another within a second.
