@@ -1,0 +1,8 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Request declined · {{ org.name }}{% endblock title %}
+{% block panel %}
+<span class="eyebrow">{{ org.name }}</span>
+<h2 class="mt-3 text-3xl font-medium tracking-[-.03em]">Request declined</h2>
+<p class="mt-3 text-sm leading-6 text-white/60">Your request to join {{ org.name }} was not approved. If you think this is a mistake, contact someone in the organisation directly.</p>
+<form method="post" action="/logout" class="mt-8"><button type="submit" class="btn btn-ghost h-12 w-full">Sign out</button></form>
+{% endblock panel %}

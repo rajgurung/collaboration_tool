@@ -129,3 +129,9 @@ settings:
   app_url: <%= get_env(name="APP_URL") %>
   # Mark the session cookie Secure (HTTPS only).
   secure_cookies: true
+  # The platform owner. `cargo loco task super_admin` creates or promotes this account.
+  super_admin:
+    email: <%= get_env(name="SUPER_ADMIN_EMAIL", default="gurungraj26@gmail.com") %>
+    username: <%= get_env(name="SUPER_ADMIN_USERNAME", default="raj") %>
+    organisation: <%= get_env(name="SUPER_ADMIN_ORGANISATION", default="Himalayan Ritual") %>
+    password: "<%= get_env(name="SUPER_ADMIN_PASSWORD", default="") %>"

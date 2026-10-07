@@ -19,6 +19,8 @@
   --color-input: var(--input); --color-ring: var(--ring); --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
   --font-sans: "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif;
 }
+/* Ported design classes. Kept in the components layer so Tailwind utilities (e.g. md:hidden) can override them. */
+@layer components {
 * { box-sizing: border-box; }
 html { background: #0b0b10; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif; }
@@ -102,6 +104,7 @@ button, a { transition: color .2s ease, background-color .2s ease, border-color 
 @media (min-width: 900px) { .auth-stage { grid-template-columns: minmax(0, 1.25fr) minmax(420px, .75fr); } .auth-story, .auth-panel { min-height: 100vh; } .auth-panel { border-top: 0; border-left: 1px solid #ffffff10; } }
 @media (max-width: 767px) { .hero-grid { padding: 24px 20px; } .progress-orbit { width: 210px; } .roadmap-lane, .task-column { min-height: auto; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+}
 
 /* Replacements for the shadcn components the React app used. */
 @layer components {

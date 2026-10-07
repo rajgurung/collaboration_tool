@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::{offset::Local, Duration};
 use loco_rs::{auth::jwt, hash, prelude::*};
+use sea_orm::TransactionSession;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use std::sync::LazyLock;
@@ -105,7 +106,7 @@ impl Model {
     /// # Errors
     ///
     /// When could not find user by the given token or DB query error
-    pub async fn find_by_email(db: &DatabaseConnection, email: &str) -> ModelResult<Self> {
+    pub async fn find_by_email<C: ConnectionTrait>(db: &C, email: &str) -> ModelResult<Self> {
         let user = users::Entity::find()
             .filter(
                 model::query::condition()
@@ -259,10 +260,10 @@ impl Model {
     /// # Errors
     ///
     /// When could not save the user into the DB
-    pub async fn create_with_password(
-        db: &DatabaseConnection,
-        params: &RegisterParams,
-    ) -> ModelResult<Self> {
+    pub async fn create_with_password<C>(db: &C, params: &RegisterParams) -> ModelResult<Self>
+    where
+        C: ConnectionTrait + TransactionTrait,
+    {
         ValidatorTrait::validate(params)?;
         let email = normalize_email(&params.email);
         let txn = db.begin().await?;
@@ -309,6 +310,15 @@ impl Model {
 }
 
 impl ActiveModel {
+    /// Grants platform-wide super admin rights.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn make_super_admin<C: ConnectionTrait>(mut self, db: &C) -> ModelResult<Model> {
+        self.is_super_admin = ActiveValue::Set(true);
+        self.update(db).await.map_err(ModelError::from)
+    }
+
     /// Sets the email verification information for the user and
     /// updates it in the database.
     ///

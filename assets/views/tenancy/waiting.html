@@ -1,0 +1,12 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Waiting for approval · {{ org.name }}{% endblock title %}
+{% block headline %}Almost there.{% endblock headline %}
+{% block panel %}
+<span class="eyebrow">{{ org.name }}</span>
+<h2 class="mt-3 text-3xl font-medium tracking-[-.03em]">Waiting for approval</h2>
+<p class="mt-3 text-sm leading-6 text-white/60">Hey {{ username }}, you're waiting to be approved by an owner or admin of {{ org.name }}. You'll see the workspace as soon as someone lets you in.</p>
+<div class="mt-8 grid gap-3">
+  <a href="/dashboard" class="btn btn-primary h-12">Check again</a>
+  <form method="post" action="/logout"><button type="submit" class="btn btn-ghost h-12 w-full">Sign out</button></form>
+</div>
+{% endblock panel %}

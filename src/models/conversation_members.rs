@@ -1,5 +1,8 @@
-pub use super::_entities::conversation_members::{ActiveModel, Entity, Model};
-use sea_orm::entity::prelude::*;
+use loco_rs::prelude::*;
+
+pub use super::_entities::conversation_members::{ActiveModel, Column, Entity, Model};
+use super::conversations;
+
 pub type ConversationMembers = Entity;
 
 #[async_trait::async_trait]
@@ -18,14 +21,26 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
-
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
+impl Model {
+    /// Adds a user to a conversation in the conversation's organisation.
+    ///
+    /// # Errors
+    /// On database errors, including a duplicate membership.
+    pub async fn add<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        user_id: i64,
+    ) -> ModelResult<Self> {
+        Ok(ActiveModel {
+            conversation_id: ActiveValue::Set(conversation.id),
+            user_id: ActiveValue::Set(user_id),
+            ..Default::default()
+        }
+        .set_tenant(conversation.organisation_id)?
+        .insert(db)
+        .await?)
+    }
+}
 
 impl loco_rs::prelude::TenantEntity for Entity {
     type TenantId = i64;

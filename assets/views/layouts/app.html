@@ -1,7 +1,7 @@
 {% extends "layouts/base.html" %}
 {% block body %}
 {% set nav = [
-  {"key": "dashboard", "href": "/", "label": "Overview", "icon": "layout-dashboard"},
+  {"key": "dashboard", "href": "/dashboard", "label": "Overview", "icon": "layout-dashboard"},
   {"key": "roadmap", "href": "/roadmap", "label": "Roadmap", "icon": "map"},
   {"key": "tasks", "href": "/tasks", "label": "Tasks", "icon": "list-todo"},
   {"key": "meetings", "href": "/meetings", "label": "Meetings", "icon": "message-square-text"},
@@ -11,7 +11,7 @@
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
   <header class="sticky top-0 z-40 border-b border-white/8 bg-[#0b0b10]/80 backdrop-blur-xl">
     <div class="mx-auto flex h-[68px] max-w-[1500px] items-center gap-3 px-4 md:h-20 md:gap-5 md:px-5 lg:px-8">
-      <a href="/" class="flex min-w-0 items-center gap-3">
+      <a href="/dashboard" class="flex min-w-0 items-center gap-3">
         {{<logo/>}}
         <span class="min-w-0 text-left">
           <strong class="block truncate text-[13px] tracking-[.08em] uppercase sm:text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong>
@@ -28,6 +28,8 @@
           {{<avatar name={me.username} color={me.color | default(value="#e8dfce")} small={true}/>}}<span class="max-w-24 truncate">{{ me.username }}</span>
         </span>
         {% endif %}
+        {% if me.is_super_admin %}<a href="/admin" title="Platform admin" class="round-icon">{{<icon name="shield"/>}}</a>{% endif %}
+        <a href="/members" title="Members" class="round-icon">{{<icon name="users"/>}}</a>
         <a href="/tasks?new=1" aria-label="Add task" class="btn btn-primary h-10 w-10 p-0 sm:w-auto sm:px-4">{{<icon name="plus"/>}}<span class="hidden sm:inline">Add task</span></a>
         <form action="/logout" method="post">
           <button type="submit" title="Sign out" class="round-icon">{{<icon name="log-out"/>}}</button>

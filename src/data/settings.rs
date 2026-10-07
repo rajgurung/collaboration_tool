@@ -8,6 +8,19 @@ pub struct Settings {
     pub app_url: String,
     /// Whether the session cookie is marked `Secure`.
     pub secure_cookies: bool,
+    /// Used by `cargo loco task super_admin`.
+    pub super_admin: SuperAdminSettings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SuperAdminSettings {
+    pub email: String,
+    pub username: String,
+    /// The super admin's own organisation, created if they have none.
+    pub organisation: String,
+    /// Only needed the first time, to create the account. Empty when unset.
+    #[serde(default)]
+    pub password: String,
 }
 
 impl Settings {

@@ -1,6 +1,17 @@
-pub use super::_entities::conversations::{ActiveModel, Entity, Model};
-use sea_orm::entity::prelude::*;
+use loco_rs::prelude::*;
+
+pub use super::_entities::conversations::{ActiveModel, Column, Entity, Model};
+use super::{conversation_members, organisations, users};
+
 pub type Conversations = Entity;
+
+pub mod kind {
+    pub const CHANNEL: &str = "channel";
+    pub const GROUP: &str = "group";
+    pub const DM: &str = "dm";
+}
+
+pub const GENERAL: &str = "general";
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -18,14 +29,41 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
-// implement your read-oriented logic here
-impl Model {}
+impl Model {
+    /// The `general` channel every organisation starts with, with its creator as a member.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn create_general<C: ConnectionTrait>(
+        db: &C,
+        org: &organisations::Model,
+        creator: &users::Model,
+    ) -> ModelResult<Self> {
+        let channel = ActiveModel {
+            kind: ActiveValue::Set(kind::CHANNEL.to_string()),
+            name: ActiveValue::Set(Some(GENERAL.to_string())),
+            created_by_id: ActiveValue::Set(Some(creator.id)),
+            ..Default::default()
+        }
+        .set_tenant(org.id)?
+        .insert(db)
+        .await?;
+        conversation_members::Model::add(db, &channel, creator.id).await?;
+        Ok(channel)
+    }
 
-// implement your write-oriented logic here
-impl ActiveModel {}
-
-// implement your custom finders, selectors oriented logic here
-impl Entity {}
+    /// # Errors
+    /// `EntityNotFound` when the organisation has no `general` channel.
+    pub async fn find_general<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<Self> {
+        Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Kind.eq(kind::CHANNEL))
+            .filter(Column::Name.eq(GENERAL))
+            .one(db)
+            .await?
+            .ok_or(ModelError::EntityNotFound)
+    }
+}
 
 impl loco_rs::prelude::TenantEntity for Entity {
     type TenantId = i64;

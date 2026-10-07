@@ -58,6 +58,15 @@ impl Hooks for App {
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::admin::routes())
+            .add_route(controllers::members::routes())
+            .add_route(controllers::chat::routes())
+            .add_route(controllers::meetings::routes())
+            .add_route(controllers::tasks::routes())
+            .add_route(controllers::roadmap::routes())
+            .add_route(controllers::dashboard::routes())
+            .add_route(controllers::join::routes())
+            .add_route(controllers::signup::routes())
             .add_route(controllers::auth::routes())
             .add_route(controllers::page::routes())
     }
@@ -68,6 +77,7 @@ impl Hooks for App {
 
     #[allow(unused_variables)]
     fn register_tasks(tasks: &mut Tasks) {
+        tasks.register(tasks::super_admin::SuperAdmin);
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
         tasks.register(tasks::user_delete::UserDelete);

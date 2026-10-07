@@ -25,3 +25,19 @@ impl FromRequestParts<AppContext> for CurrentUser {
         }
     }
 }
+
+/// `Option<CurrentUser>`: `None` for anonymous requests instead of a redirect.
+impl axum::extract::OptionalFromRequestParts<AppContext> for CurrentUser {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        ctx: &AppContext,
+    ) -> std::result::Result<Option<Self>, Self::Rejection> {
+        Ok(
+            <Self as FromRequestParts<AppContext>>::from_request_parts(parts, ctx)
+                .await
+                .ok(),
+        )
+    }
+}

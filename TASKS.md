@@ -45,7 +45,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/auth.rs`, `src/models/users.rs`, `src/mailers/`, `assets/views/auth/`, `config/`.
   - Verify: request tests for login, wrong password, logout, reset (token used twice fails, expired token fails). Dev mailer shows the reset email.
 
-- [ ] **Task 5**: Tenancy core.
+- [x] **Task 5**: Tenancy core.
   - What: `CurrentMember` extractor (user + active membership + organisation, super admin may enter any org). Sign-up creates organisation, owner membership and `general` channel in one transaction. `/join/<slug>` creates a pending membership. Waiting and declined pages. Seed task that creates the super admin (gurungraj26@gmail.com, password from env var). Register stub controllers and nav items for dashboard, roadmap, tasks, meetings, chat, members, admin.
   - Depends on: Task 4.
   - Files: `src/extractors/`, `src/controllers/{signup,join,stubs}.rs`, `src/models/{organisations,memberships}.rs`, `src/tasks/`, `src/app.rs`, `assets/views/{signup,join,pending}/`.
