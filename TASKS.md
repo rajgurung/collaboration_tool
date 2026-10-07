@@ -83,7 +83,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/admin.rs`, `assets/views/admin/`.
   - Verify: request tests for access control and entering an org.
 
-- [ ] **Task 12**: Dockerfile and Railway config.
+- [x] **Task 12**: Dockerfile and Railway config.
   - What: multi-stage Dockerfile (Tailwind + esbuild, `cargo build --release`, slim runtime image with `assets/` and `config/`). Run migrations on start. `railway.json` or `railway.toml` with health check. Document required env vars.
   - Files: `Dockerfile`, `.dockerignore`, `railway.toml`, `docs/deploy.md`.
   - Verify: `docker build` succeeds. The container starts against local Postgres with `PORT=8080` and serves the login page.

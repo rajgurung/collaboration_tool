@@ -8,6 +8,8 @@ pub struct Settings {
     pub app_url: String,
     /// Whether the session cookie is marked `Secure`.
     pub secure_cookies: bool,
+    /// Sender for outgoing email, e.g. `Collaboration Tool <no-reply@example.com>`.
+    pub mail_from: String,
     /// Used by `cargo loco task super_admin`.
     pub super_admin: SuperAdminSettings,
 }

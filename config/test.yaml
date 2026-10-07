@@ -103,6 +103,8 @@ auth:
 settings:
   # Public URL of the app, used in email links and the Origin check on form posts.
   app_url: http://localhost:5150
+  # Sender for outgoing email. Must be an address your mail provider allows.
+  mail_from: "Collaboration Tool <no-reply@localhost>"
   # Mark the session cookie Secure (HTTPS only).
   secure_cookies: false
   # The platform owner. `cargo loco task super_admin` creates or promotes this account.

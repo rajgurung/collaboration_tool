@@ -7,7 +7,7 @@
 # secret or a localhost database is worse than one that refuses to boot.
 #
 # The variables this file requires:
-#   DATABASE_URL, JWT_SECRET, APP_URL, and the MAILER_* / REDIS_URL set below,
+#   DATABASE_URL, JWT_SECRET, APP_URL, MAIL_FROM, and the MAILER_* set below,
 #   depending on which features you generated.
 
 # Application logging configuration
@@ -127,6 +127,8 @@ auth:
 settings:
   # Public URL of the app, used in email links and the Origin check on form posts.
   app_url: <%= get_env(name="APP_URL") %>
+  # Sender for outgoing email. Must be an address your mail provider allows.
+  mail_from: "<%= get_env(name="MAIL_FROM") %>"
   # Mark the session cookie Secure (HTTPS only).
   secure_cookies: true
   # The platform owner. `cargo loco task super_admin` creates or promotes this account.
