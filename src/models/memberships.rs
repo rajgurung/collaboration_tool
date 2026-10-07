@@ -142,6 +142,22 @@ impl Model {
             .collect())
     }
 
+    /// `(user_id, username)` for every approved member, oldest first.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn team<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<Vec<(i64, String)>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Status.eq(status::ACTIVE))
+            .order_by_asc(Column::CreatedAt)
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|m| (m.user_id, m.username))
+            .collect())
+    }
+
     /// # Errors
     /// `EntityNotFound` when the membership is not in this organisation.
     pub async fn find_in_org<C: ConnectionTrait>(

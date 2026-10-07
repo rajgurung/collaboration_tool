@@ -12,18 +12,11 @@ use crate::{
     },
     views::{
         forms::{field_errors, invalid_form, toast},
-        layout::avatar_color,
+        layout::{avatar_color, Person},
     },
 };
 
 const FORM_ID: &str = "project-form";
-
-#[derive(Debug, Serialize)]
-struct Person {
-    id: i64,
-    username: String,
-    color: &'static str,
-}
 
 #[derive(Debug, Serialize)]
 struct Card {
@@ -47,16 +40,9 @@ struct Lane {
 
 /// Approved members, for owner pickers and names on cards.
 async fn team(ctx: &AppContext, org_id: i64) -> Result<Vec<Person>> {
-    Ok(memberships::Model::list_for_org(&ctx.db, org_id)
-        .await?
-        .into_iter()
-        .filter(|(m, _)| m.is_active())
-        .map(|(m, u)| Person {
-            id: u.id,
-            color: avatar_color(&m.username),
-            username: m.username,
-        })
-        .collect())
+    Ok(Person::from_team(
+        memberships::Model::team(&ctx.db, org_id).await?,
+    ))
 }
 
 async fn lanes(ctx: &AppContext, org_id: i64) -> Result<Vec<Lane>> {

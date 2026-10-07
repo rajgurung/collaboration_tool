@@ -11,3 +11,24 @@ pub fn avatar_color(name: &str) -> &'static str {
     });
     AVATAR_COLORS[sum % AVATAR_COLORS.len()]
 }
+
+/// Someone on the team, as shown in pickers and on cards.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Person {
+    pub id: i64,
+    pub username: String,
+    pub color: &'static str,
+}
+
+impl Person {
+    #[must_use]
+    pub fn from_team(team: Vec<(i64, String)>) -> Vec<Self> {
+        team.into_iter()
+            .map(|(id, username)| Self {
+                id,
+                color: avatar_color(&username),
+                username,
+            })
+            .collect()
+    }
+}

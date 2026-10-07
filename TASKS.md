@@ -63,7 +63,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/projects.rs`, `src/models/projects.rs`, `assets/views/projects/`.
   - Verify: request tests for create, edit, validation errors, owner must be an org member.
 
-- [ ] **Task 8**: Task board and notes.
+- [x] **Task 8**: Task board and notes.
   - What: tasks page with search, create task (project, owner, priority, due date), inline status change via HTMX, side panel with notes and add-note form.
   - Files: `src/controllers/tasks.rs`, `src/models/{tasks,task_notes}.rs`, `assets/views/tasks/`.
   - Verify: request tests for create, status change (invalid status rejected), notes, search.
