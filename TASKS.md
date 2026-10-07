@@ -27,7 +27,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `frontend/`, `tailwind.css`, `bin/`, `assets/views/base.html`, `assets/static/`.
   - Verify: `bin/dev` runs. A test page renders with the dark theme. Editing a `.ts` file rebuilds the JS.
 
-- [ ] **Task 3**: Database schema.
+- [x] **Task 3**: Database schema.
   - What: SeaORM migrations for every table in SPEC.md (extend the starter `users` table with `username`, `is_super_admin`, reset fields). Foreign keys, unique indexes (email, org slug, one membership per user, username per org case-insensitive, conversation member pair), and `organisation_id` indexes. Generate entities.
   - Files: `migration/src/`, `src/models/_entities/`.
   - Verify: `cargo loco db migrate` and `cargo loco db reset` succeed. `cargo loco db entities` produces no diff.

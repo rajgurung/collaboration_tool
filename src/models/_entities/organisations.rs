@@ -4,27 +4,16 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "organisations")]
 pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub pid: Uuid,
-    #[sea_orm(unique)]
-    pub email: String,
-    pub password: String,
-    #[sea_orm(unique)]
-    pub api_key: String,
     pub name: String,
-    pub reset_token: Option<String>,
-    pub reset_sent_at: Option<DateTimeWithTimeZone>,
-    pub email_verification_token: Option<String>,
-    pub email_verification_sent_at: Option<DateTimeWithTimeZone>,
-    pub email_verified_at: Option<DateTimeWithTimeZone>,
-    pub magic_link_token: Option<String>,
-    pub magic_link_expiration: Option<DateTimeWithTimeZone>,
-    pub is_super_admin: bool,
+    #[sea_orm(unique)]
+    pub slug: String,
+    pub created_by_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -37,16 +26,24 @@ pub enum Relation {
     MeetingAttendees,
     #[sea_orm(has_many = "super::meetings::Entity")]
     Meetings,
+    #[sea_orm(has_one = "super::memberships::Entity")]
+    Memberships,
     #[sea_orm(has_many = "super::messages::Entity")]
     Messages,
-    #[sea_orm(has_many = "super::organisations::Entity")]
-    Organisations,
     #[sea_orm(has_many = "super::projects::Entity")]
     Projects,
     #[sea_orm(has_many = "super::task_notes::Entity")]
     TaskNotes,
     #[sea_orm(has_many = "super::tasks::Entity")]
     Tasks,
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::CreatedById",
+        to = "super::users::Column::Id",
+        on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    Users,
 }
 
 impl Related<super::conversation_members::Entity> for Entity {
@@ -73,15 +70,15 @@ impl Related<super::meetings::Entity> for Entity {
     }
 }
 
-impl Related<super::messages::Entity> for Entity {
+impl Related<super::memberships::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Messages.def()
+        Relation::Memberships.def()
     }
 }
 
-impl Related<super::organisations::Entity> for Entity {
+impl Related<super::messages::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Organisations.def()
+        Relation::Messages.def()
     }
 }
 
@@ -100,5 +97,11 @@ impl Related<super::task_notes::Entity> for Entity {
 impl Related<super::tasks::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Tasks.def()
+    }
+}
+
+impl Related<super::users::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Users.def()
     }
 }
