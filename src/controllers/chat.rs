@@ -182,7 +182,11 @@ async fn send(
 ) -> Result<Response> {
     let conversation =
         conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
-    match messages::Model::create(&ctx.db, &conversation, member.user.id, &params).await {
+    let result = messages::Model::create(&ctx.db, &conversation, member.user.id, &params).await;
+    if let Ok(message) = &result {
+        super::chat_ws::publish(&ctx, member.org.id, message).await?;
+    }
+    match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(
             &headers,
             &format!("/chat?c={}", conversation.id),
@@ -202,6 +206,25 @@ async fn send(
                 .empty()
         }
     }
+}
+
+/// The message list on its own, for reloading after a reconnect.
+#[debug_handler]
+async fn feed(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path(id): Path<i64>,
+) -> Result<Response> {
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    let names = names(&ctx, member.org.id).await?;
+    let feed: Vec<MessageView> = messages::Model::recent(&ctx.db, &conversation)
+        .await?
+        .iter()
+        .map(|m| MessageView::new(m, &names, member.user.id))
+        .collect();
+    format::render().view(&v, "chat/_feed.html", data!({ "messages": feed }))
 }
 
 async fn team_except_me(ctx: &AppContext, member: &CurrentMember) -> Result<Vec<Person>> {
@@ -283,6 +306,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .add("/chat", get(index))
         .add("/chat/{id}/messages", post(send))
+        .add("/chat/{id}/feed", get(feed))
         .add("/chat/groups/new", get(new_group))
         .add("/chat/groups", post(create_group))
         .add("/chat/dms/new", get(new_dm))

@@ -67,3 +67,23 @@ document.body.addEventListener("htmx:afterSwap", (event) => {
   const feed = target.closest("[data-autoscroll]") ?? target.querySelector("[data-autoscroll]");
   if (feed) scrollToEnd(feed);
 });
+
+// Live chat (HTMX ws extension): clear the composer once a message is sent,
+// and reload the feed after a reconnect so nothing sent meanwhile is missed.
+document.body.addEventListener("htmx:wsAfterSend", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  const form = elt instanceof HTMLFormElement ? elt : elt.closest("form");
+  form?.reset();
+});
+
+const reconnecting = new WeakSet<Element>();
+document.body.addEventListener("htmx:wsClose", (event) => {
+  reconnecting.add((event as CustomEvent<{ elt: Element }>).detail.elt);
+});
+document.body.addEventListener("htmx:wsOpen", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  if (!reconnecting.has(elt)) return;
+  reconnecting.delete(elt);
+  const url = elt.getAttribute("data-chat-feed-url");
+  if (url) void htmx.ajax("GET", url, { target: "#chat-feed", swap: "innerHTML" });
+});

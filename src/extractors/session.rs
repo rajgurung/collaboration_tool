@@ -13,11 +13,13 @@ pub const SESSION_COOKIE: &str = "auth_token";
 /// When the JWT config is missing or the token cannot be signed.
 pub fn session_cookie(ctx: &AppContext, user: &users::Model) -> Result<Cookie<'static>> {
     let jwt = ctx.config.get_jwt_config()?;
-    let token = user.generate_jwt(&jwt.secret, jwt.expiration).map_err(|err| {
-        // Most often a JWT_SECRET that is not valid base64.
-        tracing::error!(error = %err, "could not sign the session token");
-        Error::InternalServerError
-    })?;
+    let token = user
+        .generate_jwt(&jwt.secret, jwt.expiration)
+        .map_err(|err| {
+            // Most often a JWT_SECRET that is not valid base64.
+            tracing::error!(error = %err, "could not sign the session token");
+            Error::InternalServerError
+        })?;
     let max_age = i64::try_from(jwt.expiration).unwrap_or(i64::MAX);
     Ok(base_cookie(ctx, SESSION_COOKIE, token)?
         .max_age(::cookie::time::Duration::seconds(max_age))

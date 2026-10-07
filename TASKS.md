@@ -90,7 +90,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
 
 ## Sequential (after Group 2)
 
-- [ ] **Task 13**: Live chat over WebSockets.
+- [x] **Task 13**: Live chat over WebSockets.
   - What: per-organisation WebSocket route using the pattern from the spike. In-memory broadcast keyed by conversation. Sending through the socket saves the message and pushes rendered HTML to members. TS helper for autoscroll and reconnect.
   - Depends on: Tasks 4a, 10.
   - Files: `src/controllers/chat_ws.rs`, `src/chat_hub.rs`, `frontend/chat.ts`, `assets/views/chat/`.

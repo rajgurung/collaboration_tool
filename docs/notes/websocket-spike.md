@@ -41,3 +41,17 @@ Works end to end.
 - Lagged receivers (`RecvError::Lagged`) skip messages. Clients should reload the
   message list on reconnect.
 - Routes are exact: `/spike` matched, `/spike/` returned 404.
+
+## Built (Task 13)
+
+- `src/data/chat_hub.rs`: one `broadcast` channel in the shared store carrying
+  `ChatEvent { conversation_id, author_id, message }`.
+- `src/controllers/chat_ws.rs`: `/chat/{id}/ws`. Before upgrading it checks the
+  session and approval (`CurrentMember`), conversation membership, and `Origin`.
+  Membership is checked again on every send. Each socket renders messages for its
+  own viewer, so `own` styling is correct for everyone.
+- HTTP sends (`POST /chat/{id}/messages`) also publish to the hub.
+- Browser: `hx-ext="ws"` + `ws-send` composer. After a reconnect `frontend/app.ts`
+  reloads `/chat/{id}/feed` so messages sent while disconnected appear.
+- Verified with two Chrome instances as different users: delivery about 20 ms,
+  correct bubble styles, and recovery after a server restart.

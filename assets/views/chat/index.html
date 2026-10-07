@@ -44,20 +44,16 @@
         </div>
         <div class="flex -space-x-2">{% for person in conversation.members %}{{<avatar name={person.username} color={person.color} small={true}/>}}{% endfor %}</div>
       </div>
-      <div class="chat-feed" id="chat-feed" data-autoscroll>
-        {% for message in messages %}{% include "chat/_message.html" %}{% else %}
-        <div class="grid min-h-72 place-items-center text-center" id="chat-empty">
-          <div>{{<icon name="messages-square" class="mx-auto h-9 w-9 text-white/20"/>}}<h3 class="mt-4 text-lg font-medium">Start the conversation</h3><p class="mt-2 text-sm text-white/35">Share an update, ask a question or flag a blocker.</p></div>
+      <div class="flex min-h-0 flex-1 flex-col" hx-ext="ws" ws-connect="/chat/{{ conversation.id }}/ws" data-chat-feed-url="/chat/{{ conversation.id }}/feed">
+        <div class="chat-feed" id="chat-feed" data-autoscroll>
+          {% include "chat/_feed.html" %}
         </div>
-        {% endfor %}
+        <form class="chat-composer" method="post" action="/chat/{{ conversation.id }}/messages" ws-send>
+          {{<avatar name={me.username} color={me.color}/>}}
+          <textarea name="body" rows="1" maxlength="1000" required data-enter-submits class="input min-h-12 resize-none border-0 bg-transparent" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}…" aria-label="Message"></textarea>
+          <button type="submit" class="btn btn-primary h-11 w-11 shrink-0 p-0" aria-label="Send">{{<icon name="send"/>}}</button>
+        </form>
       </div>
-      <form class="chat-composer" method="post" action="/chat/{{ conversation.id }}/messages"
-            hx-post="/chat/{{ conversation.id }}/messages" hx-target="#chat-feed" hx-swap="beforeend"
-            hx-on::after-request="if (event.detail.successful) { this.reset(); document.getElementById('chat-empty')?.remove(); }">
-        {{<avatar name={me.username} color={me.color}/>}}
-        <textarea name="body" rows="1" maxlength="1000" required data-enter-submits class="input min-h-12 resize-none border-0 bg-transparent" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}…" aria-label="Message"></textarea>
-        <button type="submit" class="btn btn-primary h-11 w-11 shrink-0 p-0" aria-label="Send">{{<icon name="send"/>}}</button>
-      </form>
       {% else %}
       <div class="grid min-h-96 place-items-center p-8 text-center text-white/50">You are not in any conversations yet.</div>
       {% endif %}

@@ -49,6 +49,12 @@ impl Hooks for App {
         create_app::<Self, Migrator>(mode, environment, config).await
     }
 
+    async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        ctx.shared_store
+            .insert(crate::data::chat_hub::ChatHub::new());
+        Ok(ctx)
+    }
+
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(vec![
             Box::new(initializers::view_engine::ViewEngineInitializer),
@@ -58,6 +64,7 @@ impl Hooks for App {
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::chat_ws::routes())
             .add_route(controllers::admin::routes())
             .add_route(controllers::members::routes())
             .add_route(controllers::chat::routes())

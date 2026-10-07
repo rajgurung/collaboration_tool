@@ -235,3 +235,87 @@ async fn chat_does_not_cross_organisations() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn websocket_checks_run_before_the_upgrade() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, _bob) = acme_with_bob(&request, &ctx).await;
+        let general = general(&ctx).await;
+        let path = format!("/chat/{}/ws", general.id);
+
+        // Anonymous: sent to login.
+        assert_eq!(request.get(&path).await.status_code(), 303);
+
+        // Someone pending in Acme: waiting page.
+        let carol = join(&request, "acme", "carol", "carol@example.com").await;
+        assert_eq!(
+            request
+                .get(&path)
+                .add_header(carol.0, carol.1)
+                .await
+                .status_code(),
+            403
+        );
+
+        // Another organisation's member: the conversation does not exist for them.
+        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        assert_eq!(
+            request
+                .get(&path)
+                .add_header(gina.0, gina.1)
+                .await
+                .status_code(),
+            404
+        );
+
+        // Cross-site page trying to open a socket with Alice's cookie.
+        let evil = request
+            .get(&path)
+            .add_header(alice.0.clone(), alice.1.clone())
+            .add_header("Origin", "https://evil.example")
+            .await;
+        assert_eq!(evil.status_code(), 403);
+
+        // Alice passes every check; without upgrade headers the request is just not a WebSocket.
+        let plain = request
+            .get(&path)
+            .add_header(alice.0, alice.1)
+            .add_header("Origin", "http://localhost:5150")
+            .await;
+        assert_eq!(plain.status_code(), 400);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn http_sends_are_published_and_the_feed_reloads() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let general = general(&ctx).await;
+        let hub = ctx
+            .shared_store
+            .get::<collab::data::chat_hub::ChatHub>()
+            .unwrap();
+        let mut events = hub.subscribe();
+
+        request
+            .post(&format!("/chat/{}/messages", general.id))
+            .add_header(alice.0, alice.1)
+            .form(&serde_json::json!({ "body": "Standup in 5" }))
+            .await;
+        let event = events.try_recv().expect("the message is broadcast");
+        assert_eq!(event.conversation_id, general.id);
+        assert_eq!(event.message.body, "Standup in 5");
+        assert_eq!(event.message.author, "alice");
+
+        let feed = request
+            .get(&format!("/chat/{}/feed", general.id))
+            .add_header(bob.0, bob.1)
+            .await;
+        assert_eq!(feed.status_code(), 200);
+        assert!(feed.text().contains("Standup in 5"));
+    })
+    .await;
+}

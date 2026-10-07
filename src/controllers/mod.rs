@@ -18,3 +18,5 @@ pub mod chat;
 pub mod members;
 
 pub mod admin;
+
+pub mod chat_ws;

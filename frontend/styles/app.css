@@ -143,6 +143,10 @@ button, a { transition: color .2s ease, background-color .2s ease, border-color 
   .tab-link:hover { color: #fff; }
   .tab-link[aria-current="page"] { background: #ffffff10; color: #fff; }
 
+  /* The empty-state hint disappears as soon as the first message is in the feed. */
+  .chat-feed:has(.chat-row) .chat-empty { display: none; }
+  .chat-feed .chat-row ~ .chat-empty { display: none; }
+
   .toast-region { position: fixed; right: 1rem; bottom: 6rem; z-index: 80; display: grid; gap: .5rem; }
   .toast { border: 1px solid #ffffff1a; border-radius: 1rem; background: #1a1a23; padding: .75rem 1rem; font-size: .875rem; box-shadow: 0 18px 55px #0008; }
   .toast-success { border-color: #72e5b440; }
