@@ -78,6 +78,9 @@ impl Hooks for App {
             .add_route(controllers::page::routes())
     }
     async fn connect_workers(ctx: &AppContext, queue: &Queue) -> Result<()> {
+        queue
+            .register(crate::workers::resend_email::Worker::build(ctx))
+            .await?;
         queue.register(DownloadWorker::build(ctx)).await?;
         Ok(())
     }

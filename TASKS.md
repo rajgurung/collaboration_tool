@@ -110,7 +110,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `tests/requests/tenancy.rs`.
   - Verify: every attempt returns 404 or 403. `cargo test` and `cargo clippy -- -D warnings` pass.
 
-- [ ] **Task 16**: Deploy to Railway.
+- [x] **Task 16**: Deploy to Railway.
   - What: you create the Railway project, add Postgres, set SMTP and super admin env vars. Deploy, run the seed task, smoke test every flow in SPEC.md on desktop and mobile.
   - Depends on: Tasks 12, 15.
   - Verify: SPEC.md success criteria checked off on the live URL.
