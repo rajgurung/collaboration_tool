@@ -1,0 +1,9 @@
+{# Form building blocks. #}
+
+{% component form_alert(message: string, kind: string = "error") %}<p role="alert" class="rounded-xl border px-4 py-3 text-sm {% if kind == "error" %}border-[#ff758f40] bg-[#ff758f12] text-[#ff9db0]{% else %}border-[#72e5b440] bg-[#72e5b412] text-[#9ff0cf]{% endif %}">{{ message }}</p>{% endcomponent form_alert %}
+
+{% component text_field(name: string, label: string, value: string = "", type: string = "text", error: string = "", autocomplete: string = "", hint: string = "", required: bool = true) %}<label class="field">
+  <span class="field-label">{{ label }}</span>
+  <input class="input auth-input" type="{{ type }}" name="{{ name }}" value="{{ value }}" {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %} {% if required %}required{% endif %} {% if error %}aria-invalid="true"{% endif %}>
+  {% if error %}<span class="field-error">{{ error }}</span>{% elif hint %}<span class="text-xs text-white/40">{{ hint }}</span>{% endif %}
+</label>{% endcomponent text_field %}

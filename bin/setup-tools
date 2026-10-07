@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Downloads pinned, checksum-verified Tailwind and esbuild binaries into .tools/.
+# Used locally (bin/dev, bin/build-assets) and in the Docker build.
+set -euo pipefail
+
+TAILWIND_VERSION=4.3.3
+ESBUILD_VERSION=0.28.2
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+tools="$root/.tools"
+mkdir -p "$tools"
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) tw_plat=macos-arm64; es_plat=darwin-arm64
+    tw_sha=cdf646702987a743464dff4d9c60fd4480d1c1e73dd819a9a67f1078815dce9d
+    es_sha=1980cde09749094452b20d36ff267585ccb3f72749c7bc97291cd9996ccf5a2a ;;
+  Linux-x86_64) tw_plat=linux-x64; es_plat=linux-x64
+    tw_sha=dc61b3ac6b8c9ca874c0cc4c57b2409791a64c5540404ca5f5367360babc313a
+    es_sha=9573bb2233aab0f9ea7647d5cca9726113cc1768de61d66b17267f4db84488f6 ;;
+  Linux-aarch64) tw_plat=linux-arm64; es_plat=linux-arm64
+    tw_sha=55fd0b241214eff3de1e8ee4f22796662f2d2e7a49bcfca7477cfd0bac398195
+    es_sha=a96dbfa41d3ef5dbd1ef22b1c10d5187be9267e86093a870f06402a7ec931596 ;;
+  *) echo "Unsupported platform: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+
+verify() {
+  local file=$1 expected=$2
+  if [ "$(sha256 "$file")" != "$expected" ]; then
+    rm -f "$file"
+    echo "Checksum mismatch for $file" >&2
+    exit 1
+  fi
+}
+
+tw="$tools/tailwindcss-$TAILWIND_VERSION"
+if [ ! -x "$tw" ]; then
+  echo "Downloading Tailwind $TAILWIND_VERSION ($tw_plat)"
+  curl -fsSL -o "$tw" "https://github.com/tailwindlabs/tailwindcss/releases/download/v$TAILWIND_VERSION/tailwindcss-$tw_plat"
+  verify "$tw" "$tw_sha"
+  chmod +x "$tw"
+fi
+ln -sf "$(basename "$tw")" "$tools/tailwindcss"
+
+es="$tools/esbuild-$ESBUILD_VERSION"
+if [ ! -x "$es" ]; then
+  echo "Downloading esbuild $ESBUILD_VERSION ($es_plat)"
+  tgz="$tools/esbuild.tgz"
+  curl -fsSL -o "$tgz" "https://registry.npmjs.org/@esbuild/$es_plat/-/$es_plat-$ESBUILD_VERSION.tgz"
+  verify "$tgz" "$es_sha"
+  tar -xzf "$tgz" -C "$tools" package/bin/esbuild
+  mv "$tools/package/bin/esbuild" "$es"
+  rm -rf "$tgz" "$tools/package"
+  chmod +x "$es"
+fi
+ln -sf "$(basename "$es")" "$tools/esbuild"

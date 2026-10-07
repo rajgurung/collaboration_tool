@@ -1,0 +1,21 @@
+{% extends "layouts/app.html" %}
+{% block title %}Tasks · {{ org.name }}{% endblock title %}
+{% block content %}
+<section class="space-y-5">
+  <div class="flex flex-col justify-between gap-5 py-3 md:flex-row md:items-end">
+    {{<page_header eyebrow="Shared action list" title="Every promise has an owner" description="Move work forward, leave context, and keep the team aligned."/>}}
+    <button type="button" class="btn btn-primary self-start md:self-auto" id="new-task-button"
+            hx-get="/tasks/new" hx-target="#task-dialog-body"
+            hx-trigger="click{% if open_new %}, load{% endif %}"
+            hx-on::after-request="document.getElementById('task-dialog').showModal()">
+      {{<icon name="plus"/>}}New task
+    </button>
+  </div>
+  {% if q %}
+  <p class="text-sm text-white/50">Showing tasks matching “{{ q }}”. <a href="/tasks" class="text-white/80 underline hover:text-white">Clear search</a></p>
+  {% endif %}
+  {% include "tasks/_board.html" %}
+</section>
+<dialog id="task-dialog" class="modal" aria-label="New task"><div id="task-dialog-body"></div></dialog>
+<dialog id="task-sheet" class="sheet" aria-label="Task details"><div id="task-sheet-body"></div></dialog>
+{% endblock content %}

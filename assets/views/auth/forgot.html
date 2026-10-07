@@ -1,0 +1,11 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Reset password · Collaboration Tool{% endblock title %}
+{% block panel %}
+<h2 class="text-3xl font-medium tracking-[-.03em]">Forgot your password?</h2>
+<p class="mt-2 text-sm text-white/50">Enter your email and we will send you a link to choose a new one.</p>
+<form method="post" action="/forgot" class="mt-8 grid gap-5">
+  {{<text_field name="email" label="Email" type="email" value={email} autocomplete="email"/>}}
+  <button type="submit" class="btn btn-primary h-12">Send reset link</button>
+</form>
+<p class="mt-6 text-sm text-white/50"><a href="/login" class="hover:text-white">Back to sign in</a></p>
+{% endblock panel %}

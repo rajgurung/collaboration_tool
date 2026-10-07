@@ -1,0 +1,16 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Create an organisation · Collaboration Tool{% endblock title %}
+{% block headline %}Set up your team's workspace.{% endblock headline %}
+{% block panel %}
+<h2 class="text-3xl font-medium tracking-[-.03em]">Create an organisation</h2>
+<p class="mt-2 text-sm text-white/50">You'll be its owner. Invite your team with a join link afterwards.</p>
+<form method="post" action="/signup" class="mt-8 grid gap-5">
+  {% if error %}{{<form_alert message={error}/>}}{% endif %}
+  {{<text_field name="organisation_name" label="Organisation name" value={form.organisation_name} error={errors.organisation_name | default(value="")} autocomplete="organization"/>}}
+  {{<text_field name="name" label="Username" value={form.name} error={errors.name | default(value="")} autocomplete="username" hint="Start with a letter. 3 to 30 letters or numbers."/>}}
+  {{<text_field name="email" label="Email" type="email" value={form.email} error={errors.email | default(value="")} autocomplete="email"/>}}
+  {{<text_field name="password" label="Password" type="password" error={errors.password | default(value="")} autocomplete="new-password" hint="At least 8 characters."/>}}
+  <button type="submit" class="btn btn-primary h-12">Create organisation</button>
+</form>
+<p class="mt-6 text-sm text-white/50">Already have an account? <a href="/login" class="text-white/80 hover:text-white">Sign in</a></p>
+{% endblock panel %}

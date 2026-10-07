@@ -1,0 +1,92 @@
+{% extends "layouts/app.html" %}
+{% block title %}Overview · {{ org.name }}{% endblock title %}
+{% block content %}
+<div class="space-y-5">
+  <section class="hero-grid overflow-hidden rounded-[28px] border border-white/10 p-6 md:p-8">
+    <div class="relative z-10 grid gap-8 lg:grid-cols-[1.3fr_.7fr] lg:items-center">
+      <div>
+        <div class="mb-5 flex items-center gap-2 text-xs font-medium uppercase tracking-[.18em] text-[#ffb454]">{{<icon name="sparkles"/>}} Overview · {{ org.name }}</div>
+        <h1 class="max-w-3xl text-[clamp(2.4rem,6vw,5.8rem)] font-medium leading-[.92] tracking-[-.06em]">From idea<br><span class="text-white/35">to the first release.</span></h1>
+        <p class="mt-6 max-w-xl text-base leading-7 text-white/55">One shared view of the work, who owns it and how far it has come.</p>
+      </div>
+      <div class="flex items-center justify-center lg:justify-end">
+        <div class="progress-orbit" style="--progress: {{ completion }}%">
+          <div class="progress-core"><span class="text-5xl font-semibold tracking-[-.05em]">{{ completion }}%</span><span class="mt-1 text-xs uppercase tracking-[.18em] text-white/40">Tasks complete</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid gap-4 md:grid-cols-3">
+    {% for metric in [
+      {"label": "In motion", "value": in_progress, "detail": "active tasks", "color": "#ffb454"},
+      {"label": "Needs attention", "value": blocked, "detail": "blocked tasks", "color": "#ff758f"},
+      {"label": "Team engaged", "value": members_with_tasks ~ "/" ~ team_size, "detail": "people with tasks", "color": "#72e5b4"}
+    ] %}
+    <div class="metric-card">
+      <div class="flex items-center justify-between"><span class="eyebrow">{{ metric.label }}</span><span class="h-2.5 w-2.5 rounded-full" style="background: {{ metric.color }}; box-shadow: 0 0 18px {{ metric.color }}"></span></div>
+      <div class="mt-6 flex items-end gap-3"><strong class="text-5xl font-medium tracking-[-.06em]">{{ metric.value }}</strong><span class="pb-1 text-sm text-white/35">{{ metric.detail }}</span></div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="panel p-5 md:p-6">
+    <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div><span class="eyebrow">Team progress</span><h2 class="mt-1 text-2xl font-medium tracking-tight">Momentum across the team</h2></div>
+      <span class="text-sm text-white/35">Based on assigned tasks</span>
+    </div>
+    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {% for person in people %}
+      <article class="founder-progress">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">{{<avatar name={person.username} color={person.color}/>}}<div><h3 class="font-medium">{{ person.username }}</h3><p class="text-xs text-white/35">{{ person.done }}/{{ person.total }} complete · {{ person.active }} active</p></div></div>
+          <strong class="text-2xl tracking-[-.04em]" style="color: {{ person.color }}">{{ person.score }}%</strong>
+        </div>
+        <div class="progress-track mt-5" style="--bar: {{ person.color }}"><div class="progress-fill" style="width: {{ person.score }}%"></div></div>
+        <div class="mt-3 flex justify-between text-xs text-white/30"><span>Progress score</span>{% if person.blocked > 0 %}<span class="text-[#ff8ca1]">{{ person.blocked }} blocked</span>{% endif %}</div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="grid gap-5 xl:grid-cols-[1.45fr_.8fr]">
+    <div class="panel p-5 md:p-6">
+      <div class="mb-5 flex items-center justify-between">
+        <div><span class="eyebrow">Workstreams</span><h2 class="mt-1 text-2xl font-medium">Moving right now</h2></div>
+        <a href="/roadmap" class="flex items-center gap-1 text-sm text-white/45 hover:text-white">Full roadmap {{<icon name="arrow-right"/>}}</a>
+      </div>
+      <div class="space-y-3">
+        {% for project in workstreams %}
+        <div class="project-row">
+          <span class="project-icon" style="background: {{ project.accent }}16; color: {{ project.accent }}">{{<icon name="circle-dashed" class="h-5 w-5"/>}}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex justify-between gap-3"><span class="truncate font-medium">{{ project.name }}</span><span class="text-sm text-white/40">{{ project.progress }}%</span></div>
+            <div class="progress-track mt-2 h-1" style="--bar: {{ project.accent }}"><div class="progress-fill" style="width: {{ project.progress }}%"></div></div>
+          </div>
+          {% if project.owner %}{{<avatar name={project.owner} color={project.owner_color}/>}}{% endif %}
+        </div>
+        {% else %}
+        <p class="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-white/35">Nothing in the "now" lane. <a href="/roadmap" class="underline hover:text-white">Add a project</a>.</p>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="panel p-5 md:p-6">
+      <div class="mb-5 flex items-center justify-between">
+        <div><span class="eyebrow">Up next</span><h2 class="mt-1 text-2xl font-medium">Open actions</h2></div>
+        <a href="/tasks" class="round-icon" aria-label="All tasks">{{<icon name="chevron-right"/>}}</a>
+      </div>
+      <div class="space-y-1">
+        {% for task in actions %}
+        <div class="compact-task">
+          <div class="mt-1 h-2 w-2 rounded-full" style="background: {{ task.color }}"></div>
+          <div class="min-w-0 flex-1"><p class="truncate text-sm text-white/72">{{ task.title }}</p><p class="mt-1 truncate text-xs text-white/30">{{ task.project }} · {{ task.due }}</p></div>
+          {% if task.owner %}{{<avatar name={task.owner} color={task.owner_color} small={true}/>}}{% endif %}
+        </div>
+        {% else %}
+        <p class="py-4 text-sm text-white/35">No open tasks. <a href="/tasks?new=1" class="underline hover:text-white">Add one</a>.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock content %}

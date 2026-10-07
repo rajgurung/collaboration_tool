@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# One-off production build of CSS and JS into assets/static/.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+bin/setup-tools
+
+.tools/tailwindcss -i frontend/styles/app.css -o assets/static/css/app.css --minify
+.tools/esbuild frontend/app.ts --bundle --minify --target=es2022 --outfile=assets/static/js/app.js

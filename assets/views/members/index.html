@@ -1,0 +1,39 @@
+{% extends "layouts/app.html" %}
+{% block title %}Members · {{ org.name }}{% endblock title %}
+{% block content %}
+<section class="space-y-5">
+  {{<page_header eyebrow="Members" title="Who is on the team" description="Everyone in this organisation, and anyone waiting to join."/>}}
+
+  {% if me.can_manage %}
+  <div class="panel p-5 md:p-6">
+    <span class="eyebrow">Invite people</span>
+    <p class="mt-2 text-sm text-white/55">Share this link. People who use it can sign up, then wait for you or another admin to approve them.</p>
+    <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+      <input class="input font-mono text-sm" readonly value="{{ join_url }}" aria-label="Join link" onclick="this.select()">
+    </div>
+  </div>
+
+  <div class="panel p-5 md:p-6">
+    <div class="flex items-center justify-between">
+      <span class="eyebrow">Waiting for approval</span>
+      <span class="count-badge">{{ pending | length }}</span>
+    </div>
+    <div class="mt-4 grid gap-2" id="pending-list">
+      {% for row in pending %}{% include "members/_pending_row.html" %}{% else %}
+      <p class="py-3 text-sm text-white/40">No one is waiting right now.</p>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="panel p-5 md:p-6">
+    <div class="flex items-center justify-between">
+      <span class="eyebrow">Members</span>
+      <span class="count-badge">{{ active_members | length }}</span>
+    </div>
+    <div class="mt-4 grid gap-2">
+      {% for row in active_members %}{% include "members/_row.html" %}{% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock content %}

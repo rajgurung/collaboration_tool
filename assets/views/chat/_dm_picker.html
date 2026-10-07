@@ -1,0 +1,17 @@
+<div class="grid gap-5">
+  <div>
+    <h2 class="modal-title">New direct message</h2>
+    <p class="modal-description">Choose someone for a private conversation.</p>
+  </div>
+  <div class="grid gap-2">
+    {% for person in team %}
+    <form method="post" action="/chat/dms" hx-post="/chat/dms">
+      <input type="hidden" name="user_id" value="{{ person.id }}">
+      <button type="submit" class="dm-choice w-full text-left">{{<avatar name={person.username} color={person.color}/>}}<div><strong>{{ person.username }}</strong><span>Send a private message</span></div></button>
+    </form>
+    {% else %}
+    <p class="text-sm text-white/45">Nobody else is on the team yet. Share your join link from the Members page.</p>
+    {% endfor %}
+  </div>
+  <div class="flex justify-end"><button type="button" class="btn btn-ghost" data-dialog-close>Close</button></div>
+</div>

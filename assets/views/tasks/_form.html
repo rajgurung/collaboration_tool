@@ -1,0 +1,46 @@
+<form id="task-form" method="post" action="/tasks" hx-post="/tasks" hx-target="#task-board" hx-swap="outerHTML" data-close-on-success class="grid gap-5">
+  <div>
+    <h2 class="modal-title">Add a task</h2>
+    <p class="modal-description">Give it one owner and connect it to the project it moves forward.</p>
+  </div>
+  {{<text_field name="title" label="Task" value={form.title} error={errors.title | default(value="")}/>}}
+  {% if projects | length == 0 %}
+  <p class="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-white/60">Tasks belong to a project. <a href="/roadmap" class="underline">Create a project on the roadmap</a> first.</p>
+  {% endif %}
+  <div class="grid gap-4 sm:grid-cols-2">
+    <label class="field">
+      <span class="field-label">Project</span>
+      <select name="project_id" class="input" required>
+        <option value="">Choose a project</option>
+        {% for p in projects %}<option value="{{ p.id }}" {% if form.project_id == p.id | str %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+      {% if errors.project_id %}<span class="field-error">{{ errors.project_id }}</span>{% endif %}
+    </label>
+    <label class="field">
+      <span class="field-label">Owner</span>
+      <select name="owner_id" class="input">
+        <option value="">Unassigned</option>
+        {% for person in team %}<option value="{{ person.id }}" {% if form.owner_id == person.id | str %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
+      </select>
+      {% if errors.owner_id %}<span class="field-error">{{ errors.owner_id }}</span>{% endif %}
+    </label>
+  </div>
+  <div class="grid gap-4 sm:grid-cols-2">
+    <label class="field">
+      <span class="field-label">Priority</span>
+      <select name="priority" class="input">
+        {% for p in priorities %}<option value="{{ p }}" {% if form.priority == p %}selected{% endif %}>{{ p | capitalize }}</option>{% endfor %}
+      </select>
+      {% if errors.priority %}<span class="field-error">{{ errors.priority }}</span>{% endif %}
+    </label>
+    <label class="field">
+      <span class="field-label">Due date</span>
+      <input class="input" type="date" name="due_on" value="{{ form.due_on }}">
+      {% if errors.due_on %}<span class="field-error">{{ errors.due_on }}</span>{% endif %}
+    </label>
+  </div>
+  <div class="flex justify-end gap-2">
+    <button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>
+    <button type="submit" class="btn btn-primary">Add task</button>
+  </div>
+</form>

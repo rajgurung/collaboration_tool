@@ -1,0 +1,40 @@
+<form id="meeting-form" method="post" action="/meetings" hx-post="/meetings" hx-target="#meeting-list" hx-swap="outerHTML" data-close-on-success class="grid gap-5">
+  <div>
+    <h2 class="modal-title">Record the meeting</h2>
+    <p class="modal-description">Capture what changed, what was decided and what happens next.</p>
+  </div>
+  <div class="grid gap-4 sm:grid-cols-[1fr_auto]">
+    {{<text_field name="title" label="Title" value={form.title} error={errors.title | default(value="")}/>}}
+    <label class="field">
+      <span class="field-label">Date</span>
+      <input class="input" type="date" name="held_on" value="{{ form.held_on }}" required>
+      {% if errors.held_on %}<span class="field-error">{{ errors.held_on }}</span>{% endif %}
+    </label>
+  </div>
+  <label class="field">
+    <span class="field-label">Minutes</span>
+    <textarea name="summary" class="input" rows="4" required placeholder="What was discussed and what changed?">{{ form.summary }}</textarea>
+    {% if errors.summary %}<span class="field-error">{{ errors.summary }}</span>{% endif %}
+  </label>
+  <label class="field">
+    <span class="field-label">Decisions</span>
+    <textarea name="decisions" class="input" rows="3" placeholder="What did you agree?">{{ form.decisions }}</textarea>
+    {% if errors.decisions %}<span class="field-error">{{ errors.decisions }}</span>{% endif %}
+  </label>
+  <fieldset class="field">
+    <legend class="field-label mb-2">Attendees</legend>
+    <div class="grid gap-2 sm:grid-cols-2">
+      {% for person in team %}
+      <label class="member-choice cursor-pointer">
+        <input type="checkbox" name="attendee_ids" value="{{ person.id }}" {% if person.id in form.attendee_ids %}checked{% endif %}>
+        {{<avatar name={person.username} color={person.color} small={true}/>}}<span>{{ person.username }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if errors.attendee_ids %}<span class="field-error">{{ errors.attendee_ids }}</span>{% endif %}
+  </fieldset>
+  <div class="flex justify-end gap-2">
+    <button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>
+    <button type="submit" class="btn btn-primary">Save meeting</button>
+  </div>
+</form>

@@ -1,0 +1,11 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Choose a new password · Collaboration Tool{% endblock title %}
+{% block panel %}
+<h2 class="text-3xl font-medium tracking-[-.03em]">Choose a new password</h2>
+<form method="post" action="/reset/{{ token }}" class="mt-8 grid gap-5">
+  {% if error %}{{<form_alert message={error}/>}}{% endif %}
+  {{<text_field name="password" label="New password" type="password" autocomplete="new-password" hint="At least 8 characters."/>}}
+  {{<text_field name="password_confirmation" label="Repeat new password" type="password" autocomplete="new-password"/>}}
+  <button type="submit" class="btn btn-primary h-12">Save password</button>
+</form>
+{% endblock panel %}

@@ -1,0 +1,18 @@
+<div class="project-row flex-wrap" data-member-row id="member-{{ row.id }}">
+  {{<avatar name={row.username} color={row.color}/>}}
+  <div class="min-w-0 flex-1">
+    <p class="truncate font-medium">{{ row.username }}{% if row.is_me %} <span class="text-white/40">(you)</span>{% endif %}</p>
+    <p class="truncate text-xs text-white/40">{{ row.email }}</p>
+  </div>
+  {% if me.role == "owner" and row.role != "owner" %}
+  <form method="post" action="/members/{{ row.id }}/role" hx-post="/members/{{ row.id }}/role" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
+    <select name="role" class="input h-9 min-h-0 w-auto py-1 text-xs" aria-label="Role for {{ row.username }}">
+      <option value="member" {% if row.role == "member" %}selected{% endif %}>Member</option>
+      <option value="admin" {% if row.role == "admin" %}selected{% endif %}>Admin</option>
+    </select>
+    <button type="submit" class="btn btn-ghost btn-sm">Save</button>
+  </form>
+  {% else %}
+  <span class="note-meta capitalize">{{ row.role }}</span>
+  {% endif %}
+</div>

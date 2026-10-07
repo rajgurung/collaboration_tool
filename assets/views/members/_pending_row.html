@@ -1,0 +1,19 @@
+<div class="project-row flex-wrap" data-member-row id="member-{{ row.id }}">
+  {{<avatar name={row.username} color={row.color}/>}}
+  <div class="min-w-0 flex-1">
+    <p class="truncate font-medium">{{ row.username }}</p>
+    <p class="truncate text-xs text-white/40">{{ row.email }}</p>
+  </div>
+  {% if row.status == "pending" %}
+  <div class="flex gap-2">
+    <form method="post" action="/members/{{ row.id }}/reject" hx-post="/members/{{ row.id }}/reject" hx-target="#member-{{ row.id }}" hx-swap="outerHTML">
+      <button type="submit" class="btn btn-danger btn-sm">Decline</button>
+    </form>
+    <form method="post" action="/members/{{ row.id }}/approve" hx-post="/members/{{ row.id }}/approve" hx-target="#member-{{ row.id }}" hx-swap="outerHTML">
+      <button type="submit" class="btn btn-primary btn-sm">Approve</button>
+    </form>
+  </div>
+  {% else %}
+  <span class="note-meta">Declined</span>
+  {% endif %}
+</div>

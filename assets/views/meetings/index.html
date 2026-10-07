@@ -1,0 +1,27 @@
+{% extends "layouts/app.html" %}
+{% block title %}Meetings · {{ org.name }}{% endblock title %}
+{% block content %}
+<section class="space-y-5">
+  <div class="flex flex-col justify-between gap-5 py-3 md:flex-row md:items-end">
+    {{<page_header eyebrow="Company memory" title="Decisions, not disappearing notes" description="A permanent record of what was agreed, why it matters and what happens next."/>}}
+    <button type="button" class="btn btn-primary self-start md:self-auto"
+            hx-get="/meetings/new" hx-target="#meeting-dialog-body"
+            hx-on::after-request="document.getElementById('meeting-dialog').showModal()">
+      {{<icon name="plus"/>}}Log meeting
+    </button>
+  </div>
+  <div class="grid gap-5 lg:grid-cols-[1fr_.42fr]">
+    {% include "meetings/_list.html" %}
+    <aside class="panel h-fit p-6">
+      <span class="eyebrow">Meeting ritual</span>
+      <h3 class="mt-2 text-xl font-medium">Keep it to 30 minutes</h3>
+      <ol class="mt-5 space-y-4">
+        {% for item in ["Progress since last week", "Blockers needing a decision", "Decisions made", "Actions, owners and dates"] %}
+        <li class="flex gap-3 text-sm text-white/55"><span class="step-index">{{ loop.index }}</span><span class="pt-1">{{ item }}</span></li>
+        {% endfor %}
+      </ol>
+    </aside>
+  </div>
+</section>
+<dialog id="meeting-dialog" class="modal" aria-label="Log meeting"><div id="meeting-dialog-body"></div></dialog>
+{% endblock content %}

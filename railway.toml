@@ -1,0 +1,11 @@
+# Railway build and deploy settings. Env vars are set in the Railway dashboard:
+# see docs/deploy.md.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/_health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

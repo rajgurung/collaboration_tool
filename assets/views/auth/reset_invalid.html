@@ -1,0 +1,7 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Link expired · Collaboration Tool{% endblock title %}
+{% block panel %}
+<h2 class="text-3xl font-medium tracking-[-.03em]">This link no longer works</h2>
+<p class="mt-3 text-sm leading-6 text-white/60">Reset links work once and expire after an hour. Ask for a new one and use it straight away.</p>
+<a href="/forgot" class="btn btn-primary mt-8 h-12 w-full">Send a new link</a>
+{% endblock panel %}

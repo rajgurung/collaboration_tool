@@ -1,0 +1,7 @@
+{# Shared UI components, available in every template. #}
+
+{% component logo() %}<span class="logo-mark"><span>C</span></span>{% endcomponent logo %}
+
+{% component avatar(name: string, color: string = "#e8dfce", small: bool = false) %}<span title="{{ name }}" aria-label="{{ name }}" class="{% if small %}h-7 w-7 text-[10px]{% else %}h-9 w-9 text-xs{% endif %} grid shrink-0 place-items-center rounded-full border-2 border-[#14141b] font-semibold text-[#0b0b10]" style="background: {{ color }}">{{ name | truncate(length=1, end="") | upper }}</span>{% endcomponent avatar %}
+
+{% component page_header(eyebrow: string, title: string, description: string) %}<div><span class="eyebrow">{{ eyebrow }}</span><h1 class="mt-2 text-4xl font-medium tracking-[-.045em] md:text-6xl">{{ title }}</h1><p class="mt-3 max-w-2xl text-base leading-7 text-white/45">{{ description }}</p></div>{% endcomponent page_header %}
