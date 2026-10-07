@@ -14,7 +14,7 @@ async fn can_run_user_delete_by_pid() {
         &users::RegisterParams {
             email: "test@example.com".to_string(),
             password: "securepassword".to_string(),
-            name: "Test User".to_string(),
+            name: "testuser".to_string(),
         },
     )
     .await

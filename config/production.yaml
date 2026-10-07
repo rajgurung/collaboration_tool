@@ -7,7 +7,7 @@
 # secret or a localhost database is worse than one that refuses to boot.
 #
 # The variables this file requires:
-#   DATABASE_URL, JWT_SECRET, HOST, and the MAILER_* / REDIS_URL set below,
+#   DATABASE_URL, JWT_SECRET, APP_URL, and the MAILER_* / REDIS_URL set below,
 #   depending on which features you generated.
 
 # Application logging configuration
@@ -36,7 +36,7 @@ server:
   binding: <%= get_env(name="BINDING", default="0.0.0.0") %>
   # The UI hostname or IP address that mailers will point to.
   # Required: links in outgoing mail have to name the real host.
-  host: <%= get_env(name="HOST") %>
+  host: <%= get_env(name="APP_URL") %>
   # Out of the box middleware configuration. to disable middleware you can changed the `enable` field to `false` of comment the middleware block
   middlewares:
     static:
@@ -118,3 +118,14 @@ auth:
     secret: <%= get_env(name="JWT_SECRET") %>
     # Token expiration time in seconds
     expiration: 604800 # 7 days
+    # Server-rendered pages read the token from an HttpOnly cookie.
+    location:
+      from: Cookie
+      name: auth_token
+
+# App settings, read through `crate::data::settings::Settings`.
+settings:
+  # Public URL of the app, used in email links and the Origin check on form posts.
+  app_url: <%= get_env(name="APP_URL") %>
+  # Mark the session cookie Secure (HTTPS only).
+  secure_cookies: true

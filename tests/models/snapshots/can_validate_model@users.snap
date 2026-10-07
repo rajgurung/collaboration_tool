@@ -4,6 +4,6 @@ expression: res
 ---
 Err(
     Custom(
-        "{\"email\":[{\"code\":\"email\",\"message\":\"invalid email\"}],\"name\":[{\"code\":\"length\",\"message\":\"Name must be at least 2 characters long.\"}]}",
+        "{\"email\":[{\"code\":\"email\",\"message\":\"Enter a valid email address.\"}],\"name\":[{\"code\":\"regex\",\"message\":\"Start with a letter and use 3 to 30 letters or numbers.\"}]}",
     ),
 )

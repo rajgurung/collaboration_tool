@@ -1,57 +1,54 @@
 use axum::http::{HeaderName, HeaderValue};
-use collab::{models::users, views::auth::LoginResponse};
+use collab::models::users::{self, RegisterParams};
 use loco_rs::{app::AppContext, TestServer};
 
-const USER_EMAIL: &str = "test@loco.com";
-const USER_PASSWORD: &str = "1234";
+pub const USER_EMAIL: &str = "test@loco.com";
+pub const USER_NAME: &str = "tester";
+pub const USER_PASSWORD: &str = "correct-horse";
 
+#[allow(dead_code)]
 pub struct LoggedInUser {
     pub user: users::Model,
-    pub token: String,
+    pub cookie: (HeaderName, HeaderValue),
 }
 
-pub async fn init_user_login(request: &TestServer, ctx: &AppContext) -> LoggedInUser {
-    let register_payload = serde_json::json!({
-        "name": "loco",
-        "email": USER_EMAIL,
-        "password": USER_PASSWORD
-    });
+/// Creates a user directly through the model.
+pub async fn create_user(ctx: &AppContext, email: &str, name: &str) -> users::Model {
+    users::Model::create_with_password(
+        &ctx.db,
+        &RegisterParams {
+            email: email.to_string(),
+            password: USER_PASSWORD.to_string(),
+            name: name.to_string(),
+        },
+    )
+    .await
+    .expect("test user should be created")
+}
 
-    //Creating a new user
-    request
-        .post("/api/auth/register")
-        .json(&register_payload)
-        .await;
-    let user = users::Model::find_by_email(&ctx.db, USER_EMAIL)
-        .await
-        .unwrap();
-
-    let verify_payload = serde_json::json!({
-        "token": user.email_verification_token,
-    });
-
-    request.post("/api/auth/verify").json(&verify_payload).await;
-
+/// Signs in through the login form and returns the session cookie as a request header.
+pub async fn login(request: &TestServer, email: &str, password: &str) -> (HeaderName, HeaderValue) {
     let response = request
-        .post("/api/auth/login")
-        .json(&serde_json::json!({
-            "email": USER_EMAIL,
-            "password": USER_PASSWORD
-        }))
+        .post("/login")
+        .form(&serde_json::json!({ "email": email, "password": password }))
         .await;
-
-    let login_response: LoginResponse = serde_json::from_str(&response.text()).unwrap();
-
-    LoggedInUser {
-        user: users::Model::find_by_email(&ctx.db, USER_EMAIL)
-            .await
-            .unwrap(),
-        token: login_response.token,
-    }
+    assert_eq!(response.status_code(), 303, "login should redirect");
+    let set_cookie = response
+        .headers()
+        .get("set-cookie")
+        .expect("login should set the session cookie")
+        .to_str()
+        .unwrap();
+    let pair = set_cookie.split(';').next().unwrap().to_string();
+    (
+        HeaderName::from_static("cookie"),
+        HeaderValue::from_str(&pair).unwrap(),
+    )
 }
 
-pub fn auth_header(token: &str) -> (HeaderName, HeaderValue) {
-    let auth_header_value = HeaderValue::from_str(&format!("Bearer {token}")).unwrap();
-
-    (HeaderName::from_static("authorization"), auth_header_value)
+#[allow(dead_code)]
+pub async fn init_user_login(request: &TestServer, ctx: &AppContext) -> LoggedInUser {
+    let user = create_user(ctx, USER_EMAIL, USER_NAME).await;
+    let cookie = login(request, USER_EMAIL, USER_PASSWORD).await;
+    LoggedInUser { user, cookie }
 }

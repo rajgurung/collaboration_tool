@@ -48,7 +48,7 @@ async fn can_create_with_password() {
 
     let params = RegisterParams {
         email: "test@framework.com".to_string(),
-        password: "1234".to_string(),
+        password: "12341234".to_string(),
         name: "framework".to_string(),
     };
 
@@ -83,7 +83,7 @@ async fn handle_create_with_password_with_duplicate() {
         &boot.app_context.db,
         &RegisterParams {
             email: "user1@example.com".to_string(),
-            password: "1234".to_string(),
+            password: "12341234".to_string(),
             name: "framework".to_string(),
         },
     )

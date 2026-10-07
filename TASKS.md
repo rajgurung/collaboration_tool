@@ -39,7 +39,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
 
 ## Sequential: auth and tenancy (after Group 1)
 
-- [ ] **Task 4**: Auth.
+- [x] **Task 4**: Auth.
   - What: adapt the starter auth to server-rendered pages. JWT in an HttpOnly, Secure, SameSite=Lax cookie (confirm Loco's cookie support, or write a small extractor). Login, logout, forgot password, reset password pages. Reset link emailed via the Loco mailer, valid once for 1 hour. SMTP settings from env vars. Decide and implement CSRF protection for forms. Username validation (letter first, letters and digits, 3 to 30).
   - Depends on: Tasks 2, 3.
   - Files: `src/controllers/auth.rs`, `src/models/users.rs`, `src/mailers/`, `assets/views/auth/`, `config/`.

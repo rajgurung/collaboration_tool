@@ -1,273 +1,185 @@
+use axum::http::HeaderMap;
+use loco_rs::{hash, prelude::*};
+use serde::Deserialize;
+
 use crate::{
+    extractors::session::{cleared_session_cookie, redirect_response, session_cookie},
     mailers::auth::AuthMailer,
-    models::{
-        _entities::users,
-        users::{LoginParams, RegisterParams},
-    },
-    views::auth::{CurrentResponse, LoginResponse},
+    models::users,
+    views::forms::field_errors,
 };
-use loco_rs::prelude::*;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
 
-pub static EMAIL_DOMAIN_RE: OnceLock<Regex> = OnceLock::new();
+/// Hash of a throwaway password. Checked when an email is unknown so a failed
+/// login takes the same time whether or not the account exists.
+const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$ETQBx4rTgNAZhSaeYZKOZg$eYTdH26CRT6nUJtacLDEboP0li6xUwUF/q5nSlQ8uuc";
 
-fn get_allow_email_domain_re() -> &'static Regex {
-    EMAIL_DOMAIN_RE.get_or_init(|| {
-        Regex::new(r"@example\.com$|@gmail\.com$").expect("Failed to compile regex")
-    })
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ForgotParams {
+#[derive(Debug, Deserialize)]
+pub struct LoginForm {
     pub email: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ResetParams {
-    pub token: String,
     pub password: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct MagicLinkParams {
+#[derive(Debug, Deserialize)]
+pub struct ForgotForm {
     pub email: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ResendVerificationParams {
-    pub email: String,
+#[derive(Debug, Deserialize)]
+pub struct ResetForm {
+    pub password: String,
+    pub password_confirmation: String,
 }
 
-/// Register function creates a new user with the given parameters and sends a
-/// welcome email to the user
+#[derive(Debug, Deserialize)]
+pub struct LoginQuery {
+    pub reset: Option<String>,
+}
+
 #[debug_handler]
-async fn register(
-    State(ctx): State<AppContext>,
-    Json(params): Json<RegisterParams>,
+async fn login_page(
+    ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<LoginQuery>,
 ) -> Result<Response> {
-    let res = users::Model::create_with_password(&ctx.db, &params).await;
+    let notice = query
+        .reset
+        .map(|_| "Your password has been changed. Sign in with the new one.");
+    format::render().view(
+        &v,
+        "auth/login.html",
+        data!({ "email": "", "notice": notice }),
+    )
+}
 
-    let user = match res {
-        Ok(user) => user,
-        Err(err) => {
-            tracing::info!(
-                message = err.to_string(),
-                user_email = &params.email,
-                "could not register user",
-            );
-            return format::json(());
+#[debug_handler]
+async fn login(
+    ViewEngine(v): ViewEngine<TeraView>,
+    State(ctx): State<AppContext>,
+    Form(form): Form<LoginForm>,
+) -> Result<Response> {
+    let user = match users::Model::find_by_email(&ctx.db, &form.email).await {
+        Ok(user) if user.verify_password(&form.password) => user,
+        Ok(_) => return login_failed(&v, &form.email),
+        Err(_) => {
+            let _ = hash::verify_password(&form.password, DUMMY_HASH);
+            return login_failed(&v, &form.email);
         }
     };
-
-    let user = user
-        .into_active_model()
-        .set_email_verification_sent(&ctx.db)
-        .await?;
-
-    AuthMailer::send_welcome(&ctx, &user).await?;
-
-    format::json(())
+    format::render()
+        .cookies(&[session_cookie(&ctx, &user)?])?
+        .redirect("/")
 }
 
-/// Verify register user. if the user not verified his email, he can't login to
-/// the system.
+fn login_failed(v: &TeraView, email: &str) -> Result<Response> {
+    format::render().status(422).view(
+        v,
+        "auth/login.html",
+        data!({ "email": email, "error": "Email or password is incorrect." }),
+    )
+}
+
 #[debug_handler]
-async fn verify(State(ctx): State<AppContext>, Path(token): Path<String>) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_verification_token(&ctx.db, &token).await else {
-        return unauthorized("invalid token");
-    };
-
-    if user.email_verified_at.is_some() {
-        tracing::info!(pid = user.pid.to_string(), "user already verified");
-    } else {
-        let active_model = user.into_active_model();
-        let user = active_model.verified(&ctx.db).await?;
-        tracing::info!(pid = user.pid.to_string(), "user verified");
-    }
-
-    format::json(())
+async fn logout(State(ctx): State<AppContext>, headers: HeaderMap) -> Result<Response> {
+    let mut response = redirect_response(&headers, "/login");
+    let cookie = cleared_session_cookie(&ctx)?;
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        cookie
+            .to_string()
+            .parse()
+            .map_err(|_| Error::string("invalid cookie header"))?,
+    );
+    Ok(response)
 }
 
-/// In case the user forgot his password  this endpoints generate a forgot token
-/// and send email to the user. In case the email not found in our DB, we are
-/// returning a valid request for security reasons (not exposing users DB
-/// list).
+#[debug_handler]
+async fn forgot_page(ViewEngine(v): ViewEngine<TeraView>) -> Result<Response> {
+    format::render().view(&v, "auth/forgot.html", data!({ "email": "" }))
+}
+
+/// Always shows the same confirmation, so the form cannot be used to find out
+/// which emails have accounts.
 #[debug_handler]
 async fn forgot(
+    ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
-    Json(params): Json<ForgotParams>,
+    Form(form): Form<ForgotForm>,
 ) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
-        // we don't want to expose our users email. if the email is invalid we still
-        // returning success to the caller
-        return format::json(());
-    };
-
-    let user = user
-        .into_active_model()
-        .set_forgot_password_sent(&ctx.db)
-        .await?;
-
-    AuthMailer::forgot_password(&ctx, &user).await?;
-
-    format::json(())
-}
-
-/// reset user password by the given parameters
-#[debug_handler]
-async fn reset(State(ctx): State<AppContext>, Json(params): Json<ResetParams>) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_reset_token(&ctx.db, &params.token).await else {
-        // we don't want to expose our users email. if the email is invalid we still
-        // returning success to the caller
-        tracing::info!("reset token not found");
-
-        return format::json(());
-    };
-    user.into_active_model()
-        .reset_password(&ctx.db, &params.password)
-        .await?;
-
-    format::json(())
-}
-
-/// Creates a user login and returns a token
-#[debug_handler]
-async fn login(State(ctx): State<AppContext>, Json(params): Json<LoginParams>) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
-        tracing::debug!(
-            email = params.email,
-            "login attempt with non-existent email"
-        );
-        return unauthorized("Invalid credentials!");
-    };
-
-    let valid = user.verify_password(&params.password);
-
-    if !valid {
-        return unauthorized("unauthorized!");
+    if let Ok(user) = users::Model::find_by_email(&ctx.db, &form.email).await {
+        let user = user
+            .into_active_model()
+            .set_forgot_password_sent(&ctx.db)
+            .await?;
+        AuthMailer::forgot_password(&ctx, &user).await?;
+    } else {
+        tracing::debug!("password reset requested for unknown email");
     }
-
-    let jwt_secret = ctx.config.get_jwt_config()?;
-
-    let token = user
-        .generate_jwt(&jwt_secret.secret, jwt_secret.expiration)
-        .or_else(|_| unauthorized("unauthorized!"))?;
-
-    format::json(LoginResponse::new(&user, &token))
+    format::render().view(&v, "auth/forgot_sent.html", data!({}))
 }
 
 #[debug_handler]
-async fn current(auth: auth::JWT, State(ctx): State<AppContext>) -> Result<Response> {
-    let user = users::Model::find_by_pid(&ctx.db, &auth.claims.pid).await?;
-    format::json(CurrentResponse::new(&user))
-}
-
-/// Magic link authentication provides a secure and passwordless way to log in to the application.
-///
-/// # Flow
-/// 1. **Request a Magic Link**:
-///    A registered user sends a POST request to `/magic-link` with their email.
-///    If the email exists, a short-lived, one-time-use token is generated and sent to the user's email.
-///    For security and to avoid exposing whether an email exists, the response always returns 200, even if the email is invalid.
-///
-/// 2. **Click the Magic Link**:
-///    The user clicks the link (/magic-link/{token}), which validates the token and its expiration.
-///    If valid, the server generates a JWT and responds with a [`LoginResponse`].
-///    If invalid or expired, an unauthorized response is returned.
-///
-/// This flow enhances security by avoiding traditional passwords and providing a seamless login experience.
-async fn magic_link(
+async fn reset_page(
+    ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
-    Json(params): Json<MagicLinkParams>,
-) -> Result<Response> {
-    let email_regex = get_allow_email_domain_re();
-    if !email_regex.is_match(&params.email) {
-        tracing::debug!(
-            email = params.email,
-            "The provided email is invalid or does not match the allowed domains"
-        );
-        return bad_request("invalid request");
-    }
-
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
-        // we don't want to expose our users email. if the email is invalid we still
-        // returning success to the caller
-        tracing::debug!(email = params.email, "user not found by email");
-        return format::empty_json();
-    };
-
-    let user = user.into_active_model().create_magic_link(&ctx.db).await?;
-    AuthMailer::send_magic_link(&ctx, &user).await?;
-
-    format::empty_json()
-}
-
-/// Verifies a magic link token and authenticates the user.
-async fn magic_link_verify(
     Path(token): Path<String>,
-    State(ctx): State<AppContext>,
 ) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_magic_token(&ctx.db, &token).await else {
-        // we don't want to expose our users email. if the email is invalid we still
-        // returning success to the caller
-        return unauthorized("unauthorized!");
-    };
-
-    let user = user.into_active_model().clear_magic_link(&ctx.db).await?;
-
-    let jwt_secret = ctx.config.get_jwt_config()?;
-
-    let token = user
-        .generate_jwt(&jwt_secret.secret, jwt_secret.expiration)
-        .or_else(|_| unauthorized("unauthorized!"))?;
-
-    format::json(LoginResponse::new(&user, &token))
+    if users::Model::find_by_reset_token(&ctx.db, &token)
+        .await
+        .is_err()
+    {
+        return reset_invalid(&v);
+    }
+    format::render().view(&v, "auth/reset.html", data!({ "token": token }))
 }
 
 #[debug_handler]
-async fn resend_verification_email(
+async fn reset(
+    ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
-    Json(params): Json<ResendVerificationParams>,
+    Path(token): Path<String>,
+    Form(form): Form<ResetForm>,
 ) -> Result<Response> {
-    let Ok(user) = users::Model::find_by_email(&ctx.db, &params.email).await else {
-        tracing::info!(
-            email = params.email,
-            "User not found for resend verification"
-        );
-        return format::json(());
+    let Ok(user) = users::Model::find_by_reset_token(&ctx.db, &token).await else {
+        return reset_invalid(&v);
     };
-
-    if user.email_verified_at.is_some() {
-        tracing::info!(
-            pid = user.pid.to_string(),
-            "User already verified, skipping resend"
-        );
-        return format::json(());
+    if form.password != form.password_confirmation {
+        return reset_form_error(&v, &token, "The two passwords do not match.");
     }
-
-    let user = user
+    match user
         .into_active_model()
-        .set_email_verification_sent(&ctx.db)
-        .await?;
+        .reset_password(&ctx.db, &form.password)
+        .await
+    {
+        Ok(_) => format::redirect("/login?reset=1"),
+        Err(err) => {
+            let message = field_errors(&err)
+                .and_then(|errors| errors.into_values().next())
+                .ok_or(err)?;
+            reset_form_error(&v, &token, &message)
+        }
+    }
+}
 
-    AuthMailer::send_welcome(&ctx, &user).await?;
-    tracing::info!(pid = user.pid.to_string(), "Verification email re-sent");
+fn reset_form_error(v: &TeraView, token: &str, message: &str) -> Result<Response> {
+    format::render().status(422).view(
+        v,
+        "auth/reset.html",
+        data!({ "token": token, "error": message }),
+    )
+}
 
-    format::json(())
+fn reset_invalid(v: &TeraView) -> Result<Response> {
+    format::render()
+        .status(404)
+        .view(v, "auth/reset_invalid.html", data!({}))
 }
 
 pub fn routes() -> Routes {
     Routes::new()
-        .prefix("/api/auth")
-        .add("/register", post(register))
-        .add("/verify/{token}", get(verify))
+        .add("/login", get(login_page))
         .add("/login", post(login))
+        .add("/logout", post(logout))
+        .add("/forgot", get(forgot_page))
         .add("/forgot", post(forgot))
-        .add("/reset", post(reset))
-        .add("/current", get(current))
-        .add("/magic-link", post(magic_link))
-        .add("/magic-link/{token}", get(magic_link_verify))
-        .add("/resend-verification-mail", post(resend_verification_email))
+        .add("/reset/{token}", get(reset_page))
+        .add("/reset/{token}", post(reset))
 }

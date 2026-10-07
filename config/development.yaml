@@ -105,6 +105,10 @@ auth:
     secret: qCpZrPPrFannoZqUFUNo
     # Token expiration time in seconds
     expiration: 604800 # 7 days
+    # Server-rendered pages read the token from an HttpOnly cookie.
+    location:
+      from: Cookie
+      name: auth_token
     # Where to read the token from. Omitted => `Authorization: Bearer <token>`.
     # A cookie or query parameter is a single map with a `from:` tag:
     #
@@ -115,3 +119,10 @@ auth:
     # `from:` is one of Bearer, Cookie, Query. Cookie and Query also take a
     # `name:`. A YAML list of these tries each in order and uses the first
     # that yields a token. See https://loco.rs/docs/how-to/jwt-locations
+
+# App settings, read through `crate::data::settings::Settings`.
+settings:
+  # Public URL of the app, used in email links and the Origin check on form posts.
+  app_url: <%= get_env(name="APP_URL", default="http://localhost:5150") %>
+  # Mark the session cookie Secure (HTTPS only).
+  secure_cookies: false

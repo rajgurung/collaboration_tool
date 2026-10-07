@@ -94,3 +94,14 @@ auth:
     secret: ElIf5un4u76rBJXhW7rC
     # Token expiration time in seconds
     expiration: 604800 # 7 days
+    # Server-rendered pages read the token from an HttpOnly cookie.
+    location:
+      from: Cookie
+      name: auth_token
+
+# App settings, read through `crate::data::settings::Settings`.
+settings:
+  # Public URL of the app, used in email links and the Origin check on form posts.
+  app_url: http://localhost:5150
+  # Mark the session cookie Secure (HTTPS only).
+  secure_cookies: false

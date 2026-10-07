@@ -1,1 +1,1 @@
-Your reset password link
+Reset your Collaboration Tool password

@@ -1,9 +1,6 @@
 use loco_rs::prelude::*;
 
-use crate::{
-    mailers::auth::AuthMailer,
-    models::{_entities::users, users::RegisterParams},
-};
+use crate::models::{_entities::users, users::RegisterParams};
 
 pub struct UserCreate;
 #[async_trait]
@@ -11,7 +8,7 @@ impl Task for UserCreate {
     fn task(&self) -> TaskInfo {
         TaskInfo {
             name: "user:create".to_string(),
-            detail: "Create a new user with email, name, and password. Sends welcome email and sets up email verification.\nUsage:\ncargo run task user:create email:user@example.com name:\"John Doe\" password:\"securepassword\"".to_string(),
+            detail: "Create a new user with email, username (name) and password.\nUsage:\ncargo run task user:create email:user@example.com name:\"john\" password:\"securepassword\"".to_string(),
         }
     }
     async fn run(&self, app_context: &AppContext, vars: &task::Vars) -> Result<()> {
@@ -53,32 +50,6 @@ impl Task for UserCreate {
                 return Err(Error::string(&format!("Failed to create user. err: {err}")));
             }
         };
-
-        // Set email verification sent (same as register controller)
-        let user = user
-            .into_active_model()
-            .set_email_verification_sent(&app_context.db)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    message = err.to_string(),
-                    user_email = &register_params.email,
-                    "could not set email verification"
-                );
-                Error::string("Failed to set email verification")
-            })?;
-
-        // Send welcome email (same as register controller)
-        AuthMailer::send_welcome(app_context, &user)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    message = err.to_string(),
-                    user_email = &register_params.email,
-                    "could not send welcome email"
-                );
-                Error::string("Failed to send welcome email")
-            })?;
 
         tracing::info!(
             message = "User creation task completed successfully",

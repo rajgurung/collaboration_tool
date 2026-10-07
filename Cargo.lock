@@ -917,6 +917,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "chrono",
+ "cookie",
  "fluent-templates",
  "include_dir",
  "insta",
