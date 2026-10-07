@@ -53,7 +53,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
 
 ## Parallel Group 2 (after Task 5)
 
-- [ ] **Task 6**: Members management.
+- [x] **Task 6**: Members management.
   - What: members page listing active and pending. Owner/admin approve or reject. Owner promotes or demotes admins. Admins cannot change roles.
   - Files: `src/controllers/members.rs`, `assets/views/members/`.
   - Verify: request tests for each role's permissions, including a member trying to approve (403).

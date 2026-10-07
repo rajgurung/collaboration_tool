@@ -38,6 +38,26 @@ impl CurrentMember {
         self.role == role::OWNER
     }
 
+    /// # Errors
+    /// 403 unless the member is an owner or admin.
+    pub fn require_manager(&self) -> Result<()> {
+        if self.can_manage() {
+            Ok(())
+        } else {
+            Err(forbidden("Only owners and admins can do that."))
+        }
+    }
+
+    /// # Errors
+    /// 403 unless the member is an owner.
+    pub fn require_owner(&self) -> Result<()> {
+        if self.is_owner() {
+            Ok(())
+        } else {
+            Err(forbidden("Only owners can do that."))
+        }
+    }
+
     /// Context every app-layout page needs: org, signed-in user and active tab.
     #[must_use]
     pub fn page(&self, active: &str, mut extra: serde_json::Value) -> serde_json::Value {
@@ -124,6 +144,13 @@ impl FromRequestParts<AppContext> for CurrentMember {
             }),
         ))
     }
+}
+
+fn forbidden(message: &str) -> Error {
+    Error::CustomError(
+        StatusCode::FORBIDDEN,
+        loco_rs::controller::ErrorDetail::new("forbidden", message),
+    )
 }
 
 async fn acting_org(parts: &Parts, ctx: &AppContext) -> Option<organisations::Model> {

@@ -118,6 +118,15 @@ impl Model {
         user.ok_or_else(|| ModelError::EntityNotFound)
     }
 
+    /// # Errors
+    /// `EntityNotFound` when no user has this id.
+    pub async fn find_by_id<C: ConnectionTrait>(db: &C, id: i64) -> ModelResult<Self> {
+        users::Entity::find_by_id(id)
+            .one(db)
+            .await?
+            .ok_or(ModelError::EntityNotFound)
+    }
+
     /// finds a user by the provided verification token
     ///
     /// # Errors

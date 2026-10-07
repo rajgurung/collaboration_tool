@@ -8,7 +8,7 @@ use sea_orm::sea_query::{ExprTrait, Func};
 
 pub use super::_entities::memberships::{ActiveModel, Column, Entity, Model};
 use super::{
-    organisations,
+    conversation_members, conversations, organisations,
     users::{self, RegisterParams},
 };
 
@@ -117,6 +117,104 @@ impl Model {
         .await?;
         txn.commit().await?;
         Ok((user, membership))
+    }
+
+    /// Every membership in the organisation with its user, oldest first.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn list_for_org<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+    ) -> ModelResult<Vec<(Self, users::Model)>> {
+        let memberships = Entity::find()
+            .in_tenant(org_id)
+            .order_by_asc(Column::CreatedAt)
+            .all(db)
+            .await?;
+        let mut users: HashMap<i64, users::Model> = users::Entity::find()
+            .filter(users::users::Column::Id.is_in(memberships.iter().map(|m| m.user_id)))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|u| (u.id, u))
+            .collect();
+        Ok(memberships
+            .into_iter()
+            .filter_map(|m| users.remove(&m.user_id).map(|u| (m, u)))
+            .collect())
+    }
+
+    /// # Errors
+    /// `EntityNotFound` when the membership is not in this organisation.
+    pub async fn find_in_org<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        id: i64,
+    ) -> ModelResult<Self> {
+        Entity::find_by_id(id)
+            .in_tenant(org_id)
+            .one(db)
+            .await?
+            .ok_or(ModelError::EntityNotFound)
+    }
+
+    /// Approves a pending request and adds the member to `#general`.
+    ///
+    /// # Errors
+    /// When the membership is not pending, or on database errors.
+    pub async fn approve(self, db: &DatabaseConnection, approver_id: i64) -> ModelResult<Self> {
+        if !self.is_pending() {
+            return Err(ModelError::msg("Only pending requests can be approved."));
+        }
+        let txn = db.begin().await?;
+        let general = conversations::Model::find_general(&txn, self.organisation_id).await?;
+        let mut membership = self.into_active_model();
+        membership.status = ActiveValue::Set(status::ACTIVE.to_string());
+        membership.approved_by_id = ActiveValue::Set(Some(approver_id));
+        membership.approved_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
+        let membership = membership.update(&txn).await?;
+        conversation_members::Model::add(&txn, &general, membership.user_id).await?;
+        txn.commit().await?;
+        Ok(membership)
+    }
+
+    /// # Errors
+    /// When the membership is not pending, or on database errors.
+    pub async fn reject<C: ConnectionTrait>(self, db: &C, approver_id: i64) -> ModelResult<Self> {
+        if !self.is_pending() {
+            return Err(ModelError::msg("Only pending requests can be declined."));
+        }
+        let mut membership = self.into_active_model();
+        membership.status = ActiveValue::Set(status::REJECTED.to_string());
+        membership.approved_by_id = ActiveValue::Set(Some(approver_id));
+        Ok(membership.update(db).await?)
+    }
+
+    /// Makes an active member an admin or turns an admin back into a member.
+    /// Owners keep their role.
+    ///
+    /// # Errors
+    /// For an unknown role, an owner, an inactive member, or database errors.
+    pub async fn change_role<C: ConnectionTrait>(
+        self,
+        db: &C,
+        new_role: &str,
+    ) -> ModelResult<Self> {
+        if new_role != role::ADMIN && new_role != role::MEMBER {
+            return Err(ModelError::msg("Choose admin or member."));
+        }
+        if self.role == role::OWNER {
+            return Err(ModelError::msg("The owner's role cannot be changed."));
+        }
+        if !self.is_active() {
+            return Err(ModelError::msg(
+                "Approve the request before changing the role.",
+            ));
+        }
+        let mut membership = self.into_active_model();
+        membership.role = ActiveValue::Set(new_role.to_string());
+        Ok(membership.update(db).await?)
     }
 
     #[must_use]
