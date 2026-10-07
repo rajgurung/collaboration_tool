@@ -126,6 +126,8 @@ settings:
   app_url: <%= get_env(name="APP_URL", default="http://localhost:5150") %>
   # Sender for outgoing email. Must be an address your mail provider allows.
   mail_from: "Collaboration Tool <no-reply@localhost>"
+  # Resend API key. When set, email is sent over HTTPS through Resend instead of SMTP.
+  resend_api_key: "<%= get_env(name="RESEND_API_KEY", default="") %>"
   # Mark the session cookie Secure (HTTPS only).
   secure_cookies: false
   # The platform owner. `cargo loco task super_admin` creates or promotes this account.

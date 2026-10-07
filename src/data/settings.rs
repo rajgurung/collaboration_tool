@@ -10,6 +10,9 @@ pub struct Settings {
     pub secure_cookies: bool,
     /// Sender for outgoing email, e.g. `Collaboration Tool <no-reply@example.com>`.
     pub mail_from: String,
+    /// When set, email goes out through Resend's HTTPS API instead of SMTP.
+    #[serde(default)]
+    pub resend_api_key: String,
     /// Used by `cargo loco task super_admin`.
     pub super_admin: SuperAdminSettings,
 }
