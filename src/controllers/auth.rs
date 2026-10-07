@@ -3,7 +3,9 @@ use loco_rs::{hash, prelude::*};
 use serde::Deserialize;
 
 use crate::{
-    extractors::session::{cleared_session_cookie, redirect_response, session_cookie},
+    extractors::session::{
+        cleared_acting_org_cookie, cleared_session_cookie, redirect_response, session_cookie,
+    },
     mailers::auth::AuthMailer,
     models::users,
     views::forms::field_errors,
@@ -80,14 +82,18 @@ fn login_failed(v: &TeraView, email: &str) -> Result<Response> {
 #[debug_handler]
 async fn logout(State(ctx): State<AppContext>, headers: HeaderMap) -> Result<Response> {
     let mut response = redirect_response(&headers, "/login");
-    let cookie = cleared_session_cookie(&ctx)?;
-    response.headers_mut().append(
-        axum::http::header::SET_COOKIE,
-        cookie
-            .to_string()
-            .parse()
-            .map_err(|_| Error::string("invalid cookie header"))?,
-    );
+    for cookie in [
+        cleared_session_cookie(&ctx)?,
+        cleared_acting_org_cookie(&ctx)?,
+    ] {
+        response.headers_mut().append(
+            axum::http::header::SET_COOKIE,
+            cookie
+                .to_string()
+                .parse()
+                .map_err(|_| Error::string("invalid cookie header"))?,
+        );
+    }
     Ok(response)
 }
 

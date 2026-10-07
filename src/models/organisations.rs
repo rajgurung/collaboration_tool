@@ -3,9 +3,22 @@ use serde::Deserialize;
 
 pub use super::_entities::organisations::{ActiveModel, Column, Entity, Model};
 use super::{
-    conversations, memberships,
+    conversations, memberships, projects, tasks,
     users::{self, RegisterParams},
 };
+
+/// One row of the platform admin's organisation list.
+#[derive(Debug, serde::Serialize)]
+pub struct OrgSummary {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+    pub created_at: String,
+    pub active_members: u64,
+    pub pending_members: u64,
+    pub projects: u64,
+    pub tasks: u64,
+}
 
 pub type Organisations = Entity;
 
@@ -56,6 +69,37 @@ impl Model {
             .one(db)
             .await?
             .ok_or(ModelError::EntityNotFound)
+    }
+
+    /// Every organisation with headline counts, newest first. For the platform admin only.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn admin_overview<C: ConnectionTrait>(db: &C) -> ModelResult<Vec<OrgSummary>> {
+        let orgs = Entity::find()
+            .order_by_desc(Column::CreatedAt)
+            .all(db)
+            .await?;
+        let mut rows = Vec::with_capacity(orgs.len());
+        for org in orgs {
+            let members = |status: &'static str| {
+                memberships::Entity::find()
+                    .in_tenant(org.id)
+                    .filter(memberships::Column::Status.eq(status))
+                    .count(db)
+            };
+            rows.push(OrgSummary {
+                active_members: members(memberships::status::ACTIVE).await?,
+                pending_members: members(memberships::status::PENDING).await?,
+                projects: projects::Entity::find().in_tenant(org.id).count(db).await?,
+                tasks: tasks::Entity::find().in_tenant(org.id).count(db).await?,
+                created_at: org.created_at.format("%d %b %Y").to_string(),
+                id: org.id,
+                name: org.name,
+                slug: org.slug,
+            });
+        }
+        Ok(rows)
     }
 
     /// Creates the owner's account, the organisation, the owner membership and

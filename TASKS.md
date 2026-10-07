@@ -78,7 +78,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/chat.rs`, `src/models/{conversations,messages}.rs`, `assets/views/chat/`.
   - Verify: request tests: non-members get 403 on a conversation, DM to same person twice reuses it, group members limited to the org.
 
-- [ ] **Task 11**: Super admin area.
+- [x] **Task 11**: Super admin area.
   - What: `/admin` listing organisations and users with counts. "Enter organisation" sets the acting org for the super admin. Non super admins get 404.
   - Files: `src/controllers/admin.rs`, `assets/views/admin/`.
   - Verify: request tests for access control and entering an org.

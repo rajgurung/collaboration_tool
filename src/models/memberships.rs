@@ -40,6 +40,19 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
+    /// Every user's membership (if any), for the platform admin.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn all_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
+        Ok(Entity::find()
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|m| (m.user_id, m))
+            .collect())
+    }
+
     /// A user belongs to at most one organisation.
     ///
     /// # Errors

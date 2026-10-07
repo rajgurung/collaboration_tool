@@ -118,6 +118,17 @@ impl Model {
         user.ok_or_else(|| ModelError::EntityNotFound)
     }
 
+    /// Every user, newest first. For the platform admin only.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn all_newest_first<C: ConnectionTrait>(db: &C) -> ModelResult<Vec<Self>> {
+        Ok(users::Entity::find()
+            .order_by_desc(users::Column::CreatedAt)
+            .all(db)
+            .await?)
+    }
+
     /// # Errors
     /// `EntityNotFound` when no user has this id.
     pub async fn find_by_id<C: ConnectionTrait>(db: &C, id: i64) -> ModelResult<Self> {

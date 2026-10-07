@@ -37,6 +37,14 @@
       </div>
     </div>
   </header>
+  {% if me.acting %}
+  <div class="relative z-30 border-b border-[#ffb45433] bg-[#ffb45414] px-4 py-2 text-sm text-[#ffd59a]">
+    <div class="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-2">
+      <span>{{<icon name="shield" class="inline h-4 w-4"/>}} You are inside <strong>{{ org.name }}</strong> as platform admin. Changes you make are real.</span>
+      <form method="post" action="/admin/leave"><button type="submit" class="btn btn-ghost btn-sm">Leave</button></form>
+    </div>
+  </div>
+  {% endif %}
   <div class="relative z-10 mx-auto max-w-[1500px] px-4 py-4 pb-28 md:px-5 md:py-5 md:pb-5 lg:px-8 lg:py-7">
     <nav class="mb-5 hidden w-fit gap-1 rounded-2xl border border-white/8 bg-white/[.035] p-1.5 md:flex" aria-label="Sections">
       {% for item in nav %}
