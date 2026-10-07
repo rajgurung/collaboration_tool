@@ -39,17 +39,20 @@ fn renders_home_view_with_i18n() {
 fn renders_app_layout_with_nav() {
     let rendered = view_engine()
         .render(
-            "dashboard/index.html",
+            "members/index.html",
             serde_json::json!({
                 "active": "tasks",
                 "org": { "name": "Himalayan Ritual" },
                 "me": { "username": "raj", "color": "#ffb454" },
+                "active_members": [],
+                "pending": [],
+                "join_url": "http://localhost:5150/join/himalayan-ritual",
             }),
         )
         .expect("app layout should render");
 
     assert!(rendered.contains("Himalayan Ritual"));
-    assert!(rendered.contains("progress at a glance"));
+    assert!(rendered.contains("Who is on the team"));
     assert!(rendered
         .contains(r#"href="/tasks" class="tab-link flex items-center gap-2" aria-current="page""#));
     assert!(rendered.contains("<svg"), "icons should render");

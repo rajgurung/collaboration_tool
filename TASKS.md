@@ -96,7 +96,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/chat_ws.rs`, `src/chat_hub.rs`, `frontend/chat.ts`, `assets/views/chat/`.
   - Verify: two browsers see each other's messages within a second. Pending users and non-members cannot open the socket (test).
 
-- [ ] **Task 14**: Overview dashboard.
+- [x] **Task 14**: Overview dashboard.
   - What: completion percentage, per-member progress (same scoring as `app/page.tsx`: done 100, progress 55, blocked 10, todo 15), active projects, recent tasks.
   - Depends on: Tasks 7, 8.
   - Files: `src/controllers/dashboard.rs`, `assets/views/dashboard/`.
