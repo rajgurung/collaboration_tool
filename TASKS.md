@@ -68,7 +68,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/tasks.rs`, `src/models/{tasks,task_notes}.rs`, `assets/views/tasks/`.
   - Verify: request tests for create, status change (invalid status rejected), notes, search.
 
-- [ ] **Task 9**: Meetings.
+- [x] **Task 9**: Meetings.
   - What: meetings list and log-meeting form (title, date, summary, decisions, attendees picked from members).
   - Files: `src/controllers/meetings.rs`, `src/models/meetings.rs`, `assets/views/meetings/`.
   - Verify: request tests for create and validation. Attendees must be org members.

@@ -1,4 +1,4 @@
-pub use super::_entities::meeting_attendees::{ActiveModel, Entity, Model};
+pub use super::_entities::meeting_attendees::{ActiveModel, Column, Entity, Model};
 use sea_orm::entity::prelude::*;
 pub type MeetingAttendees = Entity;
 
