@@ -104,7 +104,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
 
 ## Final
 
-- [ ] **Task 15**: Cross-tenant security tests.
+- [x] **Task 15**: Cross-tenant security tests.
   - What: one test file that creates two organisations and tries every tenant route and the WebSocket from org A against org B's IDs.
   - Depends on: Tasks 6 to 14.
   - Files: `tests/requests/tenancy.rs`.

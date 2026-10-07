@@ -21,3 +21,5 @@ pub mod members;
 pub mod admin;
 
 pub mod dashboard_numbers;
+
+pub mod tenancy;
