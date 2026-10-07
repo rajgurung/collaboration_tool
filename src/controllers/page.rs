@@ -13,7 +13,7 @@ use loco_rs::prelude::*;
 /// swapping the engine later leaves this call site compiling untouched.
 #[debug_handler]
 async fn index(ViewEngine(v): ViewEngine<TeraView>) -> Result<Response> {
-    format::render().view(&v, "home/hello.html", data!({}))
+    format::render().view(&v, "home/index.html", data!({}))
 }
 
 pub fn routes() -> Routes {

@@ -1,1 +1,1 @@
--something = foo
+-brand = Collaboration Tool

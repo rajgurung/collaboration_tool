@@ -1,0 +1,7 @@
+{% extends "layouts/app.html" %}
+{% block title %}Overview · {{ org.name }}{% endblock title %}
+{% block content %}
+<section class="space-y-5">
+  {{<page_header eyebrow="Overview" title={org.name} description="Your team's progress at a glance."/>}}
+</section>
+{% endblock content %}

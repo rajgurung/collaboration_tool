@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Runs Tailwind and esbuild in watch mode alongside the Loco server.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+bin/setup-tools
+
+trap 'kill 0' EXIT
+
+.tools/tailwindcss -i frontend/styles/app.css -o assets/static/css/app.css --watch=always &
+.tools/esbuild frontend/app.ts --bundle --sourcemap --target=es2022 --outfile=assets/static/js/app.js --watch=forever &
+cargo loco start

@@ -22,7 +22,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
 
 ## Parallel Group 1 (after Task 1)
 
-- [ ] **Task 2**: Frontend build pipeline and base layout.
+- [x] **Task 2**: Frontend build pipeline and base layout.
   - What: Tailwind standalone CLI and esbuild (pinned binaries fetched by a script). `frontend/app.ts` entry. A `bin/dev` script that runs Tailwind watch, esbuild watch and `cargo loco start`. Port the colour tokens, fonts and shared classes (`metric-card`, `task-card`, `chat-bubble`, ambient background) from `app/globals.css`. Base layout with header, desktop tabs and mobile bottom nav, HTMX and the HTMX ws extension loaded from `assets/static/vendor/`.
   - Files: `frontend/`, `tailwind.css`, `bin/`, `assets/views/base.html`, `assets/static/`.
   - Verify: `bin/dev` runs. A test page renders with the dark theme. Editing a `.ts` file rebuilds the JS.

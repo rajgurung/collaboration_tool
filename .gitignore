@@ -67,3 +67,8 @@ target/
 *.sqlite
 *.sqlite-*
 .idea/
+
+# Frontend tooling and build output (bin/setup-tools, bin/build-assets)
+/.tools/
+/assets/static/css/
+/assets/static/js/

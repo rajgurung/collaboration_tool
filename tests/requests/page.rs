@@ -17,7 +17,7 @@ async fn can_get_home_page() {
 
         assert_eq!(res.status_code(), 200);
         assert!(
-            res.text().contains("Hello World"),
+            res.text().contains("Create an organisation"),
             "expected the rendered view, got: {}",
             res.text()
         );

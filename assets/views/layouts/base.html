@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Collaboration Tool{% endblock title %}</title>
+  <meta name="description" content="A shared workspace for roadmaps, tasks, progress, meetings and team chat.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/vendor/htmx.min.js" defer></script>
+  <script src="/static/vendor/htmx-ext-ws.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body class="antialiased" {% block body_attrs %}{% endblock body_attrs %}>
+  {% block body %}{% endblock body %}
+  {% if flash %}<div hidden data-flash="{{ flash.kind | default(value='info') }}">{{ flash.message }}</div>{% endif %}
+</body>
+</html>
