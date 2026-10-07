@@ -73,7 +73,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/meetings.rs`, `src/models/meetings.rs`, `assets/views/meetings/`.
   - Verify: request tests for create and validation. Attendees must be org members.
 
-- [ ] **Task 10**: Chat (HTTP part).
+- [x] **Task 10**: Chat (HTTP part).
   - What: conversation sidebar (channels, groups, DMs with last message), message history (latest 200), create group with chosen members, start DM (deduplicated per pair), send message via a normal POST as fallback. Body 1 to 1000 chars.
   - Files: `src/controllers/chat.rs`, `src/models/{conversations,messages}.rs`, `assets/views/chat/`.
   - Verify: request tests: non-members get 403 on a conversation, DM to same person twice reuses it, group members limited to the org.

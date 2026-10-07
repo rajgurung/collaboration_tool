@@ -42,6 +42,24 @@ impl Model {
     }
 }
 
+impl Model {
+    /// # Errors
+    /// On database errors.
+    pub async fn is_member<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        user_id: i64,
+    ) -> ModelResult<bool> {
+        Ok(Entity::find()
+            .in_tenant(conversation.organisation_id)
+            .filter(Column::ConversationId.eq(conversation.id))
+            .filter(Column::UserId.eq(user_id))
+            .one(db)
+            .await?
+            .is_some())
+    }
+}
+
 impl loco_rs::prelude::TenantEntity for Entity {
     type TenantId = i64;
 
