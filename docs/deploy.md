@@ -38,6 +38,7 @@ The app ships as one Docker image (`Dockerfile`). Railway builds it from the rep
 | `MAILER_PORT` | no | Defaults to `587` (STARTTLS) |
 | `MAILER_USER` | yes | SMTP user |
 | `MAILER_PASSWORD` | yes | SMTP password or API key |
+| `RESEND_API_KEY` | production | Sending-only Resend key. When set, email goes through Resend's HTTPS API instead of SMTP. |
 | `PORT` | set by Railway | The app binds `0.0.0.0:$PORT` |
 | `SUPER_ADMIN_EMAIL` | no | Defaults to `gurungraj26@gmail.com` |
 | `SUPER_ADMIN_USERNAME` | no | Defaults to `raj` |
@@ -66,7 +67,7 @@ Wrangler cannot manage DNS records; use the Cloudflare API, dashboard or the `cf
 
 - **One instance.** Live chat keeps WebSocket subscribers in memory, so run a single replica.
 - **Health check.** Railway checks `/_health`.
-- **Email.** Outbound SMTP may be blocked on some Railway plans (unverified). If emails do not arrive, check the logs for SMTP errors and use a provider on port 587 or 2587.
+- **Email.** Railway blocks outbound SMTP (ports 25/465/587) below the Pro plan; sends fail with `Network is unreachable`. Production therefore uses Resend's HTTPS API (`RESEND_API_KEY`), sending from `no-reply@rajgurung.me` (domain verified in Resend; DKIM/SPF records in Cloudflare). The `MAILER_*` variables must still exist for the app to boot, but are unused while `RESEND_API_KEY` is set.
 - **Cookies.** Production marks the session cookie `Secure`, so the site must be served over HTTPS (Railway domains are).
 - **Form posts** are rejected if their `Origin` is not `APP_URL`. If you add a custom domain, update `APP_URL`.
 
