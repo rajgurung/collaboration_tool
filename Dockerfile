@@ -28,7 +28,7 @@ FROM debian:bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && useradd --system --create-home --uid 10001 app
+ && useradd --system --create-home --uid 10001 --shell /bin/sh app
 
 WORKDIR /usr/app
 COPY --from=builder /usr/src/app/assets assets
