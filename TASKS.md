@@ -58,7 +58,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Files: `src/controllers/members.rs`, `assets/views/members/`.
   - Verify: request tests for each role's permissions, including a member trying to approve (403).
 
-- [ ] **Task 7**: Projects and roadmap.
+- [x] **Task 7**: Projects and roadmap.
   - What: roadmap page with now / next / later lanes. Create and edit project (name, lane, status, progress, accent, owner from org members, summary) in a `<dialog>` form via HTMX.
   - Files: `src/controllers/projects.rs`, `src/models/projects.rs`, `assets/views/projects/`.
   - Verify: request tests for create, edit, validation errors, owner must be an org member.

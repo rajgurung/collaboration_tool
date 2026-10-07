@@ -1,14 +1,11 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use loco_rs::{
-    prelude::*,
-    validation::{ModelValidationErrors, ValidationError},
-};
+use loco_rs::prelude::*;
 use sea_orm::sea_query::{ExprTrait, Func};
 
 pub use super::_entities::memberships::{ActiveModel, Column, Entity, Model};
 use super::{
-    conversation_members, conversations, organisations,
+    conversation_members, conversations, field_error, organisations,
     users::{self, RegisterParams},
 };
 
@@ -217,6 +214,24 @@ impl Model {
         Ok(membership.update(db).await?)
     }
 
+    /// Whether `user_id` is an approved member of the organisation.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn is_active_member<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<bool> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::Status.eq(status::ACTIVE))
+            .one(db)
+            .await?
+            .is_some())
+    }
+
     #[must_use]
     pub fn is_active(&self) -> bool {
         self.status == status::ACTIVE
@@ -226,20 +241,6 @@ impl Model {
     pub fn is_pending(&self) -> bool {
         self.status == status::PENDING
     }
-}
-
-/// A validation error for one field, shaped like the ones `Validatable` produces.
-fn field_error(field: &str, message: &str) -> ModelError {
-    ModelError::Validation(ModelValidationErrors {
-        errors: BTreeMap::from([(
-            field.to_string(),
-            vec![ValidationError {
-                code: "taken".to_string(),
-                message: Some(message.to_string()),
-                params: HashMap::new(),
-            }],
-        )]),
-    })
 }
 
 impl loco_rs::prelude::TenantEntity for Entity {

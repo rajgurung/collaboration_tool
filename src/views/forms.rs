@@ -47,3 +47,27 @@ fn from_validation(errors: &ModelValidationErrors) -> FieldErrors {
         })
         .collect()
 }
+
+/// Re-renders a form with its errors (422). `HX-Retarget`/`HX-Reswap` make HTMX
+/// replace the form itself instead of the element a successful submit updates.
+///
+/// # Errors
+/// When the template fails to render.
+pub fn invalid_form(
+    v: &loco_rs::prelude::TeraView,
+    template: &str,
+    form_id: &str,
+    data: serde_json::Value,
+) -> loco_rs::Result<loco_rs::prelude::Response> {
+    loco_rs::prelude::format::render()
+        .status(422)
+        .header("HX-Retarget", format!("#{form_id}"))
+        .header("HX-Reswap", "outerHTML")
+        .view(v, template, data)
+}
+
+/// An `HX-Trigger` header value that shows a toast in the browser.
+#[must_use]
+pub fn toast(kind: &str, message: &str) -> String {
+    serde_json::json!({ "toast": { "kind": kind, "message": message } }).to_string()
+}

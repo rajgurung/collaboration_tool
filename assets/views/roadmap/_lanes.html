@@ -1,0 +1,33 @@
+<div id="roadmap-lanes" class="grid gap-4 lg:grid-cols-3">
+  {% for lane in lanes %}
+  <section class="roadmap-lane" aria-label="{{ lane.key }}">
+    <div class="mb-5 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="lane-number">0{{ lane.number }}</span>
+        <div><span class="block text-lg font-medium capitalize">{{ lane.key }}</span><span class="text-xs text-white/35">{{ lane.subtitle }}</span></div>
+      </div>
+      <span class="text-sm text-white/30">{{ lane.cards | length }}</span>
+    </div>
+    <div class="space-y-3">
+      {% for card in lane.cards %}
+      <article class="roadmap-card cursor-pointer" style="--accent: {{ card.accent }}" role="button" tabindex="0" aria-label="Edit {{ card.name }}"
+               hx-get="/roadmap/projects/{{ card.id }}/edit" hx-target="#project-dialog-body" hx-trigger="click, keyup[key=='Enter']"
+               hx-on::after-request="document.getElementById('project-dialog').showModal()">
+        <div class="mb-5 flex items-center justify-between">
+          <span class="rounded-full px-2.5 py-1 text-[11px] uppercase tracking-[.13em]" style="background: {{ card.accent }}15; color: {{ card.accent }}">{{ card.status }}</span>
+          {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} small={true}/>}}{% else %}<span class="text-xs text-white/30">Unassigned</span>{% endif %}
+        </div>
+        <h3 class="text-xl font-medium">{{ card.name }}</h3>
+        <p class="mt-2 min-h-12 text-sm leading-6 text-white/45">{{ card.summary }}</p>
+        <div class="mt-6 flex items-center gap-3">
+          <div class="progress-track flex-1" style="--bar: {{ card.accent }}"><div class="progress-fill" style="width: {{ card.progress }}%"></div></div>
+          <span class="text-xs text-white/40">{{ card.progress }}%</span>
+        </div>
+      </article>
+      {% else %}
+      <p class="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-white/30">Nothing here yet.</p>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>

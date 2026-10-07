@@ -1,0 +1,56 @@
+<form id="project-form" method="post" data-close-on-success
+      action="{% if project_id %}/roadmap/projects/{{ project_id }}{% else %}/roadmap/projects{% endif %}"
+      hx-post="{% if project_id %}/roadmap/projects/{{ project_id }}{% else %}/roadmap/projects{% endif %}"
+      hx-target="#roadmap-lanes" hx-swap="outerHTML" class="grid gap-5">
+  <div>
+    <h2 class="modal-title">{% if project_id %}Edit project{% else %}New project{% endif %}</h2>
+    <p class="modal-description">A workstream on the roadmap, with one owner.</p>
+  </div>
+  {{<text_field name="name" label="Name" value={form.name} error={errors.name | default(value="")}/>}}
+  <div class="grid gap-4 sm:grid-cols-2">
+    <label class="field">
+      <span class="field-label">Lane</span>
+      <select name="lane" class="input">
+        {% for lane in lanes %}<option value="{{ lane }}" {% if form.lane == lane %}selected{% endif %}>{{ lane | capitalize }}</option>{% endfor %}
+      </select>
+      {% if errors.lane %}<span class="field-error">{{ errors.lane }}</span>{% endif %}
+    </label>
+    {{<text_field name="status" label="Status" value={form.status} error={errors.status | default(value="")}/>}}
+  </div>
+  <div class="grid gap-4 sm:grid-cols-2">
+    <label class="field">
+      <span class="field-label">Owner</span>
+      <select name="owner_id" class="input">
+        <option value="">Unassigned</option>
+        {% for person in team %}<option value="{{ person.id }}" {% if form.owner_id == person.id | str %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
+      </select>
+      {% if errors.owner_id %}<span class="field-error">{{ errors.owner_id }}</span>{% endif %}
+    </label>
+    <label class="field">
+      <span class="field-label">Progress (%)</span>
+      <input class="input" type="number" name="progress" min="0" max="100" step="1" value="{{ form.progress }}" required>
+      {% if errors.progress %}<span class="field-error">{{ errors.progress }}</span>{% endif %}
+    </label>
+  </div>
+  <fieldset class="field">
+    <legend class="field-label mb-2">Colour</legend>
+    <div class="flex flex-wrap gap-3">
+      {% for accent in accents %}
+      <label class="cursor-pointer">
+        <input type="radio" name="accent" value="{{ accent }}" class="peer sr-only" {% if form.accent == accent %}checked{% endif %}>
+        <span class="block h-8 w-8 rounded-full ring-offset-2 ring-offset-[#15151d] peer-checked:ring-2 peer-checked:ring-white peer-focus-visible:ring-2 peer-focus-visible:ring-white/60" style="background: {{ accent }}" title="{{ accent }}"></span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if errors.accent %}<span class="field-error">{{ errors.accent }}</span>{% endif %}
+  </fieldset>
+  <label class="field">
+    <span class="field-label">Summary</span>
+    <textarea name="summary" class="input" rows="3">{{ form.summary }}</textarea>
+    {% if errors.summary %}<span class="field-error">{{ errors.summary }}</span>{% endif %}
+  </label>
+  <div class="flex justify-end gap-2">
+    <button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>
+    <button type="submit" class="btn btn-primary">{% if project_id %}Save project{% else %}Add project{% endif %}</button>
+  </div>
+</form>
