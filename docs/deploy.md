@@ -48,6 +48,20 @@ The app ships as one Docker image (`Dockerfile`). Railway builds it from the rep
 
 The app refuses to start if a required variable is missing.
 
+## Custom domain (Cloudflare DNS)
+
+Live at https://collab.rajgurung.me (Railway project `collaboration-tool`, service `web`).
+
+1. `railway domain collab.rajgurung.me --service web` prints the CNAME target.
+2. In Cloudflare add `CNAME collab -> <target>` as **DNS only** (grey cloud).
+3. Railway also needs a TXT record `_railway-verify.<subdomain>` that the CLI does not print.
+   Get it from the dashboard (service → Settings → Networking) or Railway's API
+   (`customDomain { status { verificationDnsHost verificationToken } }`).
+4. Wait for the certificate (a few minutes), then set `APP_URL` to the new address.
+   After that, form posts from the old `*.up.railway.app` address are rejected.
+
+Wrangler cannot manage DNS records; use the Cloudflare API, dashboard or the `cf` CLI.
+
 ## Notes
 
 - **One instance.** Live chat keeps WebSocket subscribers in memory, so run a single replica.
