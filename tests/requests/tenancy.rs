@@ -161,7 +161,10 @@ async fn org_a_cannot_reach_org_b() {
             assert_eq!(res.status_code(), 200, "{page}");
             let body = res.text();
             assert!(!body.contains(SECRET), "{page} leaks Globex data");
-            assert!(!body.contains("gina"), "{page} leaks a Globex member");
+            // As a name or an email, not a substring: "Argentina" is a time zone.
+            for gina in [r#""gina""#, ">gina<", "gina@"] {
+                assert!(!body.contains(gina), "{page} leaks a Globex member");
+            }
         }
         let res = request
             .get(&format!("/chat?c={}", globex.general.id))

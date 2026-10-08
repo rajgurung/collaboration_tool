@@ -33,6 +33,12 @@ impl CurrentMember {
         self.role == role::OWNER || self.role == role::ADMIN
     }
 
+    /// The organisation's time zone, for showing times.
+    #[must_use]
+    pub fn tz(&self) -> chrono_tz::Tz {
+        crate::views::time::zone(&self.org.timezone)
+    }
+
     #[must_use]
     pub fn is_owner(&self) -> bool {
         self.role == role::OWNER

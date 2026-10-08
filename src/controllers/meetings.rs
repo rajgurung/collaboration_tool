@@ -12,6 +12,7 @@ use crate::{
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
         layout::{avatar_color, Person},
+        time,
     },
 };
 
@@ -78,7 +79,7 @@ async fn new(
 ) -> Result<Response> {
     let values = serde_json::json!({
         "title": "Team weekly",
-        "held_on": chrono::Local::now().date_naive().format("%Y-%m-%d").to_string(),
+        "held_on": time::today(member.tz()).format("%Y-%m-%d").to_string(),
         "summary": "",
         "decisions": "",
         "attendee_ids": [member.user.id],

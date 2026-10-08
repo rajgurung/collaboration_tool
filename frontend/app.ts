@@ -111,15 +111,6 @@ document.body.addEventListener("htmx:wsAfterSend", () => {
   document.querySelectorAll<HTMLTextAreaElement>("textarea[data-autogrow]").forEach(autogrow);
 });
 
-// Greeting and date in the viewer's own time zone (the server runs in UTC).
-document.querySelectorAll<HTMLElement>("[data-greeting]").forEach((el) => {
-  const hour = new Date().getHours();
-  const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  el.textContent = `${part}, ${el.dataset.greeting}`;
-});
-document.querySelectorAll<HTMLElement>("[data-local-date]").forEach((el) => {
-  el.textContent = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
-});
 
 // <button data-toggle="#id"> shows or hides an element and focuses its first input.
 document.addEventListener("click", (event) => {

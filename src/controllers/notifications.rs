@@ -20,7 +20,7 @@ use crate::{
         notifications::{self, kind, Notice},
         projects, task_assignees, task_notes, tasks,
     },
-    views::layout::avatar_color,
+    views::{layout::avatar_color, time},
 };
 
 const SHOWN: u64 = 50;
@@ -41,15 +41,15 @@ struct NotificationView {
     unread: bool,
 }
 
-/// "just now", "5m", "3h", "2d", then the date.
-fn ago(at: DateTime<FixedOffset>, now: DateTime<Utc>) -> String {
+/// "just now", "5m", "3h", "2d", then the date in the organisation's zone.
+fn ago(at: DateTime<FixedOffset>, now: DateTime<Utc>, tz: chrono_tz::Tz) -> String {
     let minutes = (now - at.with_timezone(&Utc)).num_minutes();
     match minutes {
         ..1 => "just now".to_string(),
         1..60 => format!("{minutes}m"),
         60..1440 => format!("{}h", minutes / 60),
         1440..10080 => format!("{}d", minutes / 1440),
-        _ => at.format("%-d %b").to_string(),
+        _ => time::local(at, tz).format("%-d %b").to_string(),
     }
 }
 
@@ -317,7 +317,7 @@ async fn index(
                     actor,
                     headline,
                     excerpt,
-                    at: ago(n.created_at, now),
+                    at: ago(n.created_at, now, member.tz()),
                     unread: n.read_at.is_none(),
                 }
             })

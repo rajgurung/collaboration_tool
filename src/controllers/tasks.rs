@@ -19,6 +19,7 @@ use crate::{
     views::{
         forms::{field_errors, invalid_form, FieldErrors},
         layout::{avatar_color, Person},
+        time,
     },
 };
 
@@ -133,12 +134,16 @@ struct Workspace {
     tasks: Vec<tasks::Model>,
     assignees: HashMap<i64, Vec<i64>>,
     notes: HashMap<i64, usize>,
+    /// Today where the organisation is, for "overdue".
+    today: chrono::NaiveDate,
 }
 
 impl Workspace {
-    async fn load(ctx: &AppContext, org_id: i64) -> Result<Self> {
+    async fn load(ctx: &AppContext, member: &CurrentMember) -> Result<Self> {
+        let org_id = member.org.id;
         let team_list = memberships::Model::team(&ctx.db, org_id).await?;
         Ok(Self {
+            today: time::today(member.tz()),
             team_order: team_list.iter().map(|(id, _)| *id).collect(),
             team: team_list.into_iter().collect(),
             projects: projects::Model::list_for_org(&ctx.db, org_id).await?,
@@ -165,7 +170,7 @@ impl Workspace {
     fn row(&self, t: &tasks::Model) -> Row {
         let project = self.projects.iter().find(|p| Some(p.id) == t.project_id);
         let project_name = project.map(|p| p.name.clone()).unwrap_or_default();
-        let today = chrono::Utc::now().date_naive();
+        let today = self.today;
         let due = due_label(t.due_on);
         Row {
             id: t.id,
@@ -421,7 +426,7 @@ async fn index(
     ViewEngine(v): ViewEngine<TeraView>,
     Query(query): Query<ListQuery>,
 ) -> Result<Response> {
-    let ws = Workspace::load(&ctx, member.org.id).await?;
+    let ws = Workspace::load(&ctx, &member).await?;
     let views = saved_views::Model::list_for(&ctx.db, member.org.id, member.user.id).await?;
     // A plain visit to Tasks opens your default view, if you starred one.
     let mut query = query;
@@ -475,7 +480,7 @@ async fn list_partial(
     ViewEngine(v): ViewEngine<TeraView>,
     Query(query): Query<ListQuery>,
 ) -> Result<Response> {
-    let ws = Workspace::load(&ctx, member.org.id).await?;
+    let ws = Workspace::load(&ctx, &member).await?;
     let filter = pick(query.filter.as_deref(), &FILTERS, "mine");
     format::render().view(
         &v,
@@ -492,7 +497,7 @@ async fn board_partial(
     ViewEngine(v): ViewEngine<TeraView>,
     Query(query): Query<ListQuery>,
 ) -> Result<Response> {
-    let ws = Workspace::load(&ctx, member.org.id).await?;
+    let ws = Workspace::load(&ctx, &member).await?;
     let scope = pick(query.scope.as_deref(), &SCOPES, "all");
     let group = pick(query.group.as_deref(), &GROUPS, "project");
     let view = layout(query.view.as_deref());
@@ -721,7 +726,7 @@ async fn sheet_data(
                 "color": avatar_color(&author),
                 "author": author,
                 "parts": mention_parts(&n.body, &team_list),
-                "at": n.created_at.format("%a %-d %b, %H:%M").to_string(),
+                "at": time::local(n.created_at, member.tz()).format("%a %-d %b, %H:%M").to_string(),
             })
         })
         .collect();

@@ -13,6 +13,17 @@
     </div>
   </section>
 
+  <section class="card flex flex-col gap-2 p-4">
+    <h2 class="m-0 text-[17px] font-semibold">Time zone</h2>
+    <p class="meta m-0 text-sm">Everyone in {{ org.name }} sees times in this zone. It's {{ local_now }} there now.</p>
+    <form method="post" action="/members/timezone" hx-post="/members/timezone" class="flex gap-2">
+      <select name="timezone" class="input" aria-label="Time zone">
+        {% for tz in timezones %}<option value="{{ tz }}" {% if tz == timezone %}selected{% endif %}>{{ tz | replace(from="_", to=" ") }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="btn btn-secondary shrink-0">Save</button>
+    </form>
+  </section>
+
   <section class="flex flex-col gap-2">
     <h2 class="section-label">Waiting for approval · {{ pending | length }}</h2>
     <div class="list" id="pending-list">

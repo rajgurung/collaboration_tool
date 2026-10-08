@@ -18,7 +18,9 @@ use crate::{
     models::{
         conversation_members, conversations,
         messages::{self, MessageParams},
+        organisations,
     },
+    views::time,
 };
 
 /// Who is on this socket and which conversation it follows.
@@ -141,10 +143,11 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
         .get::<ChatHub>()
         .ok_or_else(|| Error::string("chat hub missing"))?;
     let names = names(ctx, org_id).await?;
+    let org = organisations::Model::find_by_id(&ctx.db, org_id).await?;
     hub.publish(ChatEvent {
         conversation_id: message.conversation_id,
         author_id: message.user_id,
-        message: MessageView::new(message, &names, 0),
+        message: MessageView::new(message, &names, 0, time::zone(&org.timezone)),
     });
     Ok(())
 }

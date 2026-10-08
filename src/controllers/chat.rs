@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use axum::http::HeaderMap;
 use chrono::{DateTime, FixedOffset, Utc};
+use chrono_tz::Tz;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +18,7 @@ use crate::{
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
         layout::{avatar_color, Person},
+        time,
     },
 };
 
@@ -69,7 +71,12 @@ pub struct MessageView {
 
 impl MessageView {
     #[must_use]
-    pub fn new(message: &messages::Model, names: &HashMap<i64, String>, viewer_id: i64) -> Self {
+    pub fn new(
+        message: &messages::Model,
+        names: &HashMap<i64, String>,
+        viewer_id: i64,
+        tz: Tz,
+    ) -> Self {
         let author = names
             .get(&message.user_id)
             .cloned()
@@ -87,7 +94,9 @@ impl MessageView {
                     .collect::<Vec<_>>(),
             ),
             body: message.body.clone(),
-            at: message.created_at.format("%H:%M").to_string(),
+            at: time::local(message.created_at, tz)
+                .format("%H:%M")
+                .to_string(),
             own: message.user_id == viewer_id,
             start: true,
             show_time: true,
@@ -100,10 +109,11 @@ fn grouped(
     list: &[messages::Model],
     names: &HashMap<i64, String>,
     viewer_id: i64,
+    tz: Tz,
 ) -> Vec<MessageView> {
     let mut views: Vec<MessageView> = list
         .iter()
-        .map(|m| MessageView::new(m, names, viewer_id))
+        .map(|m| MessageView::new(m, names, viewer_id, tz))
         .collect();
     for i in 0..views.len() {
         let same_as_prev = i > 0 && views[i - 1].author_id == views[i].author_id;
@@ -140,10 +150,11 @@ fn label(
     }
 }
 
-/// "14:05" today, "Mon" this week, otherwise "3 Oct".
-fn when(at: &DateTime<FixedOffset>) -> String {
+/// "14:05" today, "Mon" this week, otherwise "3 Oct", in the organisation's zone.
+fn when(at: &DateTime<FixedOffset>, tz: Tz) -> String {
     let age = Utc::now().signed_duration_since(at.with_timezone(&Utc));
-    if at.date_naive() == Utc::now().date_naive() {
+    let at = time::local(*at, tz);
+    if at.date_naive() == time::today(tz) {
         at.format("%H:%M").to_string()
     } else if age.num_days() < 6 {
         at.format("%a").to_string()
@@ -190,7 +201,9 @@ pub async fn list_items(
                         format!("{who}: {body}")
                     }
                 }),
-                time: last.map(|m| when(&m.created_at)).unwrap_or_default(),
+                time: last
+                    .map(|m| when(&m.created_at, member.tz()))
+                    .unwrap_or_default(),
                 unread: unread.get(&c.id).copied().unwrap_or(0),
                 label,
             },
@@ -247,6 +260,7 @@ async fn show(
         &messages::Model::recent(&ctx.db, &conversation).await?,
         &names,
         me,
+        member.tz(),
     );
     let label = label(&conversation, &members, &names, me);
     format::render().view(
@@ -327,7 +341,7 @@ async fn send(
         )),
         Ok(message) => {
             let names = names(&ctx, member.org.id).await?;
-            let view = MessageView::new(&message, &names, member.user.id);
+            let view = MessageView::new(&message, &names, member.user.id, member.tz());
             format::render().view(&v, "chat/_message.html", data!({ "message": view }))
         }
         Err(err) => {
@@ -359,6 +373,7 @@ async fn feed(
         &messages::Model::recent(&ctx.db, &conversation).await?,
         &names,
         member.user.id,
+        member.tz(),
     );
     format::render().view(&v, "chat/_feed.html", data!({ "messages": feed }))
 }
