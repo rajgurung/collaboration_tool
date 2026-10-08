@@ -1,6 +1,8 @@
 //! Live chat. The browser opens `/chat/{id}/ws` with the HTMX ws extension,
 //! sends messages as JSON (`{"body": "...", "HEADERS": {...}}`) and receives
 //! rendered message HTML that HTMX appends to `#chat-feed`.
+use std::collections::HashMap;
+
 use axum::{
     extract::ws::{rejection::WebSocketUpgradeRejection, Message, WebSocket, WebSocketUpgrade},
     http::{header::ORIGIN, HeaderMap, StatusCode},
@@ -76,6 +78,8 @@ async fn connect(
 
 async fn run(mut socket: WebSocket, session: Session) {
     let mut events = session.hub.subscribe();
+    // Reader counts already sent, per message, so a late event cannot lower them.
+    let mut sent_counts: HashMap<i64, usize> = HashMap::new();
     loop {
         tokio::select! {
             incoming = socket.recv() => match incoming {
@@ -105,7 +109,10 @@ async fn run(mut socket: WebSocket, session: Session) {
                     }
                 }
                 Ok(event) => {
-                    let updates = receipts_for(&event, session.conversation_id, session.user_id);
+                    let updates = not_older(
+                        receipts_for(&event, session.conversation_id, session.user_id),
+                        &mut sent_counts,
+                    );
                     if updates.is_empty() {
                         continue;
                     }
@@ -129,7 +136,7 @@ async fn run(mut socket: WebSocket, session: Session) {
 /// covers nothing new from others, so it skips the receipt work.
 async fn read_on_socket(session: &Session, author_id: i64) -> Result<()> {
     if author_id == session.user_id {
-        conversation_members::Model::mark_read(
+        conversation_members::Model::touch_read(
             &session.ctx.db,
             session.org_id,
             session.conversation_id,
@@ -257,6 +264,26 @@ fn receipts_for(event: &ChatEvent, conversation_id: i64, viewer_id: i64) -> Vec<
     }
 }
 
+/// Drops updates with fewer readers than this socket already showed. Readers
+/// only grow, so a lower count is a read event that arrived out of order.
+fn not_older<'a>(
+    updates: Vec<&'a ReceiptUpdate>,
+    sent_counts: &mut HashMap<i64, usize>,
+) -> Vec<&'a ReceiptUpdate> {
+    updates
+        .into_iter()
+        .filter(|u| {
+            let count = u.receipt.as_ref().map_or(0, |r| r.readers.len());
+            let last = sent_counts.entry(u.message_id).or_insert(0);
+            if count < *last {
+                return false;
+            }
+            *last = count;
+            true
+        })
+        .collect()
+}
+
 /// Receipts as out-of-band swaps of each message's `#receipt-{id}` slot.
 fn render_receipts(session: &Session, updates: &[&ReceiptUpdate]) -> Result<String> {
     let mut html = String::new();
@@ -278,9 +305,8 @@ pub fn routes() -> Routes {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
+    use crate::controllers::chat::Receipt;
 
     fn update(message_id: i64, author_id: i64) -> ReceiptUpdate {
         ReceiptUpdate {
@@ -306,6 +332,38 @@ mod tests {
             receipts_for(&event, 8, 1).is_empty(),
             "another conversation"
         );
+    }
+
+    fn read_by(message_id: i64, readers: &[&str]) -> ReceiptUpdate {
+        ReceiptUpdate {
+            message_id,
+            author_id: 1,
+            receipt: Some(Receipt {
+                text: String::new(),
+                readers: readers.iter().map(ToString::to_string).collect(),
+                all: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn late_read_events_never_lower_a_count() {
+        let mut sent = HashMap::new();
+        let everyone = read_by(10, &["bob", "carol"]);
+        let other = read_by(11, &["bob"]);
+        assert_eq!(not_older(vec![&everyone, &other], &mut sent).len(), 2);
+
+        // Bob's event arrives after carol's: message 10 keeps "everyone".
+        let late = read_by(10, &["bob"]);
+        let newer = read_by(11, &["bob", "carol"]);
+        let kept: Vec<i64> = not_older(vec![&late, &newer], &mut sent)
+            .iter()
+            .map(|u| u.message_id)
+            .collect();
+        assert_eq!(kept, vec![11]);
+
+        // The same count again is still sent.
+        assert_eq!(not_older(vec![&everyone], &mut sent).len(), 1);
     }
 
     #[test]

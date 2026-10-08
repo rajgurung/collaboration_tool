@@ -52,6 +52,13 @@ impl Model {
     }
 }
 
+/// The new `last_read_at`: now by the database clock, but never earlier than
+/// before. `statement_timestamp()` is taken after any lock wait, unlike
+/// `CURRENT_TIMESTAMP`, and `GREATEST` ignores a NULL `last_read_at`.
+fn read_now() -> Expr {
+    Expr::cust("GREATEST(last_read_at, statement_timestamp())")
+}
+
 impl Model {
     /// Records that `user_id` has seen everything in the conversation up to now,
     /// by the database clock so it compares cleanly with `messages.created_at`.
@@ -74,10 +81,12 @@ impl Model {
             .one(&txn)
             .await?
         else {
+            // Not a member: nothing was written, so the transaction just rolls back.
+            txn.rollback().await?;
             return Ok(None);
         };
         let after = Entity::update_many()
-            .col_expr(Column::LastReadAt, Expr::current_timestamp())
+            .col_expr(Column::LastReadAt, read_now())
             .filter(Column::Id.eq(before.id))
             .exec_with_returning(&txn)
             .await?;
@@ -90,6 +99,27 @@ impl Model {
                 from: before.last_read_at,
                 to,
             }))
+    }
+
+    /// Records a read with one plain UPDATE and no span, for when the caller
+    /// knows nothing new from others was read (the viewer's own message).
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn touch_read<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        conversation_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        Entity::update_many()
+            .col_expr(Column::LastReadAt, read_now())
+            .filter(Column::ConversationId.eq(conversation_id))
+            .filter(Column::UserId.eq(user_id))
+            .in_tenant(org_id)
+            .exec(db)
+            .await?;
+        Ok(())
     }
 
     /// When each member of a conversation last read it.

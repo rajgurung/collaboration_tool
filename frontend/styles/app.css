@@ -402,7 +402,9 @@
   .msg-receipt-all svg { color: var(--accent); }
   .msg-receipt-names { max-width: 240px; text-align: right; }
   /* Only the last message in a run of your own shows its receipt. */
-  .msg-own:has(+ .msg-own) .msg-receipt, .msg-own:has(+ .msg-own) .msg-meta:not(:has(.msg-time)) { display: none; }
+  /* Live messages land after .chat-empty, so a run can straddle it. */
+  .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-receipt,
+  .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-meta:not(:has(.msg-time)) { display: none; }
   .composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
   .composer textarea { flex: 1; min-height: 44px; max-height: 140px; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 22px; padding: 11px 16px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
   .composer textarea:focus { border-color: var(--accent); }
