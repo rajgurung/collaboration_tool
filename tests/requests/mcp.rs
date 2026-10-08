@@ -233,6 +233,16 @@ async fn browsers_from_other_sites_are_refused_and_no_origin_is_fine() {
             .await;
         assert_eq!(res.status_code(), 403);
 
+        // In development and test, rmcp also checks Host (DNS rebinding).
+        let res = request
+            .post("/mcp")
+            .add_header("authorization", format!("Bearer {token}"))
+            .add_header("accept", "application/json, text/event-stream")
+            .add_header("host", "evil.example")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))
+            .await;
+        assert_eq!(res.status_code(), 403);
+
         let res = rpc(&request, &token, "tools/list", json!({})).await;
         assert_eq!(res.status, 200);
         let row = access_tokens::Entity::find()
