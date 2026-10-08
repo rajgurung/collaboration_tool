@@ -78,7 +78,6 @@ fn renders_read_receipts_as_live_swaps() {
                     "readers": readers,
                     "shown": readers[..3],
                     "more": 2,
-                    "all": false,
                 } },
                 "oob": true,
             }),
@@ -110,16 +109,17 @@ fn renders_read_receipts_as_live_swaps() {
         "{read}"
     );
     assert!(read.contains(r#"aria-expanded="false""#), "{read}");
+    assert!(!read.contains("msg-receipt-dm"), "{read}");
 
     let dm = engine
         .render(
             "chat/_receipt.html",
             serde_json::json!({ "message": { "id": 43, "receipt": {
-                "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0, "all": true,
+                "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0,
             } } }),
         )
         .expect("a DM receipt should render");
-    assert!(dm.contains("msg-receipt msg-receipt-all"), "{dm}");
+    assert!(dm.contains(r#"<span class="msg-receipt-dm">"#), "{dm}");
     assert!(dm.contains("</svg>Read</span>"), "{dm}");
     assert!(!dm.contains("avatar"), "{dm}");
 
