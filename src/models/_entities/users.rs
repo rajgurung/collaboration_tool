@@ -29,6 +29,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::access_tokens::Entity")]
+    AccessTokens,
     #[sea_orm(has_many = "super::conversation_members::Entity")]
     ConversationMembers,
     #[sea_orm(has_many = "super::conversations::Entity")]
@@ -39,6 +41,8 @@ pub enum Relation {
     Meetings,
     #[sea_orm(has_many = "super::messages::Entity")]
     Messages,
+    #[sea_orm(has_many = "super::oauth_codes::Entity")]
+    OauthCodes,
     #[sea_orm(has_many = "super::organisations::Entity")]
     Organisations,
     #[sea_orm(has_many = "super::projects::Entity")]
@@ -49,6 +53,12 @@ pub enum Relation {
     TaskAssignees,
     #[sea_orm(has_many = "super::task_notes::Entity")]
     TaskNotes,
+}
+
+impl Related<super::access_tokens::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AccessTokens.def()
+    }
 }
 
 impl Related<super::conversation_members::Entity> for Entity {
@@ -78,6 +88,12 @@ impl Related<super::meetings::Entity> for Entity {
 impl Related<super::messages::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Messages.def()
+    }
+}
+
+impl Related<super::oauth_codes::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::OauthCodes.def()
     }
 }
 

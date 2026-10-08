@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod access_tokens;
 pub mod conversation_members;
 pub mod conversations;
 pub mod meeting_attendees;
@@ -9,6 +10,8 @@ pub mod meetings;
 pub mod memberships;
 pub mod messages;
 pub mod notifications;
+pub mod oauth_clients;
+pub mod oauth_codes;
 pub mod organisations;
 pub mod projects;
 pub mod saved_views;

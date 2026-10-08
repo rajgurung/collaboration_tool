@@ -36,4 +36,10 @@ impl Settings {
         settings.app_url = settings.app_url.trim_end_matches('/').to_string();
         Ok(settings)
     }
+
+    /// The MCP endpoint, which is also the OAuth resource Claude's tokens are for.
+    #[must_use]
+    pub fn mcp_url(&self) -> String {
+        format!("{}/mcp", self.app_url)
+    }
 }

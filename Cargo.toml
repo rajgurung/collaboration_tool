@@ -57,6 +57,20 @@ futures-util = { version = "0.3", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Same Tera 2 Loco uses; renders mailer templates for the HTTPS email path.
 tera = "2.4"
+# MCP server for the Claude connector (official Rust SDK).
+rmcp = { version = "3.5", default-features = false, features = [
+  "server",
+  "macros",
+  "transport-streamable-http-server",
+] }
+# Same schemars rmcp uses; describes MCP tool inputs.
+schemars = "1"
+# Opaque tokens for the Claude connector: random bytes, base64url, SHA-256 hashes.
+sha2 = "0.10"
+rand = "0.9"
+base64 = "0.22"
+# Parses OAuth redirect URIs so they are matched exactly, never by prefix.
+url = "2"
 
 [[bin]]
 name = "collab-cli"

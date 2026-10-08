@@ -19,6 +19,9 @@ const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$ETQBx4rTgNAZhSaeYZKOZg$
 pub struct LoginForm {
     pub email: String,
     pub password: String,
+    /// Where to go after signing in; see [`safe_next`].
+    #[serde(default)]
+    pub next: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +38,18 @@ pub struct ResetForm {
 #[derive(Debug, Deserialize)]
 pub struct LoginQuery {
     pub reset: Option<String>,
+    pub next: Option<String>,
+}
+
+/// Only the Claude "Allow access" page sends people to log in and back, so
+/// `next` must be that page. Anything else (other paths, `//host`, absolute
+/// URLs, backslashes or line breaks, raw or percent-encoded) is dropped.
+#[must_use]
+pub fn safe_next(next: &str) -> Option<&str> {
+    let lower = next.to_ascii_lowercase();
+    let sneaky = next.contains(['\\', '\r', '\n'])
+        || ["%5c", "%0d", "%0a"].iter().any(|s| lower.contains(s));
+    (next.starts_with("/oauth/authorize?") && !sneaky).then_some(next)
 }
 
 #[debug_handler]
@@ -45,10 +60,11 @@ async fn login_page(
     let notice = query
         .reset
         .map(|_| "Your password has been changed. Sign in with the new one.");
+    let next = query.next.as_deref().and_then(safe_next);
     format::render().view(
         &v,
         "auth/login.html",
-        data!({ "email": "", "notice": notice }),
+        data!({ "email": "", "notice": notice, "next": next }),
     )
 }
 
@@ -60,22 +76,26 @@ async fn login(
 ) -> Result<Response> {
     let user = match users::Model::find_by_email(&ctx.db, &form.email).await {
         Ok(user) if user.verify_password(&form.password) => user,
-        Ok(_) => return login_failed(&v, &form.email),
+        Ok(_) => return login_failed(&v, &form),
         Err(_) => {
             let _ = hash::verify_password(&form.password, DUMMY_HASH);
-            return login_failed(&v, &form.email);
+            return login_failed(&v, &form);
         }
     };
     format::render()
         .cookies(&[session_cookie(&ctx, &user)?])?
-        .redirect("/")
+        .redirect(safe_next(&form.next).unwrap_or("/"))
 }
 
-fn login_failed(v: &TeraView, email: &str) -> Result<Response> {
+fn login_failed(v: &TeraView, form: &LoginForm) -> Result<Response> {
     format::render().status(422).view(
         v,
         "auth/login.html",
-        data!({ "email": email, "error": "Email or password is incorrect." }),
+        data!({
+            "email": form.email,
+            "next": safe_next(&form.next),
+            "error": "Email or password is incorrect.",
+        }),
     )
 }
 
@@ -188,4 +208,32 @@ pub fn routes() -> Routes {
         .add("/forgot", post(forgot))
         .add("/reset/{token}", get(reset_page))
         .add("/reset/{token}", post(reset))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_next;
+
+    #[test]
+    fn next_only_returns_to_the_allow_access_page() {
+        assert_eq!(
+            safe_next("/oauth/authorize?client_id=a&state=b"),
+            Some("/oauth/authorize?client_id=a&state=b")
+        );
+        for bad in [
+            "",
+            "/",
+            "/dashboard",
+            "//evil.example",
+            "/\\evil.example",
+            "/%5Cevil.example",
+            "https://evil.example/oauth/authorize?x=1",
+            "/oauth/authorize",
+            "/oauth/authorizeX?x=1",
+            "/oauth/authorize?x=%0d%0aSet-Cookie:a=b",
+            "/oauth/authorize?x=\\y",
+        ] {
+            assert_eq!(safe_next(bad), None, "{bad}");
+        }
+    }
 }

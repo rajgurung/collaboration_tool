@@ -52,7 +52,7 @@ async fn super_admin_reaches_admin_and_their_own_org() {
     .await;
 }
 
-async fn super_admin_cookie(
+pub(super) async fn super_admin_cookie(
     request: &loco_rs::TestServer,
     ctx: &loco_rs::app::AppContext,
 ) -> (axum::http::HeaderName, axum::http::HeaderValue) {
