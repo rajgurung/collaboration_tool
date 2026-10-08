@@ -253,7 +253,16 @@ fn list_data(ws: &Workspace, me: i64, filter: &str, q: &str) -> serde_json::Valu
 }
 
 /// The board: status columns, with one swimlane per project, person, or none.
-fn board_data(ws: &Workspace, me: i64, scope: &str, group: &str, q: &str) -> serde_json::Value {
+/// The board's lanes and toolbar state. `layout` is "board" or "list"; the
+/// desktop list shows the same lanes as rows.
+fn board_data(
+    ws: &Workspace,
+    me: i64,
+    scope: &str,
+    group: &str,
+    q: &str,
+    layout: &str,
+) -> serde_json::Value {
     let needle = q.trim().to_lowercase();
     let rows: Vec<Row> = ws
         .tasks
@@ -391,7 +400,16 @@ fn board_data(ws: &Workspace, me: i64, scope: &str, group: &str, q: &str) -> ser
         "scopes": options(&SCOPES, scope),
         "groups": options(&GROUPS, group),
         "q": q,
+        "layout": layout,
     })
+}
+
+fn layout(view: Option<&str>) -> &'static str {
+    if view == Some("list") {
+        "list"
+    } else {
+        "board"
+    }
 }
 
 #[debug_handler]
@@ -405,13 +423,10 @@ async fn index(
     let filter = pick(query.filter.as_deref(), &FILTERS, "mine");
     let scope = pick(query.scope.as_deref(), &SCOPES, "all");
     let group = pick(query.group.as_deref(), &GROUPS, "project");
+    let view = layout(query.view.as_deref());
     let mut data = list_data(&ws, member.user.id, filter, &query.q);
-    data["board"] = board_data(&ws, member.user.id, scope, group, &query.q);
-    data["view"] = serde_json::json!(if query.view.as_deref() == Some("list") {
-        "list"
-    } else {
-        "board"
-    });
+    data["board"] = board_data(&ws, member.user.id, scope, group, &query.q, view);
+    data["view"] = serde_json::json!(view);
     data["open_new"] = serde_json::json!(query.new.is_some());
     data["open_task"] = serde_json::json!(query.open);
     format::render().view(&v, "tasks/index.html", member.page("tasks", data))
@@ -434,7 +449,7 @@ async fn list_partial(
     )
 }
 
-/// The board on its own, for HTMX refreshes.
+/// The board (or the desktop list, with `view=list`) on its own, for HTMX refreshes.
 #[debug_handler]
 async fn board_partial(
     member: CurrentMember,
@@ -445,9 +460,16 @@ async fn board_partial(
     let ws = Workspace::load(&ctx, member.org.id).await?;
     let scope = pick(query.scope.as_deref(), &SCOPES, "all");
     let group = pick(query.group.as_deref(), &GROUPS, "project");
-    let data =
-        serde_json::json!({ "board": board_data(&ws, member.user.id, scope, group, &query.q) });
-    format::render().view(&v, "tasks/_board.html", data)
+    let view = layout(query.view.as_deref());
+    let data = serde_json::json!({
+        "board": board_data(&ws, member.user.id, scope, group, &query.q, view),
+    });
+    let template = if view == "list" {
+        "tasks/_table.html"
+    } else {
+        "tasks/_board.html"
+    };
+    format::render().view(&v, template, data)
 }
 
 /// The values a task form shows: a new task's defaults, an existing task, or what was submitted.

@@ -359,7 +359,7 @@ async fn filters_show_the_right_tasks() {
             let cookie = owner.clone();
             async move {
                 request
-                    .get(&format!("/tasks?view=list&filter={filter}"))
+                    .get(&format!("/tasks/list?filter={filter}"))
                     .add_header(cookie.0, cookie.1)
                     .await
                     .text()
@@ -374,6 +374,12 @@ async fn filters_show_the_right_tasks() {
         assert!(done.contains("Mine finished") && !done.contains("Mine open"));
         let all = page("all").await;
         assert!(all.contains("Unowned") && !all.contains("Mine finished"));
+        // The phone list's filter chips, with counts, are on the full page.
+        let all = request
+            .get("/tasks?filter=all")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
         assert!(
             all.contains("Mine 2")
                 && all.contains("All 3")

@@ -321,6 +321,19 @@
   .due { padding: 2px 7px; border-radius: 6px; background: var(--chip); font-weight: 600; }
   .due-overdue { background: var(--blocked-bg); color: var(--blocked); }
 
+  /* Tasks: the desktop list, the board's lanes as rows */
+  .task-row-head, .task-row { display: grid; grid-template-columns: minmax(0, 3fr) 140px minmax(0, 1.4fr) 150px 120px minmax(0, 1fr); gap: 16px; align-items: center; }
+  .task-row-head { padding: 14px 28px 0 30px; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .task-rows { margin: 0 14px 14px; border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; background: var(--surface); }
+  .lane-head[aria-expanded="false"] + .task-rows { display: none; }
+  .task-row { min-height: 52px; padding: 8px 14px; font-size: 14px; color: var(--text); }
+  .task-row + .task-row { border-top: 1px solid var(--line-soft); }
+  .task-row:hover { background: var(--chip); }
+  .task-row-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .task-row .due { font-size: 12.5px; }
+  .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--dot) 14%, transparent); font-size: 12.5px; font-weight: 600; }
+  .status-pill .dot { background: var(--dot); }
+
   /* Chat */
   .chat-screen { display: flex; flex-direction: column; height: 100dvh; }
   .chat-head { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: env(safe-area-inset-top) 8px 0 4px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
