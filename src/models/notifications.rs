@@ -29,6 +29,18 @@ static MENTION: LazyLock<regex::Regex> = LazyLock::new(|| {
         .expect("mention regex is valid")
 });
 
+/// `@everyone` in a chat message mentions every member of the conversation.
+/// Usernames cannot be this word.
+pub const EVERYONE: &str = "everyone";
+
+/// Whether `body` has an `@everyone`, in any case.
+#[must_use]
+pub fn mentions_everyone(body: &str) -> bool {
+    MENTION
+        .captures_iter(body)
+        .any(|caps| caps[2].eq_ignore_ascii_case(EVERYONE))
+}
+
 /// Team members mentioned in `body`, in the order they first appear. Names
 /// match without regard to case; two teammates with the same name are both
 /// mentioned.
@@ -294,5 +306,15 @@ mod tests {
             }]
         );
         assert_eq!(mention_parts("@raj", &team()).len(), 1);
+    }
+
+    #[test]
+    fn spots_everyone() {
+        assert!(mentions_everyone("@everyone launch at 3"));
+        assert!(mentions_everyone("see @Everyone"));
+        assert!(mentions_everyone("@everyone's turn"));
+        assert!(!mentions_everyone("mail x@everyone.com"));
+        assert!(!mentions_everyone("@everyones"));
+        assert!(!mentions_everyone("everyone"));
     }
 }

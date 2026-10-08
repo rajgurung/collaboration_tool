@@ -27,7 +27,10 @@ pub type Organisations = Entity;
 pub struct SignupParams {
     #[validate(length(min = 2, max = 80, message = "Use 2 to 80 characters."))]
     pub organisation_name: String,
-    #[validate(regex(path = *users::USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."))]
+    #[validate(
+        regex(path = *users::USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."),
+        custom(function = "users::not_reserved")
+    )]
     pub name: String,
     #[validate(email(message = "Enter a valid email address."))]
     pub email: String,

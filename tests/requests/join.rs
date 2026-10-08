@@ -113,6 +113,24 @@ async fn usernames_are_unique_per_organisation_only() {
 
 #[tokio::test]
 #[serial]
+async fn everyone_is_not_a_username() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let res = request
+            .post("/join/acme")
+            .form(&serde_json::json!({ "name": "Everyone", "email": "e@example.com", "password": USER_PASSWORD }))
+            .await;
+        assert_eq!(res.status_code(), 422);
+        assert!(res.text().contains("That name is reserved."));
+        assert!(users::Model::find_by_email(&ctx.db, "e@example.com")
+            .await
+            .is_err());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn signed_in_users_skip_the_join_and_signup_forms() {
     request::<App, _, _>(|request, _ctx| async move {
         let cookie = sign_up(&request, "Acme", "alice", "alice@example.com").await;

@@ -109,6 +109,26 @@ async fn signup_shows_field_errors_and_saves_nothing() {
 
 #[tokio::test]
 #[serial]
+async fn signup_rejects_the_everyone_username() {
+    request::<App, _, _>(|request, ctx| async move {
+        let res = request
+            .post("/signup")
+            .form(&serde_json::json!({
+                "organisation_name": "Acme",
+                "name": "EVERYONE",
+                "email": "e@example.com",
+                "password": "a-good-password",
+            }))
+            .await;
+        assert_eq!(res.status_code(), 422);
+        assert!(res.text().contains("That name is reserved."));
+        assert_eq!(users::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn signup_with_existing_email_fails_cleanly() {
     request::<App, _, _>(|request, ctx| async move {
         sign_up(&request, "Acme", "alice", "alice@example.com").await;

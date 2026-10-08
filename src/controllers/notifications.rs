@@ -236,6 +236,8 @@ pub async fn project_saved(
 
 /// After a chat message is saved: tells mentioned people who can see the
 /// conversation. Mentioning someone outside a group or DM does nothing.
+/// `@everyone` tells the conversation's other members, once each; people also
+/// named get the "mentioned you" notice instead.
 ///
 /// # Errors
 /// On database errors.
@@ -247,7 +249,8 @@ pub async fn message_sent(
 ) -> Result<()> {
     let team = memberships::Model::team(&ctx.db, org_id).await?;
     let mentioned = notifications::mentioned_ids(&message.body, &team);
-    if mentioned.is_empty() {
+    let everyone = notifications::mentions_everyone(&message.body);
+    if mentioned.is_empty() && !everyone {
         return Ok(());
     }
     let members = conversation.member_ids(&ctx.db).await?;
@@ -260,15 +263,38 @@ pub async fn message_sent(
         (conversations::kind::CHANNEL, Some(name)) => format!("#{name}"),
         (_, Some(name)) => name.clone(),
     };
-    send(
+    let quote = excerpt(&message.body);
+    let link = format!("/chat/{}", conversation.id);
+    let told = send(
         ctx,
         org_id,
         message.user_id,
         &visible,
         &Notice {
             kind: kind::MENTION,
-            body: format!("{MENTIONED_YOU} in {place}\n{}", excerpt(&message.body)),
-            link: format!("/chat/{}", conversation.id),
+            body: format!("{MENTIONED_YOU} in {place}\n{quote}"),
+            link: link.clone(),
+        },
+    )
+    .await?;
+    if !everyone {
+        return Ok(());
+    }
+    // Mentions notify their own author, so leave the sender out here.
+    let rest: Vec<i64> = team
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| members.contains(id) && *id != message.user_id && !told.contains(id))
+        .collect();
+    send(
+        ctx,
+        org_id,
+        message.user_id,
+        &rest,
+        &Notice {
+            kind: kind::MENTION,
+            body: format!("mentioned everyone in {place}\n{quote}"),
+            link,
         },
     )
     .await?;

@@ -39,6 +39,23 @@ async fn test_can_validate_model() {
 
 #[tokio::test]
 #[serial]
+async fn everyone_is_a_reserved_name() {
+    let boot = boot_test::<App>()
+        .await
+        .expect("Failed to boot test application");
+
+    let user = users::ActiveModel {
+        name: ActiveValue::set("EveryOne".to_string()),
+        email: ActiveValue::set("e@example.com".to_string()),
+        ..Default::default()
+    };
+
+    let err = user.insert(&boot.app_context.db).await.unwrap_err();
+    assert!(err.to_string().contains("That name is reserved."), "{err}");
+}
+
+#[tokio::test]
+#[serial]
 async fn can_create_with_password() {
     configure_insta!();
 
