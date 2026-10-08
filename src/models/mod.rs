@@ -35,4 +35,5 @@ pub fn field_error(field: &str, message: &str) -> ModelError {
 }
 pub mod guide;
 pub mod notifications;
+pub mod saved_views;
 pub mod task_assignees;

@@ -321,6 +321,20 @@
   .due { padding: 2px 7px; border-radius: 6px; background: var(--chip); font-weight: 600; }
   .due-overdue { background: var(--blocked-bg); color: var(--blocked); }
 
+  /* Tasks: saved views */
+  .views-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+  .views-row::-webkit-scrollbar { display: none; }
+  .views-label { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .view-chip { display: inline-flex; flex-shrink: 0; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+  .view-chip a { display: inline-flex; align-items: center; gap: 5px; padding: 6px 4px 6px 13px; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .view-chip-on { border-color: var(--text); background: var(--text); }
+  .view-chip-on a, .view-chip-on .view-more { color: var(--bg); }
+  .view-star { color: var(--accent); }
+  .view-more { display: grid; place-items: center; width: 30px; height: 30px; margin-right: 2px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+  .view-more:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+  .view-save { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; padding: 6px 13px; border: 1px dashed var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .view-save:hover { color: var(--text); border-color: var(--muted); }
+
   /* Tasks: the desktop list, the board's lanes as rows */
   .task-row-head, .task-row { display: grid; grid-template-columns: minmax(0, 3fr) 140px minmax(0, 1.4fr) 150px 120px minmax(0, 1fr); gap: 16px; align-items: center; }
   .task-row-head { padding: 14px 28px 0 30px; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }

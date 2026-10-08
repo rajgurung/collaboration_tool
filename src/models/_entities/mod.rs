@@ -11,6 +11,7 @@ pub mod messages;
 pub mod notifications;
 pub mod organisations;
 pub mod projects;
+pub mod saved_views;
 pub mod task_assignees;
 pub mod task_notes;
 pub mod tasks;

@@ -1,0 +1,17 @@
+<div class="views-row" role="group" aria-label="Saved views">
+  <span class="views-label">Views</span>
+  {% for v in views %}
+  <span class="view-chip {% if v.current %}view-chip-on{% endif %}">
+    <a href="{{ v.url }}" {% if v.current %}aria-current="true"{% endif %}>{% if v.is_default %}<span class="view-star" title="Tasks opens with this view">★</span>{% endif %}{{ v.name }}</a>
+    <button type="button" class="view-more" aria-label="Edit view {{ v.name }}"
+            hx-get="/tasks/views/{{ v.id }}/edit?{{ setup_query }}" hx-target="#view-dialog-body"
+            hx-on::after-request="document.getElementById('view-dialog').showModal()">{{<icon name="ellipsis" class="h-4 w-4"/>}}</button>
+  </span>
+  {% endfor %}
+  {% if views | length < 10 %}
+  <button type="button" class="view-save"
+          hx-get="/tasks/views/new?{{ setup_query }}" hx-target="#view-dialog-body"
+          hx-on::after-request="document.getElementById('view-dialog').showModal()">{{<icon name="plus" class="h-3.5 w-3.5"/>}}Save view</button>
+  {% endif %}
+</div>
+<dialog id="view-dialog" class="sheet" aria-label="Saved view"><div class="sheet-handle"></div><div id="view-dialog-body" class="sheet-body"></div></dialog>

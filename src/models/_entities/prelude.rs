@@ -9,6 +9,7 @@ pub use super::messages::Entity as Messages;
 pub use super::notifications::Entity as Notifications;
 pub use super::organisations::Entity as Organisations;
 pub use super::projects::Entity as Projects;
+pub use super::saved_views::Entity as SavedViews;
 pub use super::task_assignees::Entity as TaskAssignees;
 pub use super::task_notes::Entity as TaskNotes;
 pub use super::tasks::Entity as Tasks;

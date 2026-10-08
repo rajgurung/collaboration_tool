@@ -10,7 +10,9 @@ use crate::{
     models::{
         memberships,
         notifications::mention_parts,
-        projects, task_assignees,
+        projects,
+        saved_views::{self, Setup},
+        task_assignees,
         task_notes::{self, NoteParams},
         tasks::{self, TaskParams, PRIORITIES, STATUSES},
     },
@@ -420,11 +422,44 @@ async fn index(
     Query(query): Query<ListQuery>,
 ) -> Result<Response> {
     let ws = Workspace::load(&ctx, member.org.id).await?;
+    let views = saved_views::Model::list_for(&ctx.db, member.org.id, member.user.id).await?;
+    // A plain visit to Tasks opens your default view, if you starred one.
+    let mut query = query;
+    let plain = query.view.is_none()
+        && query.scope.is_none()
+        && query.group.is_none()
+        && query.filter.is_none()
+        && query.q.is_empty();
+    if let Some(default) = views.iter().find(|v| v.is_default).filter(|_| plain) {
+        let setup = default.setup();
+        query.filter = Some(setup.scope.clone());
+        query.scope = Some(setup.scope);
+        query.group = Some(setup.group);
+        query.view = Some(setup.view);
+        query.q = setup.q;
+    }
     let filter = pick(query.filter.as_deref(), &FILTERS, "mine");
     let scope = pick(query.scope.as_deref(), &SCOPES, "all");
     let group = pick(query.group.as_deref(), &GROUPS, "project");
     let view = layout(query.view.as_deref());
+    let current = Setup {
+        scope: scope.to_string(),
+        group: group.to_string(),
+        view: view.to_string(),
+        q: query.q.trim().to_string(),
+    };
     let mut data = list_data(&ws, member.user.id, filter, &query.q);
+    data["views"] = serde_json::json!(views
+        .iter()
+        .map(|v| serde_json::json!({
+            "id": v.id,
+            "name": v.name,
+            "url": v.setup().url(),
+            "is_default": v.is_default,
+            "current": v.setup() == current,
+        }))
+        .collect::<Vec<_>>());
+    data["setup_query"] = serde_json::json!(current.query());
     data["board"] = board_data(&ws, member.user.id, scope, group, &query.q, view);
     data["view"] = serde_json::json!(view);
     data["open_new"] = serde_json::json!(query.new.is_some());
