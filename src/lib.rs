@@ -5,6 +5,7 @@ pub mod dtos;
 pub mod extractors;
 pub mod initializers;
 pub mod mailers;
+pub mod mcp;
 pub mod models;
 pub mod tasks;
 pub mod views;

@@ -17,8 +17,9 @@ use std::path::Path;
 use crate::{
     controllers, initializers,
     models::_entities::{
-        conversation_members, conversations, meeting_attendees, meetings, memberships, messages,
-        organisations, projects, task_notes, tasks as task_items, users,
+        access_tokens, conversation_members, conversations, meeting_attendees, meetings,
+        memberships, messages, oauth_clients, oauth_codes, organisations, projects, task_notes,
+        tasks as task_items, users,
     },
     tasks,
     workers::downloader::DownloadWorker,
@@ -65,8 +66,9 @@ impl Hooks for App {
         ])
     }
 
-    fn routes(_ctx: &AppContext) -> AppRoutes {
+    fn routes(ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::mcp::routes(ctx))
             .add_route(controllers::saved_views::routes())
             .add_route(controllers::guide::routes())
             .add_route(controllers::notifications::routes())
@@ -101,6 +103,9 @@ impl Hooks for App {
     }
     async fn truncate(ctx: &AppContext) -> Result<()> {
         // Children before parents so foreign keys never block the delete.
+        truncate_table(&ctx.db, access_tokens::Entity).await?;
+        truncate_table(&ctx.db, oauth_codes::Entity).await?;
+        truncate_table(&ctx.db, oauth_clients::Entity).await?;
         truncate_table(&ctx.db, messages::Entity).await?;
         truncate_table(&ctx.db, conversation_members::Entity).await?;
         truncate_table(&ctx.db, conversations::Entity).await?;

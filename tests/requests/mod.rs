@@ -32,3 +32,5 @@ pub mod notifications;
 pub mod guide;
 
 pub mod saved_views;
+
+pub mod mcp;

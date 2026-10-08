@@ -33,7 +33,10 @@ pub fn field_error(field: &str, message: &str) -> ModelError {
         )]),
     })
 }
+pub mod access_tokens;
 pub mod guide;
 pub mod notifications;
+pub mod oauth_clients;
+pub mod oauth_codes;
 pub mod saved_views;
 pub mod task_assignees;
