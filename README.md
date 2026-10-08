@@ -26,6 +26,7 @@ A calm workspace for small teams. Plan the roadmap, track tasks, keep meeting no
 - 📝 **Meetings.** Keep the summary and the decisions in one place.
 - 💬 **Chat.** Channels, groups and direct messages, live.
 - 🔔 **Notifications.** @mention someone in chat or a task note, and they see it in their bell straight away. Assignments and project activity show up there too.
+- 🤖 **Works with Claude.** Connect Claude and ask it to plan, create and update tasks for you.
 - 🌗 **Light and dark.** Follows your system setting, on desktop and phone.
 - 🔒 **Private by default.** Each organisation sees only its own work. New people join through a link, and an owner approves them.
 
@@ -34,6 +35,15 @@ A calm workspace for small teams. Plan the roadmap, track tasks, keep meeting no
   &nbsp;
   <img src="docs/images/phone-home.png" alt="Home on a phone" width="22%">
 </p>
+
+## Use with Claude
+
+Claude can read and change your projects, tasks and task notes, as you. It can't see chat, meetings or emails.
+
+- **claude.ai and the Claude apps:** Settings → Connectors → Add custom connector, paste `https://collab.rajgurung.me/mcp`, press Connect, then Allow.
+- **Claude Code:** `claude mcp add --transport http collab https://collab.rajgurung.me/mcp`, then sign in when asked.
+
+In Collab Tool, More → Connect Claude has the details, personal tokens, and a Revoke button for every connection. How it works: [docs/notes/claude-connector.md](docs/notes/claude-connector.md).
 
 ## How it's built
 
