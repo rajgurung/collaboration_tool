@@ -1,0 +1,13 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Allow access · Collaboration Tool{% endblock title %}
+{% block panel %}
+<span class="meta font-semibold">{{ org.name }}</span>
+<h2 class="mt-2 mb-0 text-2xl font-semibold">Allow {{ client_name }} to use Collab Tool?</h2>
+<p class="mt-3 text-sm leading-6 text-muted">It will be able to see and change projects, tasks and task notes in {{ org.name }}, as {{ username }}. It cannot see chat, meetings or members' emails.</p>
+<p class="mt-3 text-sm leading-6 text-muted">You'll go back to <strong class="text-text">{{ back_to }}</strong>. You can disconnect it any time from More, then Connect Claude.</p>
+<form method="post" action="/oauth/authorize" class="mt-8 grid gap-3">
+  {% for name, value in fields %}{% if value %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}
+  <button type="submit" name="decision" value="allow" class="btn btn-primary btn-lg">Allow</button>
+  <button type="submit" name="decision" value="deny" class="btn btn-secondary btn-lg">Deny</button>
+</form>
+{% endblock panel %}

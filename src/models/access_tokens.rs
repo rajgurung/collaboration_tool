@@ -73,6 +73,15 @@ pub struct Issued {
     pub scope: String,
 }
 
+/// A token request with `grant_type=authorization_code`.
+pub struct CodeExchange<'a> {
+    pub code: &'a str,
+    pub code_verifier: &'a str,
+    pub redirect_uri: &'a str,
+    pub resource: &'a str,
+    pub client: &'a oauth_clients::Model,
+}
+
 /// One connection on the settings page: a personal token, or an OAuth grant
 /// however many times its refresh token has rotated.
 pub struct Connection {
@@ -169,28 +178,51 @@ impl Model {
         Ok((row, token))
     }
 
-    /// Access and refresh tokens for a code that was just redeemed.
+    /// Swaps an authorization code for tokens. The code is spent first, so it
+    /// works once whatever happens next. `None` when the code is unknown,
+    /// used or expired, or does not match the client, redirect URI, resource
+    /// or PKCE verifier it was issued for.
+    ///
+    /// Spending the code and saving the tokens share a transaction: a second
+    /// request for the same code waits on the row lock until the tokens
+    /// exist, so revoking the grant on reuse always catches them.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn issue_for_code<C: ConnectionTrait>(
-        db: &C,
-        code: &oauth_codes::Model,
-        client: &oauth_clients::Model,
-    ) -> ModelResult<Issued> {
-        issue(
-            db,
+    pub async fn exchange_code(
+        db: &DatabaseConnection,
+        exchange: &CodeExchange<'_>,
+    ) -> ModelResult<Option<Issued>> {
+        let txn = db.begin().await?;
+        let Some(code) = oauth_codes::Model::redeem(&txn, exchange.code).await? else {
+            txn.commit().await?;
+            return Ok(None);
+        };
+        let matches = code.oauth_client_id == exchange.client.id
+            && code.redirect_uri == exchange.redirect_uri
+            && code.resource == exchange.resource
+            && code.verifier_matches(exchange.code_verifier)
+            && memberships::Model::is_active_member(&txn, code.organisation_id, code.user_id)
+                .await?;
+        if !matches {
+            txn.commit().await?;
+            return Ok(None);
+        }
+        let issued = issue(
+            &txn,
             &Grant {
                 grant_id: code.grant_id,
-                name: &client.client_name,
-                oauth_client_id: client.id,
+                name: &exchange.client.client_name,
+                oauth_client_id: exchange.client.id,
                 org_id: code.organisation_id,
                 user_id: code.user_id,
                 resource: &code.resource,
                 scope: &code.scope,
             },
         )
-        .await
+        .await?;
+        txn.commit().await?;
+        Ok(Some(issued))
     }
 
     /// Swaps a refresh token for new tokens, in one statement, so it works
