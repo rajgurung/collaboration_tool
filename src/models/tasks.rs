@@ -39,41 +39,6 @@ pub struct TaskParams {
     pub due_on: String,
 }
 
-/// Per-person momentum, as in the original app: the average of each task's
-/// weight (done 100, in progress 55, blocked 10, to do 15). No tasks scores 0.
-#[must_use]
-pub fn progress_score<'a>(statuses: impl IntoIterator<Item = &'a str>) -> u32 {
-    let (sum, count) = statuses
-        .into_iter()
-        .fold((0u32, 0u32), |(sum, count), status| {
-            let weight = match status {
-                "done" => 100,
-                "progress" => 55,
-                "blocked" => 10,
-                _ => 15,
-            };
-            (sum + weight, count + 1)
-        });
-    if count == 0 {
-        0
-    } else {
-        (f64::from(sum) / f64::from(count)).round() as u32
-    }
-}
-
-/// Share of tasks that are done, as a whole percentage.
-#[must_use]
-pub fn completion<'a>(statuses: impl IntoIterator<Item = &'a str>) -> u32 {
-    let (done, total) = statuses.into_iter().fold((0u32, 0u32), |(done, total), s| {
-        (done + u32::from(s == "done"), total + 1)
-    });
-    if total == 0 {
-        0
-    } else {
-        (f64::from(done) * 100.0 / f64::from(total)).round() as u32
-    }
-}
-
 #[must_use]
 pub fn is_status(value: &str) -> bool {
     STATUSES.iter().any(|(key, _, _)| *key == value)
@@ -196,25 +161,5 @@ impl loco_rs::prelude::TenantEntity for Entity {
 
     fn tenant_column() -> super::_entities::tasks::Column {
         super::_entities::tasks::Column::OrganisationId
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{completion, progress_score};
-
-    #[test]
-    fn progress_score_matches_the_original_weights() {
-        assert_eq!(progress_score([]), 0);
-        assert_eq!(progress_score(["done"]), 100);
-        assert_eq!(progress_score(["done", "todo"]), 58); // (100 + 15) / 2 = 57.5
-        assert_eq!(progress_score(["progress", "blocked", "todo"]), 27); // 80 / 3 = 26.7
-    }
-
-    #[test]
-    fn completion_is_the_share_done() {
-        assert_eq!(completion([]), 0);
-        assert_eq!(completion(["done", "todo", "progress"]), 33);
-        assert_eq!(completion(["done", "done"]), 100);
     }
 }

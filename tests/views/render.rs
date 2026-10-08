@@ -52,8 +52,9 @@ fn renders_app_layout_with_nav() {
         .expect("app layout should render");
 
     assert!(rendered.contains("Himalayan Ritual"));
-    assert!(rendered.contains("Who is on the team"));
-    assert!(rendered
-        .contains(r#"href="/tasks" class="tab-link flex items-center gap-2" aria-current="page""#));
+    assert!(rendered.contains("<h1>Members</h1>"));
+    // Desktop sidebar and mobile tab bar both mark Tasks as current.
+    assert!(rendered.contains(r#"href="/tasks" class="side-link" aria-current="page""#));
+    assert!(rendered.contains(r#"href="/tasks" class="tab" aria-current="page""#));
     assert!(rendered.contains("<svg"), "icons should render");
 }

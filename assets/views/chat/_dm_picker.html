@@ -1,17 +1,19 @@
-<div class="grid gap-5">
+<div class="grid gap-4">
   <div>
-    <h2 class="modal-title">New direct message</h2>
-    <p class="modal-description">Choose someone for a private conversation.</p>
+    <h2 class="m-0 text-xl font-semibold">New message</h2>
+    <p class="meta mt-1 mb-0 text-sm">Choose someone for a private conversation.</p>
   </div>
-  <div class="grid gap-2">
+  {% if team | length > 0 %}
+  <div class="list">
     {% for person in team %}
     <form method="post" action="/chat/dms" hx-post="/chat/dms">
       <input type="hidden" name="user_id" value="{{ person.id }}">
-      <button type="submit" class="dm-choice w-full text-left">{{<avatar name={person.username} color={person.color}/>}}<div><strong>{{ person.username }}</strong><span>Send a private message</span></div></button>
+      <button type="submit" class="list-row w-full border-0 bg-transparent text-left text-text">{{<avatar name={person.username} color={person.color} size="md"/>}}<span class="flex-1 text-base font-medium">{{ person.username }}</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</button>
     </form>
-    {% else %}
-    <p class="text-sm text-white/45">Nobody else is on the team yet. Share your join link from the Members page.</p>
     {% endfor %}
   </div>
-  <div class="flex justify-end"><button type="button" class="btn btn-ghost" data-dialog-close>Close</button></div>
+  {% else %}
+  <p class="meta">Nobody else is on the team yet. Share your join link from Members.</p>
+  {% endif %}
+  <div class="flex justify-end"><button type="button" class="btn btn-secondary" data-dialog-close>Close</button></div>
 </div>

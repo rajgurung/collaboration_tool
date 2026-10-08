@@ -1,9 +1,10 @@
-<div class="chat-row {% if message.own %}own{% endif %}" id="message-{{ message.id }}">
-  {{<avatar name={message.author} color={message.color}/>}}
-  <div class="max-w-[78%]">
-    <div class="chat-bubble {% if message.own %}own{% endif %}">
-      <div class="mb-1 flex items-center justify-between gap-5"><strong class="text-xs">{% if message.own %}You{% else %}{{ message.author }}{% endif %}</strong><span class="text-[10px] opacity-50">{{ message.at }}</span></div>
-      <p class="whitespace-pre-wrap text-sm leading-6">{{ message.body }}</p>
-    </div>
+<div class="msg {% if message.own %}msg-own{% endif %} {% if message.start %}msg-start{% endif %}" id="message-{{ message.id }}">
+  {% if not message.own %}
+  <span class="{% if message.show_time %}visible{% else %}invisible{% endif %}">{{<avatar name={message.author} color={message.color} size="sm"/>}}</span>
+  {% endif %}
+  <div class="msg-body">
+    {% if message.start and not message.own %}<span class="msg-name">{{ message.author }}</span>{% endif %}
+    <div class="bubble">{{ message.body }}</div>
+    {% if message.show_time %}<span class="msg-time">{{ message.at }}</span>{% endif %}
   </div>
 </div>

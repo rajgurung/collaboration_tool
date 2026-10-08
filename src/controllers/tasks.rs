@@ -12,18 +12,26 @@ use crate::{
         tasks::{self, TaskParams, PRIORITIES, STATUSES},
     },
     views::{
-        forms::{field_errors, invalid_form, toast, FieldErrors},
+        forms::{field_errors, invalid_form, FieldErrors},
         layout::{avatar_color, Person},
     },
 };
 
 const TASK_FORM_ID: &str = "task-form";
 const NOTE_FORM_ID: &str = "note-form";
+const FILTERS: [(&str, &str); 4] = [
+    ("mine", "Mine"),
+    ("all", "All"),
+    ("blocked", "Blocked"),
+    ("done", "Done"),
+];
 
 #[derive(Debug, Default, Deserialize)]
-struct BoardQuery {
+struct ListQuery {
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    filter: Option<String>,
     #[serde(default)]
     new: Option<String>,
 }
@@ -31,112 +39,133 @@ struct BoardQuery {
 #[derive(Debug, Deserialize)]
 struct StatusForm {
     status: String,
-    #[serde(default)]
-    q: String,
 }
 
 #[derive(Debug, Serialize)]
-struct Card {
+struct Row {
     id: i64,
     title: String,
-    priority: String,
     status: String,
     project: String,
+    meta: String,
     owner: Option<String>,
     owner_color: &'static str,
-    due: String,
     notes: usize,
 }
 
 #[derive(Debug, Serialize)]
-struct Column {
-    key: &'static str,
+struct Group {
     label: &'static str,
-    color: &'static str,
-    cards: Vec<Card>,
-}
-
-/// Everything the board needs, filtered by the search text (title, owner or project).
-struct Board {
-    columns: Vec<Column>,
-    team: Vec<Person>,
-    projects: Vec<projects::Model>,
+    rows: Vec<Row>,
 }
 
 fn due_label(date: Option<chrono::NaiveDate>) -> String {
-    date.map_or_else(|| "No date".to_string(), |d| d.format("%d %b").to_string())
+    date.map_or_else(String::new, |d| format!("Due {}", d.format("%a %-d %b")))
 }
 
-async fn board(ctx: &AppContext, org_id: i64, q: &str) -> Result<Board> {
-    let team = Person::from_team(memberships::Model::team(&ctx.db, org_id).await?);
-    let names: HashMap<i64, &str> = team.iter().map(|p| (p.id, p.username.as_str())).collect();
-    let projects = projects::Model::list_for_org(&ctx.db, org_id).await?;
-    let project_names: HashMap<i64, &str> =
-        projects.iter().map(|p| (p.id, p.name.as_str())).collect();
-    let counts = task_notes::Model::counts_for_org(&ctx.db, org_id).await?;
-    let needle = q.trim().to_lowercase();
-
-    let cards: Vec<Card> = tasks::Model::list_for_org(&ctx.db, org_id)
+/// The task list for one filter and search, grouped by status, plus filter counts.
+async fn list_data(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    filter: &str,
+    q: &str,
+) -> Result<serde_json::Value> {
+    let org_id = member.org.id;
+    let me = member.user.id;
+    let names: HashMap<i64, String> = memberships::Model::team(&ctx.db, org_id)
         .await?
         .into_iter()
+        .collect();
+    let project_names: HashMap<i64, String> = projects::Model::list_for_org(&ctx.db, org_id)
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p.name))
+        .collect();
+    let counts = task_notes::Model::counts_for_org(&ctx.db, org_id).await?;
+    let all = tasks::Model::list_for_org(&ctx.db, org_id).await?;
+    let needle = q.trim().to_lowercase();
+
+    let matches = |t: &tasks::Model, f: &str| match f {
+        "mine" => t.owner_id == Some(me) && t.status != "done",
+        "blocked" => t.status == "blocked",
+        "done" => t.status == "done",
+        _ => t.status != "done",
+    };
+    let filters: Vec<serde_json::Value> = FILTERS
+        .iter()
+        .map(|(key, label)| {
+            serde_json::json!({
+                "key": key,
+                "label": label,
+                "count": all.iter().filter(|t| matches(t, key)).count(),
+                "current": *key == filter,
+            })
+        })
+        .collect();
+
+    let rows: Vec<Row> = all
+        .iter()
+        .filter(|t| matches(t, filter))
         .map(|t| {
-            let owner = t
-                .owner_id
-                .and_then(|id| names.get(&id))
-                .map(|n| (*n).to_string());
-            Card {
+            let owner = t.owner_id.and_then(|id| names.get(&id).cloned());
+            let project = project_names
+                .get(&t.project_id)
+                .cloned()
+                .unwrap_or_default();
+            let due = due_label(t.due_on);
+            Row {
                 id: t.id,
-                project: project_names
-                    .get(&t.project_id)
+                title: t.title.clone(),
+                status: t.status.clone(),
+                meta: [due.as_str(), project.as_str()]
+                    .iter()
+                    .filter(|s| !s.is_empty())
                     .copied()
-                    .unwrap_or_default()
-                    .to_string(),
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+                project,
                 owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
                 owner,
-                due: due_label(t.due_on),
                 notes: counts.get(&t.id).copied().unwrap_or(0),
-                title: t.title,
-                priority: t.priority,
-                status: t.status,
             }
         })
-        .filter(|c| {
+        .filter(|r| {
             needle.is_empty()
-                || c.title.to_lowercase().contains(&needle)
-                || c.project.to_lowercase().contains(&needle)
-                || c.owner
+                || r.title.to_lowercase().contains(&needle)
+                || r.project.to_lowercase().contains(&needle)
+                || r.owner
                     .as_deref()
                     .is_some_and(|o| o.to_lowercase().contains(&needle))
         })
         .collect();
 
-    let mut columns: Vec<Column> = STATUSES
+    let order = [
+        ("blocked", "Blocked"),
+        ("progress", "In progress"),
+        ("todo", "To do"),
+        ("done", "Done"),
+    ];
+    let mut groups: Vec<Group> = order
         .iter()
-        .map(|&(key, label, color)| Column {
-            key,
+        .map(|(_, label)| Group {
             label,
-            color,
-            cards: Vec::new(),
+            rows: Vec::new(),
         })
         .collect();
-    for card in cards {
-        if let Some(col) = columns.iter_mut().find(|c| c.key == card.status) {
-            col.cards.push(card);
+    for row in rows {
+        if let Some(i) = order.iter().position(|(key, _)| *key == row.status) {
+            groups[i].rows.push(row);
         }
     }
-    Ok(Board {
-        columns,
-        team,
-        projects,
-    })
+    groups.retain(|g| !g.rows.is_empty());
+    Ok(serde_json::json!({ "filters": filters, "filter": filter, "groups": groups, "q": q }))
 }
 
-fn board_data(board: &Board, q: &str) -> serde_json::Value {
-    serde_json::json!({
-        "columns": board.columns,
-        "statuses": STATUSES.iter().map(|(k, l, _)| serde_json::json!({ "key": k, "label": l })).collect::<Vec<_>>(),
-        "q": q,
-    })
+fn filter_or_default(filter: Option<&str>) -> &str {
+    match filter {
+        Some(f) if FILTERS.iter().any(|(key, _)| *key == f) => f,
+        _ => "mine",
+    }
 }
 
 #[debug_handler]
@@ -144,38 +173,46 @@ async fn index(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
-    Query(query): Query<BoardQuery>,
+    Query(query): Query<ListQuery>,
 ) -> Result<Response> {
-    let board = board(&ctx, member.org.id, &query.q).await?;
-    let mut data = board_data(&board, &query.q);
+    let filter = filter_or_default(query.filter.as_deref());
+    let mut data = list_data(&ctx, &member, filter, &query.q).await?;
     data["open_new"] = serde_json::json!(query.new.is_some());
     format::render().view(&v, "tasks/index.html", member.page("tasks", data))
 }
 
-/// The board on its own, for HTMX refreshes.
+/// The list on its own, for HTMX refreshes (filters, search, after changes).
 #[debug_handler]
-async fn board_partial(
+async fn list_partial(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
-    Query(query): Query<BoardQuery>,
+    Query(query): Query<ListQuery>,
 ) -> Result<Response> {
-    let board = board(&ctx, member.org.id, &query.q).await?;
-    format::render().view(&v, "tasks/_board.html", board_data(&board, &query.q))
+    let filter = filter_or_default(query.filter.as_deref());
+    let data = list_data(&ctx, &member, filter, &query.q).await?;
+    format::render().view(&v, "tasks/_list.html", data)
 }
 
-fn task_form_data(
-    board: &Board,
+async fn task_form_data(
+    ctx: &AppContext,
+    member: &CurrentMember,
     values: serde_json::Value,
     errors: &FieldErrors,
-) -> serde_json::Value {
-    serde_json::json!({
+) -> Result<serde_json::Value> {
+    let team = Person::from_team(memberships::Model::team(&ctx.db, member.org.id).await?);
+    let projects: Vec<serde_json::Value> = projects::Model::list_for_org(&ctx.db, member.org.id)
+        .await?
+        .into_iter()
+        .map(|p| serde_json::json!({ "id": p.id, "name": p.name }))
+        .collect();
+    Ok(serde_json::json!({
         "form": values,
         "errors": errors,
-        "team": board.team,
-        "projects": board.projects.iter().map(|p| serde_json::json!({ "id": p.id, "name": p.name })).collect::<Vec<_>>(),
+        "team": team,
+        "projects": projects,
         "priorities": PRIORITIES,
-    })
+    }))
 }
 
 #[debug_handler]
@@ -184,15 +221,11 @@ async fn new(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
 ) -> Result<Response> {
-    let board = board(&ctx, member.org.id, "").await?;
     let values = serde_json::json!({
         "title": "", "project_id": "", "owner_id": member.user.id.to_string(), "priority": "medium", "due_on": "",
     });
-    format::render().view(
-        &v,
-        "tasks/_form.html",
-        task_form_data(&board, values, &FieldErrors::new()),
-    )
+    let data = task_form_data(&ctx, &member, values, &FieldErrors::new()).await?;
+    format::render().view(&v, "tasks/_form.html", data)
 }
 
 #[debug_handler]
@@ -206,52 +239,28 @@ async fn create(
     match tasks::Model::create(&ctx.db, member.org.id, &params).await {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
         Ok(_) => {
-            let board = board(&ctx, member.org.id, "").await?;
+            let trigger = serde_json::json!({
+                "toast": { "kind": "success", "message": "Task added" },
+                "tasks-changed": true,
+            });
             format::render()
-                .header("HX-Trigger", toast("success", "Task added"))
-                .view(&v, "tasks/_board.html", board_data(&board, ""))
+                .header("HX-Trigger", trigger.to_string())
+                .header("HX-Reswap", "none")
+                .empty()
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let board = board(&ctx, member.org.id, "").await?;
             let values = serde_json::json!({
                 "title": params.title, "project_id": params.project_id, "owner_id": params.owner_id,
                 "priority": params.priority, "due_on": params.due_on,
             });
-            invalid_form(
-                &v,
-                "tasks/_form.html",
-                TASK_FORM_ID,
-                task_form_data(&board, values, &errors),
-            )
+            let data = task_form_data(&ctx, &member, values, &errors).await?;
+            invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, data)
         }
     }
 }
 
-#[debug_handler]
-async fn set_status(
-    member: CurrentMember,
-    State(ctx): State<AppContext>,
-    ViewEngine(v): ViewEngine<TeraView>,
-    headers: HeaderMap,
-    Path(id): Path<i64>,
-    Form(form): Form<StatusForm>,
-) -> Result<Response> {
-    let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    if !tasks::is_status(&form.status) {
-        return Err(Error::BadRequest("Unknown status.".to_string()));
-    }
-    task.set_status(&ctx.db, &form.status).await?;
-    if !headers.contains_key("hx-request") {
-        return Ok(redirect_response(&headers, "/tasks"));
-    }
-    let board = board(&ctx, member.org.id, &form.q).await?;
-    format::render()
-        .header("HX-Trigger", toast("success", "Task updated"))
-        .view(&v, "tasks/_board.html", board_data(&board, &form.q))
-}
-
-/// The side sheet for one task: details, notes and the note form.
+/// The sheet for one task: details, status switcher, notes and the note form.
 async fn sheet_data(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -278,31 +287,47 @@ async fn sheet_data(
                 "color": avatar_color(&author),
                 "author": author,
                 "body": n.body,
-                "at": n.created_at.format("%d %b, %H:%M").to_string(),
+                "at": n.created_at.format("%a %-d %b, %H:%M").to_string(),
             })
         })
         .collect();
-    let status_label = STATUSES
+    let owner = task.owner_id.and_then(|id| team.get(&id).cloned());
+    let statuses: Vec<serde_json::Value> = STATUSES
         .iter()
-        .find(|(k, _, _)| *k == task.status)
-        .map_or("", |(_, l, _)| *l);
+        .map(|(key, label, _)| serde_json::json!({ "key": key, "label": if *key == "progress" { "Doing" } else { label }, "current": *key == task.status }))
+        .collect();
+    let meta = [
+        project.map(|p| p.name).unwrap_or_default(),
+        due_label(task.due_on),
+        format!("{} priority", capitalise(&task.priority)),
+    ]
+    .into_iter()
+    .filter(|s| !s.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ");
     Ok(member.page(
         "tasks",
         data!({
             "task": {
                 "id": task.id,
                 "title": task.title,
-                "priority": task.priority,
-                "status": status_label,
-                "due": due_label(task.due_on),
-                "project": project.map(|p| p.name).unwrap_or_default(),
-                "owner": task.owner_id.and_then(|id| team.get(&id).cloned()),
+                "meta": meta,
+                "owner_color": owner.as_deref().map_or("#e8dfce", avatar_color),
+                "owner": owner,
             },
+            "statuses": statuses,
             "notes": notes,
             "note_body": note_body,
             "errors": errors,
         }),
     ))
+}
+
+fn capitalise(s: &str) -> String {
+    let mut chars = s.chars();
+    chars.next().map_or_else(String::new, |c| {
+        c.to_uppercase().collect::<String>() + chars.as_str()
+    })
 }
 
 #[debug_handler]
@@ -315,6 +340,30 @@ async fn show(
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
     format::render().view(&v, "tasks/_sheet.html", data)
+}
+
+#[debug_handler]
+async fn set_status(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(form): Form<StatusForm>,
+) -> Result<Response> {
+    let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if !tasks::is_status(&form.status) {
+        return Err(Error::BadRequest("Unknown status.".to_string()));
+    }
+    let task = task.set_status(&ctx.db, &form.status).await?;
+    if !headers.contains_key("hx-request") {
+        return Ok(redirect_response(&headers, "/tasks"));
+    }
+    let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
+    let trigger = serde_json::json!({ "toast": { "kind": "success", "message": "Status updated" }, "tasks-changed": true });
+    format::render()
+        .header("HX-Trigger", trigger.to_string())
+        .view(&v, "tasks/_sheet.html", data)
 }
 
 #[debug_handler]
@@ -331,11 +380,7 @@ async fn add_note(
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
         Ok(_) => {
             let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
-            // `board-changed` makes the board refresh its note counts.
-            let trigger = serde_json::json!({
-                "toast": { "kind": "success", "message": "Note posted" },
-                "board-changed": true,
-            });
+            let trigger = serde_json::json!({ "toast": { "kind": "success", "message": "Note posted" }, "tasks-changed": true });
             format::render()
                 .header("HX-Trigger", trigger.to_string())
                 .view(&v, "tasks/_sheet.html", data)
@@ -352,7 +397,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .add("/tasks", get(index))
         .add("/tasks", post(create))
-        .add("/tasks/board", get(board_partial))
+        .add("/tasks/list", get(list_partial))
         .add("/tasks/new", get(new))
         .add("/tasks/{id}", get(show))
         .add("/tasks/{id}/status", post(set_status))

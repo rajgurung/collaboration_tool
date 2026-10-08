@@ -1,11 +1,11 @@
-<form id="task-form" method="post" action="/tasks" hx-post="/tasks" hx-target="#task-board" hx-swap="outerHTML" data-close-on-success class="grid gap-5">
+<form id="task-form" method="post" action="/tasks" hx-post="/tasks" data-close-on-success class="grid gap-4">
   <div>
-    <h2 class="modal-title">Add a task</h2>
-    <p class="modal-description">Give it one owner and connect it to the project it moves forward.</p>
+    <h2 class="m-0 text-xl font-semibold">New task</h2>
+    <p class="meta mt-1 mb-0 text-sm">Give it one owner and the project it moves forward.</p>
   </div>
   {{<text_field name="title" label="Task" value={form.title} error={errors.title | default(value="")}/>}}
   {% if projects | length == 0 %}
-  <p class="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-white/60">Tasks belong to a project. <a href="/roadmap" class="underline">Create a project on the roadmap</a> first.</p>
+  <p class="alert m-0">Tasks belong to a project. <a href="/roadmap" class="text-link">Create a project on the roadmap</a> first.</p>
   {% endif %}
   <div class="grid gap-4 sm:grid-cols-2">
     <label class="field">
@@ -24,8 +24,6 @@
       </select>
       {% if errors.owner_id %}<span class="field-error">{{ errors.owner_id }}</span>{% endif %}
     </label>
-  </div>
-  <div class="grid gap-4 sm:grid-cols-2">
     <label class="field">
       <span class="field-label">Priority</span>
       <select name="priority" class="input">
@@ -40,7 +38,7 @@
     </label>
   </div>
   <div class="flex justify-end gap-2">
-    <button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>
+    <button type="button" class="btn btn-secondary" data-dialog-close>Cancel</button>
     <button type="submit" class="btn btn-primary">Add task</button>
   </div>
 </form>

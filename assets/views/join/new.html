@@ -1,16 +1,15 @@
 {% extends "layouts/auth.html" %}
 {% block title %}Join {{ org.name }} · Collaboration Tool{% endblock title %}
-{% block headline %}Join {{ org.name }}.{% endblock headline %}
 {% block panel %}
-<span class="eyebrow">{{ org.name }}</span>
-<h2 class="mt-3 text-3xl font-medium tracking-[-.03em]">Request to join</h2>
-<p class="mt-2 text-sm text-white/50">An owner or admin of {{ org.name }} will approve your account.</p>
+<span class="meta font-semibold">{{ org.name }}</span>
+<h2 class="mt-2 mb-0 text-2xl font-semibold">Request to join</h2>
+<p class="mt-2 text-sm text-muted">An owner or admin of {{ org.name }} will approve your account.</p>
 <form method="post" action="/join/{{ org.slug }}" class="mt-8 grid gap-5">
   {% if error %}{{<form_alert message={error}/>}}{% endif %}
   {{<text_field name="name" label="Username" value={form.name} error={errors.name | default(value="")} autocomplete="username" hint="Start with a letter. 3 to 30 letters or numbers."/>}}
   {{<text_field name="email" label="Email" type="email" value={form.email} error={errors.email | default(value="")} autocomplete="email"/>}}
   {{<text_field name="password" label="Password" type="password" error={errors.password | default(value="")} autocomplete="new-password" hint="At least 8 characters."/>}}
-  <button type="submit" class="btn btn-primary h-12">Request access</button>
+  <button type="submit" class="btn btn-primary btn-lg">Request access</button>
 </form>
-<p class="mt-6 text-sm text-white/50">Already have an account? <a href="/login" class="text-white/80 hover:text-white">Sign in</a></p>
+<p class="mt-6 text-sm text-muted">Already have an account? <a href="/login" class="text-text hover:text-text">Sign in</a></p>
 {% endblock panel %}

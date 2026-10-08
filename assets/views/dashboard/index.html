@@ -1,92 +1,85 @@
 {% extends "layouts/app.html" %}
-{% block title %}Overview · {{ org.name }}{% endblock title %}
+{% block title %}Home · {{ org.name }}{% endblock title %}
+{% block topbar %}
+<h1 class="text-[17px]!">{{ org.name }}</h1>
+<a href="/more" class="icon-btn min-[900px]:hidden" aria-label="Account and settings">{{<avatar name={me.username} color={me.color} size="sm"/>}}</a>
+{% endblock topbar %}
 {% block content %}
-<div class="space-y-5">
-  <section class="hero-grid overflow-hidden rounded-[28px] border border-white/10 p-6 md:p-8">
-    <div class="relative z-10 grid gap-8 lg:grid-cols-[1.3fr_.7fr] lg:items-center">
-      <div>
-        <div class="mb-5 flex items-center gap-2 text-xs font-medium uppercase tracking-[.18em] text-[#ffb454]">{{<icon name="sparkles"/>}} Overview · {{ org.name }}</div>
-        <h1 class="max-w-3xl text-[clamp(2.4rem,6vw,5.8rem)] font-medium leading-[.92] tracking-[-.06em]">From idea<br><span class="text-white/35">to the first release.</span></h1>
-        <p class="mt-6 max-w-xl text-base leading-7 text-white/55">One shared view of the work, who owns it and how far it has come.</p>
-      </div>
-      <div class="flex items-center justify-center lg:justify-end">
-        <div class="progress-orbit" style="--progress: {{ completion }}%">
-          <div class="progress-core"><span class="text-5xl font-semibold tracking-[-.05em]">{{ completion }}%</span><span class="mt-1 text-xs uppercase tracking-[.18em] text-white/40">Tasks complete</span></div>
-        </div>
-      </div>
-    </div>
+<div class="flex flex-col gap-6">
+  <div>
+    <p class="m-0 text-[26px] font-semibold tracking-tight" data-greeting="{{ me.username }}">Hello, {{ me.username }}</p>
+    <p class="meta m-0 mt-1 text-[15px]" data-local-date>{{ today }}</p>
+  </div>
+
+  <div class="grid grid-cols-3 gap-2">
+    <a href="/tasks" class="card flex flex-col gap-0.5 p-3"><span class="text-[22px] font-semibold">{{ my_open }}</span><span class="meta">Your open tasks</span></a>
+    <a href="/tasks?filter=blocked" class="card flex flex-col gap-0.5 p-3"><span class="text-[22px] font-semibold {% if blocked > 0 %}text-blocked{% endif %}">{{ blocked }}</span><span class="meta">Blocked</span></a>
+    <a href="/chat" class="card flex flex-col gap-0.5 p-3"><span class="text-[22px] font-semibold">{{ unread }}</span><span class="meta">Unread messages</span></a>
+  </div>
+
+  <section class="flex flex-col gap-2">
+    <div class="section-head"><h2>Roadmap: now</h2><a href="/roadmap">Full roadmap</a></div>
+    {% if roadmap_now | length > 0 %}
+    <a href="/roadmap" class="list">
+      {% for p in roadmap_now %}
+      <span class="flex flex-col gap-1.5 px-3.5 py-3">
+        <span class="flex items-center gap-2">
+          <span class="h-2 w-2 shrink-0 rounded-full" style="background: {{ p.accent }}"></span>
+          <span class="truncate-1 flex-1 text-[15px] font-medium">{{ p.name }}</span>
+          {% if p.blocked > 0 %}<span class="text-[13px] font-semibold text-blocked">{{ p.blocked }} blocked</span>{% endif %}
+          <span class="w-9 text-right text-[13px] font-semibold">{{ p.progress }}%</span>
+        </span>
+        <span class="bar" style="--bar: {{ p.accent }}"><span style="width: {{ p.progress }}%"></span></span>
+      </span>
+      {% endfor %}
+    </a>
+    {% else %}
+    <div class="card empty">Nothing in the "now" lane. <a href="/roadmap" class="text-link">Add a project</a></div>
+    {% endif %}
   </section>
 
-  <section class="grid gap-4 md:grid-cols-3">
-    {% for metric in [
-      {"label": "In motion", "value": in_progress, "detail": "active tasks", "color": "#ffb454"},
-      {"label": "Needs attention", "value": blocked, "detail": "blocked tasks", "color": "#ff758f"},
-      {"label": "Team engaged", "value": members_with_tasks ~ "/" ~ team_size, "detail": "people with tasks", "color": "#72e5b4"}
-    ] %}
-    <div class="metric-card">
-      <div class="flex items-center justify-between"><span class="eyebrow">{{ metric.label }}</span><span class="h-2.5 w-2.5 rounded-full" style="background: {{ metric.color }}; box-shadow: 0 0 18px {{ metric.color }}"></span></div>
-      <div class="mt-6 flex items-end gap-3"><strong class="text-5xl font-medium tracking-[-.06em]">{{ metric.value }}</strong><span class="pb-1 text-sm text-white/35">{{ metric.detail }}</span></div>
+  <section class="flex flex-col gap-2">
+    <div class="section-head"><h2>My tasks</h2><a href="/tasks">See all</a></div>
+    {% if my_tasks | length > 0 %}
+    <div class="list">
+      {% for t in my_tasks %}
+      <a href="/tasks" class="list-row">
+        {{<status_icon status={t.status}/>}}
+        <span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-[15px] font-medium">{{ t.title }}</span><span class="meta truncate-1">{{ t.meta }}</span></span>
+      </a>
+      {% endfor %}
     </div>
-    {% endfor %}
+    {% else %}
+    <div class="card empty">Nothing on your plate. <a href="/tasks?new=1" class="text-link">Add a task</a></div>
+    {% endif %}
   </section>
 
-  <section class="panel p-5 md:p-6">
-    <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div><span class="eyebrow">Team progress</span><h2 class="mt-1 text-2xl font-medium tracking-tight">Momentum across the team</h2></div>
-      <span class="text-sm text-white/35">Based on assigned tasks</span>
-    </div>
-    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {% for person in people %}
-      <article class="founder-progress">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-3">{{<avatar name={person.username} color={person.color}/>}}<div><h3 class="font-medium">{{ person.username }}</h3><p class="text-xs text-white/35">{{ person.done }}/{{ person.total }} complete · {{ person.active }} active</p></div></div>
-          <strong class="text-2xl tracking-[-.04em]" style="color: {{ person.color }}">{{ person.score }}%</strong>
-        </div>
-        <div class="progress-track mt-5" style="--bar: {{ person.color }}"><div class="progress-fill" style="width: {{ person.score }}%"></div></div>
-        <div class="mt-3 flex justify-between text-xs text-white/30"><span>Progress score</span>{% if person.blocked > 0 %}<span class="text-[#ff8ca1]">{{ person.blocked }} blocked</span>{% endif %}</div>
-      </article>
+  {% if recent_chats | length > 0 %}
+  <section class="flex flex-col gap-2">
+    <div class="section-head"><h2>Recent chat</h2><a href="/chat">All chats</a></div>
+    <div class="list">
+      {% for c in recent_chats %}
+      <a href="/chat/{{ c.id }}" class="list-row">
+        {% if c.kind == "dm" %}{{<avatar name={c.label} color={c.color} size="md"/>}}{% else %}<span class="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-chip text-muted">{{<icon name="hash" class="h-[18px] w-[18px]"/>}}</span>{% endif %}
+        <span class="flex min-w-0 flex-1 flex-col">
+          <span class="flex justify-between gap-2"><span class="truncate-1 text-[15px] {% if c.unread > 0 %}font-bold{% else %}font-medium{% endif %}">{{ c.label }}</span><span class="meta shrink-0">{{ c.time }}</span></span>
+          <span class="truncate-1 text-sm text-muted">{{ c.last }}</span>
+        </span>
+        {% if c.unread > 0 %}<span class="badge">{{ c.unread }}</span>{% endif %}
+      </a>
       {% endfor %}
     </div>
   </section>
+  {% endif %}
 
-  <section class="grid gap-5 xl:grid-cols-[1.45fr_.8fr]">
-    <div class="panel p-5 md:p-6">
-      <div class="mb-5 flex items-center justify-between">
-        <div><span class="eyebrow">Workstreams</span><h2 class="mt-1 text-2xl font-medium">Moving right now</h2></div>
-        <a href="/roadmap" class="flex items-center gap-1 text-sm text-white/45 hover:text-white">Full roadmap {{<icon name="arrow-right"/>}}</a>
-      </div>
-      <div class="space-y-3">
-        {% for project in workstreams %}
-        <div class="project-row">
-          <span class="project-icon" style="background: {{ project.accent }}16; color: {{ project.accent }}">{{<icon name="circle-dashed" class="h-5 w-5"/>}}</span>
-          <div class="min-w-0 flex-1">
-            <div class="flex justify-between gap-3"><span class="truncate font-medium">{{ project.name }}</span><span class="text-sm text-white/40">{{ project.progress }}%</span></div>
-            <div class="progress-track mt-2 h-1" style="--bar: {{ project.accent }}"><div class="progress-fill" style="width: {{ project.progress }}%"></div></div>
-          </div>
-          {% if project.owner %}{{<avatar name={project.owner} color={project.owner_color}/>}}{% endif %}
-        </div>
-        {% else %}
-        <p class="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-white/35">Nothing in the "now" lane. <a href="/roadmap" class="underline hover:text-white">Add a project</a>.</p>
-        {% endfor %}
-      </div>
-    </div>
-    <div class="panel p-5 md:p-6">
-      <div class="mb-5 flex items-center justify-between">
-        <div><span class="eyebrow">Up next</span><h2 class="mt-1 text-2xl font-medium">Open actions</h2></div>
-        <a href="/tasks" class="round-icon" aria-label="All tasks">{{<icon name="chevron-right"/>}}</a>
-      </div>
-      <div class="space-y-1">
-        {% for task in actions %}
-        <div class="compact-task">
-          <div class="mt-1 h-2 w-2 rounded-full" style="background: {{ task.color }}"></div>
-          <div class="min-w-0 flex-1"><p class="truncate text-sm text-white/72">{{ task.title }}</p><p class="mt-1 truncate text-xs text-white/30">{{ task.project }} · {{ task.due }}</p></div>
-          {% if task.owner %}{{<avatar name={task.owner} color={task.owner_color} small={true}/>}}{% endif %}
-        </div>
-        {% else %}
-        <p class="py-4 text-sm text-white/35">No open tasks. <a href="/tasks?new=1" class="underline hover:text-white">Add one</a>.</p>
-        {% endfor %}
-      </div>
+  {% if decision %}
+  <section class="flex flex-col gap-2">
+    <div class="section-head"><h2>Latest decision</h2><a href="/meetings">Meetings</a></div>
+    <div class="card flex flex-col gap-1 p-3.5">
+      <span class="meta">{{ decision.title }} · {{ decision.held_on }}</span>
+      <span class="whitespace-pre-wrap text-[15px] leading-relaxed">{{ decision.decisions }}</span>
     </div>
   </section>
+  {% endif %}
 </div>
 {% endblock content %}

@@ -35,8 +35,12 @@ async fn creating_a_project_shows_it_in_its_lane() {
             ))
             .await;
         assert_eq!(res.status_code(), 200);
-        assert!(res.text().contains(r#"id="roadmap-lanes""#));
-        assert!(res.text().contains("Design system"));
+        let lane = request
+            .get("/roadmap?lane=next")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
+        assert!(lane.contains("Design system"));
         assert!(res
             .headers()
             .get("HX-Trigger")
@@ -54,8 +58,14 @@ async fn creating_a_project_shows_it_in_its_lane() {
         assert_eq!(saved.owner_id, Some(alice.id));
         assert_eq!(saved.progress, 40);
 
-        let page = request.get("/roadmap").add_header(owner.0, owner.1).await;
-        assert!(page.text().contains("Design system"));
+        // The default "Now" lane does not list it, but the switcher counts it under "Next".
+        let page = request
+            .get("/roadmap")
+            .add_header(owner.0, owner.1)
+            .await
+            .text();
+        assert!(!page.contains("Design system"));
+        assert!(page.contains("Next 1"));
     })
     .await;
 }

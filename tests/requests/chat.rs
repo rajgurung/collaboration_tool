@@ -53,7 +53,7 @@ async fn chat_opens_on_general_and_shows_messages() {
             .await;
         assert_eq!(res.status_code(), 200);
         assert!(res.text().contains("Hello &lt;team&gt;"));
-        assert!(res.text().contains("chat-bubble own"));
+        assert!(res.text().contains("msg msg-own"));
 
         let page = request.get("/chat").add_header(bob.0, bob.1).await;
         assert_eq!(page.status_code(), 200);
@@ -106,15 +106,20 @@ async fn groups_are_private_to_their_members() {
         assert_eq!(group.name.as_deref(), Some("leadership"));
         assert_eq!(
             res.headers().get("location").unwrap().to_str().unwrap(),
-            format!("/chat?c={}", group.id)
+            format!("/chat/{}", group.id)
         );
 
         // Bob is not in the group: he cannot see it, read it, or post to it.
         let page = request
-            .get(&format!("/chat?c={}", group.id))
+            .get(&format!("/chat/{}", group.id))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
-        assert!(!page.text().contains("leadership"));
+        assert_eq!(page.status_code(), 404);
+        let list = request
+            .get("/chat")
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await;
+        assert!(!list.text().contains("leadership"));
         let post = request
             .post(&format!("/chat/{}/messages", group.id))
             .add_header(bob.0, bob.1)
@@ -195,7 +200,7 @@ async fn starting_a_dm_twice_reuses_it() {
             .unwrap()
             .to_string();
         let page = request.get(&location).add_header(bob.0, bob.1).await;
-        assert!(page.text().contains("Private conversation"));
+        assert!(page.text().contains("Direct message"));
 
         let to_self = request
             .post("/chat/dms")
@@ -316,6 +321,86 @@ async fn http_sends_are_published_and_the_feed_reloads() {
             .await;
         assert_eq!(feed.status_code(), 200);
         assert!(feed.text().contains("Standup in 5"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn unread_counts_follow_reading() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let general = general(&ctx).await;
+        // Bob has opened general once, so only newer messages count as unread.
+        request
+            .get(&format!("/chat/{}", general.id))
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await;
+
+        for body in ["First", "Second"] {
+            request
+                .post(&format!("/chat/{}/messages", general.id))
+                .add_header(alice.0.clone(), alice.1.clone())
+                .form(&serde_json::json!({ "body": body }))
+                .await;
+        }
+
+        let badge = request
+            .get("/chat/unread?style=tab")
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await
+            .text();
+        assert!(
+            badge.contains(r#"class="tab-badge""#) && badge.contains(">2<"),
+            "{badge}"
+        );
+        let mine = request
+            .get("/chat/unread")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert_eq!(mine, "", "your own messages are never unread");
+
+        let list = request
+            .get("/chat")
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await
+            .text();
+        assert!(
+            list.contains(r#"aria-label="2 unread""#),
+            "the list shows the count"
+        );
+
+        // Opening the conversation clears it.
+        request
+            .get(&format!("/chat/{}", general.id))
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await;
+        let badge = request
+            .get("/chat/unread")
+            .add_header(bob.0, bob.1)
+            .await
+            .text();
+        assert_eq!(badge, "");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn legacy_chat_links_redirect() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, _bob) = acme_with_bob(&request, &ctx).await;
+        let general = general(&ctx).await;
+        let res = request
+            .get(&format!("/chat?c={}", general.id))
+            .add_header(alice.0, alice.1)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert_eq!(
+            res.headers().get("location").unwrap().to_str().unwrap(),
+            format!("/chat/{}", general.id)
+        );
     })
     .await;
 }

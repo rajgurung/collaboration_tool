@@ -1,17 +1,17 @@
 {% extends "layouts/auth.html" %}
 {% block title %}Sign in · Collaboration Tool{% endblock title %}
 {% block panel %}
-<h2 class="text-3xl font-medium tracking-[-.03em]">Sign in</h2>
-<p class="mt-2 text-sm text-white/50">Welcome back. Use the email you signed up with.</p>
+<h2 class="m-0 text-2xl font-semibold">Sign in</h2>
+<p class="mt-2 text-sm text-muted">Welcome back. Use the email you signed up with.</p>
 <form method="post" action="/login" class="mt-8 grid gap-5">
   {% if notice %}{{<form_alert message={notice} kind="success"/>}}{% endif %}
   {% if error %}{{<form_alert message={error}/>}}{% endif %}
   {{<text_field name="email" label="Email" type="email" value={email} autocomplete="email"/>}}
   {{<text_field name="password" label="Password" type="password" autocomplete="current-password"/>}}
-  <button type="submit" class="btn btn-primary h-12">Sign in</button>
+  <button type="submit" class="btn btn-primary btn-lg">Sign in</button>
 </form>
-<div class="mt-6 flex justify-between text-sm text-white/50">
-  <a href="/forgot" class="hover:text-white">Forgot password?</a>
-  <a href="/signup" class="hover:text-white">Create an organisation</a>
+<div class="mt-6 flex justify-between text-sm text-muted">
+  <a href="/forgot" class="hover:text-text">Forgot password?</a>
+  <a href="/signup" class="hover:text-text">Create an organisation</a>
 </div>
 {% endblock panel %}

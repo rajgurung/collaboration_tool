@@ -1,0 +1,40 @@
+{% extends "layouts/app.html" %}
+{% block title %}More · {{ org.name }}{% endblock title %}
+{% block heading %}More{% endblock heading %}
+{% block content %}
+<div class="flex flex-col gap-5">
+  <div class="card flex items-center gap-3 p-3.5">
+    {{<avatar name={me.username} color={me.color} size="lg"/>}}
+    <div class="min-w-0 flex-1">
+      <p class="m-0 text-[17px] font-semibold">{{ me.username }}</p>
+      <p class="meta m-0 capitalize">{{ me.role }} · {{ org.name }}</p>
+    </div>
+  </div>
+
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Workspace</h2>
+    <div class="list">
+      <a href="/roadmap" class="list-row">{{<icon name="map" class="h-5 w-5"/>}}<span class="flex-1 text-base">Roadmap</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      <a href="/meetings" class="list-row">{{<icon name="message-square-text" class="h-5 w-5"/>}}<span class="flex-1 text-base">Meetings</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      <a href="/members" class="list-row">{{<icon name="users" class="h-5 w-5"/>}}<span class="flex-1 text-base">Members</span>{% if waiting > 0 %}<span class="pill bg-active">{{ waiting }} waiting</span>{% endif %}{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+    </div>
+  </section>
+
+  {% if me.is_super_admin %}
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Platform</h2>
+    <div class="list">
+      <a href="/admin" class="list-row">{{<icon name="shield" class="h-5 w-5"/>}}<span class="flex-1 text-base">Admin</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Account</h2>
+    <div class="list">
+      <div class="list-row">{{<icon name="sun-moon" class="h-5 w-5"/>}}<span class="flex-1 text-base">Appearance</span><span class="meta text-[15px]">Matches your device</span></div>
+      <form action="/logout" method="post"><button type="submit" class="list-row w-full border-0 bg-transparent text-left text-base text-danger">{{<icon name="log-out" class="h-5 w-5"/>}}Sign out</button></form>
+    </div>
+  </section>
+</div>
+{% endblock content %}

@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use loco_rs::prelude::*;
 
 use crate::{
+    controllers::chat,
     extractors::current_member::CurrentMember,
-    models::{memberships, projects, tasks},
-    views::layout::avatar_color,
+    models::{meetings, memberships, projects, tasks},
 };
 
-/// How many open tasks the overview lists.
-const OPEN_ACTIONS: usize = 4;
+/// How many of your open tasks Home lists.
+const MY_TASKS: usize = 4;
+/// How many conversations Home lists.
+const RECENT_CHATS: usize = 2;
 
 #[debug_handler]
 async fn index(
@@ -18,72 +20,84 @@ async fn index(
     ViewEngine(v): ViewEngine<TeraView>,
 ) -> Result<Response> {
     let org_id = member.org.id;
-    let team = memberships::Model::team(&ctx.db, org_id).await?;
-    let names: HashMap<i64, &str> = team.iter().map(|(id, n)| (*id, n.as_str())).collect();
+    let me = member.user.id;
+    let names: HashMap<i64, String> = memberships::Model::team(&ctx.db, org_id)
+        .await?
+        .into_iter()
+        .collect();
     let all_tasks = tasks::Model::list_for_org(&ctx.db, org_id).await?;
     let all_projects = projects::Model::list_for_org(&ctx.db, org_id).await?;
     let project_names: HashMap<i64, &str> = all_projects
         .iter()
         .map(|p| (p.id, p.name.as_str()))
         .collect();
-    let count = |status: &str| all_tasks.iter().filter(|t| t.status == status).count();
 
-    let people: Vec<serde_json::Value> = team
+    // Your open work, blocked first.
+    let rank = |s: &str| match s {
+        "blocked" => 0,
+        "progress" => 1,
+        _ => 2,
+    };
+    let mut mine: Vec<&tasks::Model> = all_tasks
         .iter()
-        .map(|(id, username)| {
-            let owned: Vec<&str> = all_tasks
+        .filter(|t| t.owner_id == Some(me) && t.status != "done")
+        .collect();
+    mine.sort_by_key(|t| rank(&t.status));
+    let my_open = mine.len();
+    let my_tasks: Vec<serde_json::Value> = mine
+        .iter()
+        .take(MY_TASKS)
+        .map(|t| {
+            let project = project_names
+                .get(&t.project_id)
+                .copied()
+                .unwrap_or_default();
+            let lead = match (t.status.as_str(), t.due_on) {
+                ("blocked", _) => "Blocked".to_string(),
+                (_, Some(d)) => format!("Due {}", d.format("%a %-d %b")),
+                _ => String::new(),
+            };
+            let meta = [lead.as_str(), project]
                 .iter()
-                .filter(|t| t.owner_id == Some(*id))
-                .map(|t| t.status.as_str())
-                .collect();
-            let n = |s: &str| owned.iter().filter(|x| **x == s).count();
-            serde_json::json!({
-                "username": username,
-                "color": avatar_color(username),
-                "score": tasks::progress_score(owned.iter().copied()),
-                "total": owned.len(),
-                "done": n("done"),
-                "active": n("progress"),
-                "blocked": n("blocked"),
-            })
+                .filter(|s| !s.is_empty())
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" · ");
+            serde_json::json!({ "id": t.id, "title": t.title, "status": t.status, "meta": meta })
         })
         .collect();
-    let members_with_tasks = team
-        .iter()
-        .filter(|(id, _)| all_tasks.iter().any(|t| t.owner_id == Some(*id)))
-        .count();
 
-    let workstreams: Vec<serde_json::Value> = all_projects
+    let blocked = all_tasks.iter().filter(|t| t.status == "blocked").count();
+
+    // The "now" lane, with how much of each project is stuck.
+    let roadmap_now: Vec<serde_json::Value> = all_projects
         .iter()
         .filter(|p| p.lane == "now")
         .map(|p| {
-            let owner = p.owner_id.and_then(|id| names.get(&id).copied());
-            serde_json::json!({
-                "name": p.name,
-                "progress": p.progress,
-                "accent": p.accent,
-                "owner": owner,
-                "owner_color": owner.map_or("#e8dfce", avatar_color),
-            })
+            let stuck = all_tasks.iter().filter(|t| t.project_id == p.id && t.status == "blocked").count();
+            serde_json::json!({ "name": p.name, "progress": p.progress, "accent": p.accent, "blocked": stuck })
         })
         .collect();
 
-    let actions: Vec<serde_json::Value> = all_tasks
+    let chats = chat::list_items(&ctx, &member, &names).await?;
+    let unread: u64 = chats.iter().map(|c| c.unread).sum();
+    let recent: Vec<&chat::ListItem> = chats
         .iter()
-        .filter(|t| t.status != "done")
-        .take(OPEN_ACTIONS)
-        .map(|t| {
-            let owner = t.owner_id.and_then(|id| names.get(&id).copied());
-            serde_json::json!({
-                "title": t.title,
-                "color": tasks::STATUSES.iter().find(|(k, _, _)| *k == t.status).map_or("#9ca3af", |(_, _, c)| *c),
-                "project": project_names.get(&t.project_id).copied().unwrap_or_default(),
-                "due": t.due_on.map_or_else(|| "No date".to_string(), |d| d.format("%d %b").to_string()),
-                "owner": owner,
-                "owner_color": owner.map_or("#e8dfce", avatar_color),
-            })
-        })
+        .filter(|c| c.last.is_some())
+        .take(RECENT_CHATS)
         .collect();
+
+    let decision = meetings::Model::list_for_org(&ctx.db, org_id)
+        .await?
+        .into_iter()
+        .find(|(m, _)| !m.decisions.trim().is_empty())
+        .map(|(m, _)| {
+            serde_json::json!({
+                "title": m.title,
+                "held_on": m.held_on.format("%a %-d %b").to_string(),
+                "decisions": m.decisions,
+            })
+        });
 
     format::render().view(
         &v,
@@ -91,14 +105,14 @@ async fn index(
         member.page(
             "dashboard",
             data!({
-                "completion": tasks::completion(all_tasks.iter().map(|t| t.status.as_str())),
-                "in_progress": count("progress"),
-                "blocked": count("blocked"),
-                "members_with_tasks": members_with_tasks,
-                "team_size": team.len(),
-                "people": people,
-                "workstreams": workstreams,
-                "actions": actions,
+                "my_open": my_open,
+                "blocked": blocked,
+                "unread": unread,
+                "my_tasks": my_tasks,
+                "roadmap_now": roadmap_now,
+                "recent_chats": recent,
+                "decision": decision,
+                "today": chrono::Utc::now().format("%A %-d %B").to_string(),
             }),
         ),
     )

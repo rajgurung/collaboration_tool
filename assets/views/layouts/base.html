@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}Collaboration Tool{% endblock title %}</title>
-  <meta name="description" content="A shared workspace for roadmaps, tasks, progress, meetings and team chat.">
+  <meta name="description" content="A shared workspace for roadmaps, tasks, meetings and team chat.">
+  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
   <!-- Swap 422 responses (forms re-rendered with errors) but still treat them as errors. -->
   <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true,"error":true},{"code":"[45]..","swap":false,"error":true}]}'>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
@@ -13,7 +15,7 @@
   <script src="/static/vendor/htmx-ext-ws.js" defer></script>
   <script src="/static/js/app.js" defer></script>
 </head>
-<body class="antialiased" {% block body_attrs %}{% endblock body_attrs %}>
+<body {% block body_attrs %}{% endblock body_attrs %}>
   {% block body %}{% endblock body %}
   {% if flash %}<div hidden data-flash="{{ flash.kind | default(value='info') }}">{{ flash.message }}</div>{% endif %}
 </body>

@@ -1,19 +1,21 @@
-<div class="project-row flex-wrap" data-member-row id="member-{{ row.id }}">
-  {{<avatar name={row.username} color={row.color}/>}}
+<div class="list-row flex-wrap" data-member-row id="member-{{ row.id }}">
+  {{<avatar name={row.username} color={row.color} size="md"/>}}
   <div class="min-w-0 flex-1">
-    <p class="truncate font-medium">{{ row.username }}</p>
-    <p class="truncate text-xs text-white/40">{{ row.email }}</p>
+    <p class="truncate-1 m-0 font-medium">{{ row.username }}</p>
+    <p class="meta truncate-1 m-0">{{ row.email }}</p>
   </div>
   {% if row.status == "pending" %}
   <div class="flex gap-2">
     <form method="post" action="/members/{{ row.id }}/reject" hx-post="/members/{{ row.id }}/reject" hx-target="#member-{{ row.id }}" hx-swap="outerHTML">
-      <button type="submit" class="btn btn-danger btn-sm">Decline</button>
+      <button type="submit" class="btn btn-danger">Decline</button>
     </form>
     <form method="post" action="/members/{{ row.id }}/approve" hx-post="/members/{{ row.id }}/approve" hx-target="#member-{{ row.id }}" hx-swap="outerHTML">
-      <button type="submit" class="btn btn-primary btn-sm">Approve</button>
+      <button type="submit" class="btn btn-primary">Approve</button>
     </form>
   </div>
+  {% elif row.status == "active" %}
+  <span class="pill">Approved</span>
   {% else %}
-  <span class="note-meta">Declined</span>
+  <span class="pill">Declined</span>
   {% endif %}
 </div>

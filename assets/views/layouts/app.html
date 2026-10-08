@@ -1,62 +1,45 @@
 {% extends "layouts/base.html" %}
 {% block body %}
-{% set nav = [
-  {"key": "dashboard", "href": "/dashboard", "label": "Overview", "icon": "layout-dashboard"},
-  {"key": "roadmap", "href": "/roadmap", "label": "Roadmap", "icon": "map"},
-  {"key": "tasks", "href": "/tasks", "label": "Tasks", "icon": "list-todo"},
-  {"key": "meetings", "href": "/meetings", "label": "Meetings", "icon": "message-square-text"},
-  {"key": "chat", "href": "/chat", "label": "Chat", "icon": "messages-square"}
-] %}
-<main class="min-h-screen overflow-x-hidden bg-[#0b0b10] text-[#f8f3e8]">
-  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
-  <header class="sticky top-0 z-40 border-b border-white/8 bg-[#0b0b10]/80 backdrop-blur-xl">
-    <div class="mx-auto flex h-[68px] max-w-[1500px] items-center gap-3 px-4 md:h-20 md:gap-5 md:px-5 lg:px-8">
-      <a href="/dashboard" class="flex min-w-0 items-center gap-3">
-        {{<logo/>}}
-        <span class="min-w-0 text-left">
-          <strong class="block truncate text-[13px] tracking-[.08em] uppercase sm:text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong>
-          <span class="hidden text-[11px] uppercase tracking-[.18em] text-white/40 sm:block">Team workspace</span>
-        </span>
-      </a>
-      <form action="/tasks" method="get" class="mx-auto hidden w-full max-w-md items-center rounded-full border border-white/8 bg-white/[.035] px-4 md:flex">
-        {{<icon name="search" class="h-4 w-4 text-white/35"/>}}
-        <input name="q" aria-label="Search tasks" placeholder="Search work and owners…" value="{{ q | default(value='') }}" class="h-10 w-full bg-transparent px-3 text-sm outline-none placeholder:text-white/35">
-      </form>
-      <div class="ml-auto flex shrink-0 items-center gap-2">
-        {% if me %}
-        <span class="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/65 sm:flex">
-          {{<avatar name={me.username} color={me.color | default(value="#e8dfce")} small={true}/>}}<span class="max-w-24 truncate">{{ me.username }}</span>
-        </span>
-        {% endif %}
-        {% if me.is_super_admin %}<a href="/admin" title="Platform admin" class="round-icon">{{<icon name="shield"/>}}</a>{% endif %}
-        <a href="/members" title="Members" class="round-icon">{{<icon name="users"/>}}</a>
-        <a href="/tasks?new=1" aria-label="Add task" class="btn btn-primary h-10 w-10 p-0 sm:w-auto sm:px-4">{{<icon name="plus"/>}}<span class="hidden sm:inline">Add task</span></a>
-        <form action="/logout" method="post">
-          <button type="submit" title="Sign out" class="round-icon">{{<icon name="log-out"/>}}</button>
-        </form>
-      </div>
+{# Mobile tabs are Home, Tasks, Chat, More; everything else sits under More. #}
+{% set tab = "home" if active == "dashboard" else ("tasks" if active == "tasks" else ("chat" if active == "chat" else "more")) %}
+<div class="shell">
+  <aside class="sidebar" aria-label="Main">
+    <a href="/dashboard" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
+    <a href="/dashboard" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
+    <a href="/tasks" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
+    <a href="/chat" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="/chat/unread" hx-trigger="load, every 60s"></span></a>
+    <a href="/roadmap" class="side-link" {% if active == "roadmap" %}aria-current="page"{% endif %}>{{<icon name="map" class="h-5 w-5"/>}}Roadmap</a>
+    <a href="/meetings" class="side-link" {% if active == "meetings" %}aria-current="page"{% endif %}>{{<icon name="message-square-text" class="h-5 w-5"/>}}Meetings</a>
+    <a href="/members" class="side-link" {% if active == "members" %}aria-current="page"{% endif %}>{{<icon name="users" class="h-5 w-5"/>}}Members</a>
+    {% if me.is_super_admin %}<a href="/admin" class="side-link" {% if active == "admin" %}aria-current="page"{% endif %}>{{<icon name="shield" class="h-5 w-5"/>}}Admin</a>{% endif %}
+    <div class="mt-auto flex items-center gap-3 border-t border-line px-2 pt-3">
+      {% if me %}{{<avatar name={me.username} color={me.color | default(value="#e8dfce")} size="md"/>}}<span class="truncate-1 flex-1 text-sm font-medium">{{ me.username }}</span>{% endif %}
+      <form action="/logout" method="post"><button type="submit" class="icon-btn" aria-label="Sign out" title="Sign out">{{<icon name="log-out" class="h-5 w-5"/>}}</button></form>
     </div>
-  </header>
-  {% if me.acting %}
-  <div class="relative z-30 border-b border-[#ffb45433] bg-[#ffb45414] px-4 py-2 text-sm text-[#ffd59a]">
-    <div class="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-2">
-      <span>{{<icon name="shield" class="inline h-4 w-4"/>}} You are inside <strong>{{ org.name }}</strong> as platform admin. Changes you make are real.</span>
-      <form method="post" action="/admin/leave"><button type="submit" class="btn btn-ghost btn-sm">Leave</button></form>
+  </aside>
+
+  <div class="min-w-0">
+    {% if me.acting %}
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-active px-4 py-2 text-sm">
+      <span>You are inside <strong>{{ org.name }}</strong> as platform admin. Changes you make are real.</span>
+      <form method="post" action="/admin/leave"><button type="submit" class="btn btn-secondary">Leave</button></form>
     </div>
+    {% endif %}
+    {% block main %}
+    <header class="topbar">
+      {% block topbar %}<h1>{% block heading %}{% endblock heading %}</h1>{% block actions %}{% endblock actions %}{% endblock topbar %}
+    </header>
+    <main class="page">{% block content %}{% endblock content %}</main>
+    {% endblock main %}
   </div>
-  {% endif %}
-  <div class="relative z-10 mx-auto max-w-[1500px] px-4 py-4 pb-28 md:px-5 md:py-5 md:pb-5 lg:px-8 lg:py-7">
-    <nav class="mb-5 hidden w-fit gap-1 rounded-2xl border border-white/8 bg-white/[.035] p-1.5 md:flex" aria-label="Sections">
-      {% for item in nav %}
-      <a href="{{ item.href }}" class="tab-link flex items-center gap-2" {% if active == item.key %}aria-current="page"{% endif %}>{{<icon name={item.icon}/>}}{{ item.label }}</a>
-      {% endfor %}
-    </nav>
-    {% block content %}{% endblock content %}
-  </div>
-  <nav class="mobile-bottom-nav md:hidden" aria-label="Sections">
-    {% for item in nav %}
-    <a href="{{ item.href }}" aria-label="{{ item.label }}" class="mobile-bottom-item" {% if active == item.key %}data-state="active"{% endif %}>{{<icon name={item.icon} class="h-5 w-5"/>}}<span>{{ item.label }}</span></a>
-    {% endfor %}
-  </nav>
-</main>
+</div>
+
+{% block tabbar %}
+<nav class="tabbar" aria-label="Main">
+  <a href="/dashboard" class="tab" {% if tab == "home" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="house" class="h-[22px] w-[22px]"/>}}</span>Home</a>
+  <a href="/tasks" class="tab" {% if tab == "tasks" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="list-todo" class="h-[22px] w-[22px]"/>}}</span>Tasks</a>
+  <a href="/chat" class="tab" {% if tab == "chat" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="message-circle" class="h-[22px] w-[22px]"/>}}<span hx-get="/chat/unread?style=tab" hx-trigger="load, every 60s"></span></span>Chat</a>
+  <a href="/more" class="tab" {% if tab == "more" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="ellipsis" class="h-[22px] w-[22px]"/>}}</span>More</a>
+</nav>
+{% endblock tabbar %}
 {% endblock body %}
