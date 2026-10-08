@@ -6,6 +6,7 @@ pub use super::meeting_attendees::Entity as MeetingAttendees;
 pub use super::meetings::Entity as Meetings;
 pub use super::memberships::Entity as Memberships;
 pub use super::messages::Entity as Messages;
+pub use super::notifications::Entity as Notifications;
 pub use super::organisations::Entity as Organisations;
 pub use super::projects::Entity as Projects;
 pub use super::task_assignees::Entity as TaskAssignees;

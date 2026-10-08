@@ -8,6 +8,7 @@ pub mod meeting_attendees;
 pub mod meetings;
 pub mod memberships;
 pub mod messages;
+pub mod notifications;
 pub mod organisations;
 pub mod projects;
 pub mod task_assignees;

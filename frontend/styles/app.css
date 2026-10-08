@@ -249,7 +249,7 @@
   .project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
   .project-card:hover, a.stat:hover { box-shadow: var(--shadow-lift); transform: translateY(-1px); }
   .decision { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
-  .home-grid { display: grid; gap: 28px; }
+  .home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
 
   /* Roadmap: one lane with a switcher on phones, three columns on desktop */
   .roadmap-col:not([data-current]) { display: none; }
@@ -355,4 +355,22 @@
   .toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
   .toast-error { background: var(--danger); color: #fff; }
   @media (min-width: 900px) { .toast-region { left: auto; right: 24px; bottom: 24px; justify-items: end; } }
+
+  /* Notifications and mentions */
+  .bell-btn { position: relative; }
+  .bell-badge { position: absolute; top: 4px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+  .notice { width: 100%; align-items: flex-start; padding: 14px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .notice-unread { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+  .notice-kind { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface); color: var(--muted); }
+  .notice-mention { color: var(--progress); }
+  .notice-assigned, .notice-owner { color: var(--accent); }
+  .notice-note { color: var(--done); }
+  .notice-project { color: var(--blocked); }
+  .notice-dot { flex-shrink: 0; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .mention { padding: 0 2px; border-radius: 4px; font-weight: 600; color: var(--progress); background: color-mix(in srgb, var(--progress) 12%, transparent); }
+  :has(> textarea[data-mentions]) { position: relative; }
+  .mention-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 180px; max-width: 280px; margin: 0; padding: 6px; list-style: none; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-lift); }
+  .mention-menu li { padding: 8px 10px; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; }
+  .mention-menu li[aria-selected="true"], .mention-menu li:hover { background: var(--chip); }
+  .msg-own .mention { color: inherit; background: color-mix(in srgb, var(--own-text) 10%, transparent); }
 }

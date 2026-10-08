@@ -33,4 +33,5 @@ pub fn field_error(field: &str, message: &str) -> ModelError {
         )]),
     })
 }
+pub mod notifications;
 pub mod task_assignees;

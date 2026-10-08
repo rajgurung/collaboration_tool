@@ -127,7 +127,8 @@ async fn receive(session: &Session, text: &str) -> Result<()> {
     let message =
         messages::Model::create(db, &conversation, session.user_id, &MessageParams { body })
             .await?;
-    publish(&session.ctx, session.org_id, &message).await
+    publish(&session.ctx, session.org_id, &message).await?;
+    super::notifications::message_sent(&session.ctx, session.org_id, &conversation, &message).await
 }
 
 /// Announces a saved message to every socket following its conversation.

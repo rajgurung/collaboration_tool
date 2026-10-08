@@ -34,5 +34,6 @@
   {% include "tasks/_list.html" %}
 </div>
 <dialog id="task-dialog" class="sheet" aria-label="New task"><div class="sheet-handle"></div><div id="task-dialog-body" class="sheet-body"></div></dialog>
+{% if open_task %}<span hidden hx-get="/tasks/{{ open_task }}" hx-target="#task-sheet-body" hx-trigger="load" hx-on::after-request="if (event.detail.successful) document.getElementById('task-sheet').showModal()"></span>{% endif %}
 <dialog id="task-sheet" class="sheet sheet-side" aria-label="Task details"><div class="sheet-handle"></div><div id="task-sheet-body" class="sheet-body"></div></dialog>
 {% endblock content %}

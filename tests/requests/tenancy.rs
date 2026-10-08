@@ -156,7 +156,7 @@ async fn org_a_cannot_reach_org_b() {
 
         // 1. Every page Alice can open shows nothing of Globex.
         for page in [
-            "/dashboard", "/roadmap", "/tasks", "/tasks/list", "/tasks/board", "/tasks?view=list", "/tasks?group=person", "/more", "/meetings", "/chat", "/members",
+            "/dashboard", "/roadmap", "/tasks", "/tasks/list", "/tasks/board", "/tasks?view=list", "/tasks?group=person", "/more", "/meetings", "/chat", "/members", "/notifications",
             "/tasks/new", "/meetings/new", "/roadmap/projects/new", "/chat/groups/new", "/chat/dms/new",
         ] {
             let res = request.get(page).add_header(a.0.clone(), a.1.clone()).await;

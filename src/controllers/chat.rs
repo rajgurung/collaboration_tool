@@ -12,6 +12,7 @@ use crate::{
         conversations::{self, kind, GroupParams},
         memberships,
         messages::{self, MessageParams},
+        notifications::{mention_parts, Part},
     },
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
@@ -58,6 +59,8 @@ pub struct MessageView {
     pub author: String,
     pub color: &'static str,
     pub body: String,
+    /// The body split so mentions of teammates can be highlighted.
+    pub parts: Vec<Part>,
     pub at: String,
     pub own: bool,
     pub start: bool,
@@ -76,6 +79,13 @@ impl MessageView {
             author_id: message.user_id,
             color: avatar_color(&author),
             author,
+            parts: mention_parts(
+                &message.body,
+                &names
+                    .iter()
+                    .map(|(id, n)| (*id, n.clone()))
+                    .collect::<Vec<_>>(),
+            ),
             body: message.body.clone(),
             at: message.created_at.format("%H:%M").to_string(),
             own: message.user_id == viewer_id,
@@ -252,6 +262,10 @@ async fn show(
                     "color": avatar_color(&label),
                     "label": label,
                     "members": people,
+                    "mention_names": super::tasks::mention_names(
+                        &people.iter().map(|p| (p.id, p.username.clone())).collect::<Vec<_>>(),
+                        me,
+                    ),
                 },
                 "messages": feed,
             }),
@@ -304,6 +318,7 @@ async fn send(
     let result = messages::Model::create(&ctx.db, &conversation, member.user.id, &params).await;
     if let Ok(message) = &result {
         super::chat_ws::publish(&ctx, member.org.id, message).await?;
+        super::notifications::message_sent(&ctx, member.org.id, &conversation, message).await?;
     }
     match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(

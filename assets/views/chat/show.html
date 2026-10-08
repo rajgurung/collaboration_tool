@@ -21,7 +21,7 @@
     </div>
     <form class="composer" method="post" action="/chat/{{ conversation.id }}/messages" ws-send>
       <label class="sr-only" for="composer-body">Message</label>
-      <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
+      <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}" autocomplete="off" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
       <button type="submit" class="btn btn-primary h-11 w-11 p-0" aria-label="Send">{{<icon name="send" class="h-5 w-5"/>}}</button>
     </form>
   </section>

@@ -919,6 +919,7 @@ dependencies = [
  "chrono",
  "cookie",
  "fluent-templates",
+ "futures-util",
  "include_dir",
  "insta",
  "loco-rs",

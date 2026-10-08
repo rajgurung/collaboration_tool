@@ -6,6 +6,7 @@
   <aside class="sidebar" aria-label="Main">
     <a href="/dashboard" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo letter={org.name | default(value="C") | truncate(length=1, end="")}/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
     <a href="/dashboard" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
+    <a href="/notifications" class="side-link" {% if active == "notifications" %}aria-current="page"{% endif %}>{{<icon name="bell" class="h-5 w-5"/>}}<span class="flex-1">Notifications</span><span hx-get="/notifications/unread" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>
     <a href="/tasks" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
     <a href="/chat" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="/chat/unread" hx-trigger="load, every 60s"></span></a>
     <a href="/roadmap" class="side-link" {% if active == "roadmap" %}aria-current="page"{% endif %}>{{<icon name="map" class="h-5 w-5"/>}}Roadmap</a>
@@ -28,6 +29,7 @@
     {% block main %}
     <header class="topbar">
       {% block topbar %}<h1>{% block heading %}{% endblock heading %}</h1>{% block actions %}{% endblock actions %}{% endblock topbar %}
+      {% if me and active != "notifications" %}<a href="/notifications" class="icon-btn bell-btn mobile-only" aria-label="Notifications">{{<icon name="bell" class="h-[22px] w-[22px]"/>}}<span hx-get="/notifications/unread?style=dot" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>{% endif %}
     </header>
     <main class="page {% block page_class %}{% endblock page_class %}">{% block content %}{% endblock content %}</main>
     {% endblock main %}

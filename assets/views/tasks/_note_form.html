@@ -1,7 +1,7 @@
 <form id="note-form" method="post" action="/tasks/{{ task.id }}/notes" hx-post="/tasks/{{ task.id }}/notes" hx-target="#task-sheet-body" class="flex flex-col gap-2">
   <div class="flex items-end gap-2">
     <label class="sr-only" for="note-body">Add a note</label>
-    <textarea id="note-body" name="body" rows="1" required data-autogrow class="input min-h-11 resize-none rounded-[22px] px-4" placeholder="Add a note…">{{ note_body }}</textarea>
+    <textarea id="note-body" name="body" rows="1" required data-autogrow data-mentions="{{ mention_names }}" autocomplete="off" class="input min-h-11 resize-none rounded-[22px] px-4" placeholder="Add a note…">{{ note_body }}</textarea>
     <button type="submit" class="btn btn-primary h-11 w-11 shrink-0 p-0" aria-label="Post note">{{<icon name="send" class="h-5 w-5"/>}}</button>
   </div>
   {% if errors.body %}<p class="field-error m-0">{{ errors.body }}</p>{% endif %}
