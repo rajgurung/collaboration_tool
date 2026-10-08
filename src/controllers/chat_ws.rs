@@ -16,7 +16,7 @@ use crate::{
     },
     extractors::current_member::CurrentMember,
     models::{
-        conversations,
+        conversation_members, conversations,
         messages::{self, MessageParams},
     },
 };
@@ -89,6 +89,14 @@ async fn run(mut socket: WebSocket, session: Session) {
                             if socket.send(Message::Text(html.into())).await.is_err() {
                                 break;
                             }
+                            // The viewer has this conversation open, so it is read.
+                            let _ = conversation_members::Model::mark_read(
+                                &session.ctx.db,
+                                session.org_id,
+                                session.conversation_id,
+                                session.user_id,
+                            )
+                            .await;
                         }
                         Err(err) => tracing::error!(error = %err, "could not render chat message"),
                     }

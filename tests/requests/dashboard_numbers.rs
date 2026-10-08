@@ -83,18 +83,31 @@ async fn dashboard_numbers_follow_the_tasks() {
             .add_header(cookie.0, cookie.1)
             .await
             .text();
-        assert!(body.contains("--progress: 33%"), "completion");
-        assert!(body.contains(">58%</strong>"), "alice's progress score");
-        assert!(body.contains("1/2 complete"), "alice's counts");
-        assert!(body.contains(">1/1</strong>"), "members with tasks");
-        assert!(body.contains("Launch"), "now-lane workstream");
+        let compact: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            body.contains("Book venue") && body.contains("Pick a date"),
-            "open actions"
+            compact.contains(r#"font-semibold">1</span><span class="meta">Your open tasks"#),
+            "alice has one open task"
         );
         assert!(
-            !body.contains("Write copy"),
-            "done tasks are not listed as actions"
+            compact.contains(r#"text-blocked">1</span><span class="meta">Blocked"#),
+            "one blocked task in the org"
+        );
+        assert!(
+            compact.contains("Launch") && compact.contains("40%"),
+            "now-lane project with progress"
+        );
+        assert!(
+            compact.contains("1 blocked"),
+            "the project shows its blocked task"
+        );
+        assert!(
+            compact.contains("Book venue"),
+            "alice's open task is listed"
+        );
+        assert!(!compact.contains("Write copy"), "done tasks are not listed");
+        assert!(
+            !compact.contains("Pick a date"),
+            "other people's tasks are not in My tasks"
         );
     })
     .await;

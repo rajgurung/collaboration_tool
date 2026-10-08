@@ -1,24 +1,24 @@
 <form id="group-form" method="post" action="/chat/groups" hx-post="/chat/groups" class="grid gap-5">
   <div>
-    <h2 class="modal-title">Create a new group</h2>
-    <p class="modal-description">Give the group a name and choose who should be included.</p>
+    <h2 class="m-0 text-xl font-semibold">New group</h2>
+    <p class="meta mt-1 mb-0 text-sm">Name the group and choose who is in it.</p>
   </div>
   {{<text_field name="name" label="Group name" value={form.name} error={errors.name | default(value="")}/>}}
-  <fieldset class="field">
+  <fieldset class="field m-0 border-0 p-0">
     <legend class="field-label mb-2">Members</legend>
-    {% if team | length == 0 %}<p class="text-sm text-white/45">Nobody else is on the team yet.</p>{% endif %}
-    <div class="grid gap-2 sm:grid-cols-2">
+    {% if team | length == 0 %}<p class="meta">Nobody else is on the team yet.</p>{% endif %}
+    <div class="list">
       {% for person in team %}
-      <label class="member-choice cursor-pointer">
-        <input type="checkbox" name="member_ids" value="{{ person.id }}" {% if person.id in form.member_ids %}checked{% endif %}>
-        {{<avatar name={person.username} color={person.color} small={true}/>}}<span>{{ person.username }}</span>
+      <label class="list-row cursor-pointer">
+        <input type="checkbox" name="member_ids" value="{{ person.id }}" class="h-5 w-5 accent-[var(--accent)]" {% if person.id in form.member_ids %}checked{% endif %}>
+        {{<avatar name={person.username} color={person.color} size="sm"/>}}<span class="flex-1">{{ person.username }}</span>
       </label>
       {% endfor %}
     </div>
     {% if errors.member_ids %}<span class="field-error">{{ errors.member_ids }}</span>{% endif %}
   </fieldset>
   <div class="flex justify-end gap-2">
-    <button type="button" class="btn btn-ghost" data-dialog-close>Cancel</button>
+    <button type="button" class="btn btn-secondary" data-dialog-close>Cancel</button>
     <button type="submit" class="btn btn-primary">Create group</button>
   </div>
 </form>

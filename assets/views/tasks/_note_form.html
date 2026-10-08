@@ -1,9 +1,8 @@
-<form id="note-form" method="post" action="/tasks/{{ task.id }}/notes" hx-post="/tasks/{{ task.id }}/notes" hx-target="#task-sheet-body" class="mt-7 rounded-2xl border border-white/10 bg-white/[.035] p-4">
-  <div class="mb-3 flex items-center gap-2">
-    {{<avatar name={me.username} color={me.color} small={true}/>}}
-    <span class="text-sm text-white/55">Posting as <strong class="text-white/80">{{ me.username }}</strong></span>
+<form id="note-form" method="post" action="/tasks/{{ task.id }}/notes" hx-post="/tasks/{{ task.id }}/notes" hx-target="#task-sheet-body" class="flex flex-col gap-2">
+  <div class="flex items-end gap-2">
+    <label class="sr-only" for="note-body">Add a note</label>
+    <textarea id="note-body" name="body" rows="1" required data-autogrow class="input min-h-11 resize-none rounded-[22px] px-4" placeholder="Add a note…">{{ note_body }}</textarea>
+    <button type="submit" class="btn btn-primary h-11 w-11 shrink-0 p-0" aria-label="Post note">{{<icon name="send" class="h-5 w-5"/>}}</button>
   </div>
-  <textarea name="body" class="input min-h-28 resize-none bg-[#0d0d12]" placeholder="Share an update or ask a question…" required>{{ note_body }}</textarea>
-  {% if errors.body %}<p class="field-error mt-2">{{ errors.body }}</p>{% endif %}
-  <button type="submit" class="btn btn-primary mt-3 w-full">{{<icon name="send"/>}}Post note</button>
+  {% if errors.body %}<p class="field-error m-0">{{ errors.body }}</p>{% endif %}
 </form>

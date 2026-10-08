@@ -1,18 +1,9 @@
 {% extends "layouts/base.html" %}
 {% block body %}
-<main class="auth-stage">
-  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
-  <section class="auth-story">
-    <div>
-      <a href="/" class="flex items-center gap-3">{{<logo/>}}<strong class="tracking-[.1em] uppercase">Collaboration Tool</strong></a>
-      <h1 class="mt-16 max-w-2xl text-5xl font-medium tracking-[-.05em] md:text-7xl">{% block headline %}Every promise has an owner.{% endblock headline %}</h1>
-      <p class="mt-6 max-w-xl text-lg leading-8 text-white/50">Roadmaps, tasks, meetings and team chat in one shared workspace.</p>
-    </div>
-  </section>
-  <section class="auth-panel">
-    <div class="w-full max-w-sm">
-      {% block panel %}{% endblock panel %}
-    </div>
-  </section>
+<main class="auth">
+  <div class="auth-card">
+    <a href="/" class="mb-8 flex items-center gap-3">{{<logo/>}}<strong class="text-[15px]">Collaboration Tool</strong></a>
+    {% block panel %}{% endblock panel %}
+  </div>
 </main>
 {% endblock body %}

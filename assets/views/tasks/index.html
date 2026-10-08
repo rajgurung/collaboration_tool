@@ -1,21 +1,27 @@
 {% extends "layouts/app.html" %}
 {% block title %}Tasks · {{ org.name }}{% endblock title %}
+{% block heading %}Tasks{% endblock heading %}
+{% block actions %}
+<button type="button" class="icon-btn" aria-label="Search tasks" data-toggle="#task-search">{{<icon name="search" class="h-5 w-5"/>}}</button>
+<button type="button" class="btn btn-primary" id="new-task-button"
+        hx-get="/tasks/new" hx-target="#task-dialog-body"
+        hx-trigger="click{% if open_new %}, load{% endif %}"
+        hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}Task</button>
+{% endblock actions %}
 {% block content %}
-<section class="space-y-5">
-  <div class="flex flex-col justify-between gap-5 py-3 md:flex-row md:items-end">
-    {{<page_header eyebrow="Shared action list" title="Every promise has an owner" description="Move work forward, leave context, and keep the team aligned."/>}}
-    <button type="button" class="btn btn-primary self-start md:self-auto" id="new-task-button"
-            hx-get="/tasks/new" hx-target="#task-dialog-body"
-            hx-trigger="click{% if open_new %}, load{% endif %}"
-            hx-on::after-request="document.getElementById('task-dialog').showModal()">
-      {{<icon name="plus"/>}}New task
-    </button>
-  </div>
-  {% if q %}
-  <p class="text-sm text-white/50">Showing tasks matching “{{ q }}”. <a href="/tasks" class="text-white/80 underline hover:text-white">Clear search</a></p>
-  {% endif %}
-  {% include "tasks/_board.html" %}
-</section>
-<dialog id="task-dialog" class="modal" aria-label="New task"><div id="task-dialog-body"></div></dialog>
-<dialog id="task-sheet" class="sheet" aria-label="Task details"><div id="task-sheet-body"></div></dialog>
+<form id="task-search" action="/tasks" method="get" class="mb-3 {% if not q %}hidden{% endif %}">
+  <input type="hidden" name="filter" value="{{ filter }}">
+  <label class="flex h-11 items-center gap-2 rounded-xl bg-chip px-3 text-muted">
+    {{<icon name="search" class="h-[18px] w-[18px]"/>}}
+    <input type="search" name="q" value="{{ q }}" aria-label="Search tasks" placeholder="Search by task, project or person" class="min-w-0 flex-1 border-0 bg-transparent text-base text-text outline-none">
+  </label>
+</form>
+<nav class="chips mb-4" aria-label="Filter tasks">
+  {% for f in filters %}
+  <a href="/tasks?filter={{ f.key }}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{{ f.label }} {{ f.count }}</a>
+  {% endfor %}
+</nav>
+{% include "tasks/_list.html" %}
+<dialog id="task-dialog" class="sheet" aria-label="New task"><div class="sheet-handle"></div><div id="task-dialog-body" class="sheet-body"></div></dialog>
+<dialog id="task-sheet" class="sheet" aria-label="Task details"><div class="sheet-handle"></div><div id="task-sheet-body" class="sheet-body"></div></dialog>
 {% endblock content %}

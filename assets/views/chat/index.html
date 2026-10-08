@@ -1,64 +1,13 @@
 {% extends "layouts/app.html" %}
 {% block title %}Chat · {{ org.name }}{% endblock title %}
-{% block content %}
-<section class="space-y-5">
-  <div class="flex flex-col justify-between gap-5 py-3 md:flex-row md:items-end">
-    {{<page_header eyebrow="Team chat" title="Channels & direct messages" description="Keep conversations organised without leaving the workspace."/>}}
-    <button type="button" class="btn btn-primary self-start md:self-auto"
-            hx-get="/chat/groups/new" hx-target="#chat-dialog-body"
-            hx-on::after-request="document.getElementById('chat-dialog').showModal()">
-      {{<icon name="plus"/>}}New group
-    </button>
+{% block main %}
+<div class="chat-layout">
+  <div class="chat-list-pane">
+    {% include "chat/_list.html" %}
   </div>
-  <section class="chat-workspace">
-    <aside class="chat-sidebar">
-      <div class="chat-sidebar-brand">{{<logo/>}}<div><strong>{{ org.name }}</strong><span>{{ team_size }} member{% if team_size != 1 %}s{% endif %}</span></div></div>
-      <div class="chat-section">
-        <div class="chat-section-title"><span>Channels</span>
-          <button type="button" aria-label="Create group" hx-get="/chat/groups/new" hx-target="#chat-dialog-body" hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="plus"/>}}</button>
-        </div>
-        {% for item in channels %}
-        <a href="/chat?c={{ item.id }}" class="chat-nav-item {% if conversation and conversation.id == item.id %}active{% endif %}">{{<icon name="hash"/>}}<span class="truncate">{{ item.label }}</span></a>
-        {% endfor %}
-      </div>
-      <div class="chat-section">
-        <div class="chat-section-title"><span>Direct messages</span>
-          <button type="button" aria-label="Start direct message" hx-get="/chat/dms/new" hx-target="#chat-dialog-body" hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="plus"/>}}</button>
-        </div>
-        {% for item in dms %}
-        <a href="/chat?c={{ item.id }}" class="chat-nav-item {% if conversation and conversation.id == item.id %}active{% endif %}">{{<avatar name={item.label} color={item.color} small={true}/>}}<span class="truncate">{{ item.label }}</span></a>
-        {% endfor %}
-        <button type="button" class="chat-nav-item muted" hx-get="/chat/dms/new" hx-target="#chat-dialog-body" hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="user-round"/>}}<span>Start a DM</span></button>
-      </div>
-      <div class="chat-profile">{{<avatar name={me.username} color={me.color}/>}}<div><strong>{{ me.username }}</strong><span>Online</span></div></div>
-    </aside>
-    <div class="chat-main">
-      {% if conversation %}
-      <div class="chat-header">
-        <div class="flex items-center gap-3">
-          {% if conversation.kind == "dm" %}{{<avatar name={conversation.label} color="#e8dfce"/>}}{% else %}<span class="grid h-9 w-9 place-items-center rounded-xl bg-white/7 text-white/50">{{<icon name="hash"/>}}</span>{% endif %}
-          <div>
-            <h2 class="font-medium">{{ conversation.label }}</h2>
-            <p class="mt-1 text-xs text-white/35">{% if conversation.kind == "dm" %}Private conversation{% else %}{{ conversation.members | length }} members{% endif %}</p>
-          </div>
-        </div>
-        <div class="flex -space-x-2">{% for person in conversation.members %}{{<avatar name={person.username} color={person.color} small={true}/>}}{% endfor %}</div>
-      </div>
-      <div class="flex min-h-0 flex-1 flex-col" hx-ext="ws" ws-connect="/chat/{{ conversation.id }}/ws" data-chat-feed-url="/chat/{{ conversation.id }}/feed">
-        <div class="chat-feed" id="chat-feed" data-autoscroll>
-          {% include "chat/_feed.html" %}
-        </div>
-        <form class="chat-composer" method="post" action="/chat/{{ conversation.id }}/messages" ws-send>
-          {{<avatar name={me.username} color={me.color}/>}}
-          <textarea name="body" rows="1" maxlength="1000" required data-enter-submits class="input min-h-12 resize-none border-0 bg-transparent" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}…" aria-label="Message"></textarea>
-          <button type="submit" class="btn btn-primary h-11 w-11 shrink-0 p-0" aria-label="Send">{{<icon name="send"/>}}</button>
-        </form>
-      </div>
-      {% else %}
-      <div class="grid min-h-96 place-items-center p-8 text-center text-white/50">You are not in any conversations yet.</div>
-      {% endif %}
-    </div>
-  </section>
-</section>
-<dialog id="chat-dialog" class="modal" aria-label="Chat"><div id="chat-dialog-body"></div></dialog>
-{% endblock content %}
+  <div class="hidden place-items-center p-8 text-center text-muted min-[900px]:grid">
+    <div>{{<icon name="messages-square" class="mx-auto h-9 w-9"/>}}<p class="mt-3">Choose a conversation</p></div>
+  </div>
+</div>
+<dialog id="chat-dialog" class="sheet" aria-label="Chat"><div class="sheet-handle"></div><div id="chat-dialog-body" class="sheet-body"></div></dialog>
+{% endblock main %}

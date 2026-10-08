@@ -1,7 +1,7 @@
 use loco_rs::prelude::*;
 
 pub use super::_entities::conversation_members::{ActiveModel, Column, Entity, Model};
-use super::conversations;
+use super::{conversations, messages};
 
 pub type ConversationMembers = Entity;
 
@@ -43,6 +43,58 @@ impl Model {
 }
 
 impl Model {
+    /// Records that `user_id` has seen everything in the conversation up to now.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn mark_read<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        conversation_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        Entity::update_many()
+            .col_expr(Column::LastReadAt, Expr::value(chrono::Utc::now()))
+            .filter(Column::ConversationId.eq(conversation_id))
+            .filter(Column::UserId.eq(user_id))
+            .in_tenant(org_id)
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// Unread message count per conversation for `user_id`. Messages they sent
+    /// do not count; before their first visit, counting starts when they joined.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn unread_counts<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<std::collections::HashMap<i64, u64>> {
+        let mut counts = std::collections::HashMap::new();
+        let memberships = Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::UserId.eq(user_id))
+            .all(db)
+            .await?;
+        for m in memberships {
+            let since = m.last_read_at.unwrap_or(m.created_at);
+            let n = messages::Entity::find()
+                .in_tenant(org_id)
+                .filter(messages::Column::ConversationId.eq(m.conversation_id))
+                .filter(messages::Column::UserId.ne(user_id))
+                .filter(messages::Column::CreatedAt.gt(since))
+                .count(db)
+                .await?;
+            if n > 0 {
+                counts.insert(m.conversation_id, n);
+            }
+        }
+        Ok(counts)
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn is_member<C: ConnectionTrait>(

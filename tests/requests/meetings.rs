@@ -28,7 +28,10 @@ async fn new_meeting_form_defaults_to_today_and_ticks_me() {
             .to_string();
         assert!(body.contains(&format!(r#"value="{today}""#)), "{body}");
         assert!(
-            body.contains(&format!(r#"value="{}" checked"#, alice.id)),
+            body.contains(&format!(
+                r#"value="{}" class="h-5 w-5 accent-[var(--accent)]" checked"#,
+                alice.id
+            )),
             "{body}"
         );
     })

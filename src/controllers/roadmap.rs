@@ -2,21 +2,27 @@ use std::collections::HashMap;
 
 use axum::http::HeaderMap;
 use loco_rs::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
         memberships,
         projects::{self, ProjectParams, ACCENTS, LANES},
+        tasks,
     },
     views::{
-        forms::{field_errors, invalid_form, toast},
+        forms::{field_errors, invalid_form},
         layout::{avatar_color, Person},
     },
 };
 
 const FORM_ID: &str = "project-form";
+
+#[derive(Debug, Default, Deserialize)]
+struct LaneQuery {
+    lane: Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 struct Card {
@@ -28,14 +34,15 @@ struct Card {
     summary: String,
     owner: Option<String>,
     owner_color: &'static str,
+    open: usize,
+    blocked: usize,
 }
 
-#[derive(Debug, Serialize)]
-struct Lane {
-    key: &'static str,
-    number: usize,
-    subtitle: &'static str,
-    cards: Vec<Card>,
+fn lane_or_default(lane: Option<&str>) -> &str {
+    match lane {
+        Some(l) if LANES.contains(&l) => l,
+        _ => "now",
+    }
 }
 
 /// Approved members, for owner pickers and names on cards.
@@ -45,43 +52,52 @@ async fn team(ctx: &AppContext, org_id: i64) -> Result<Vec<Person>> {
     ))
 }
 
-async fn lanes(ctx: &AppContext, org_id: i64) -> Result<Vec<Lane>> {
+/// The lane switcher counts and the cards for one lane.
+async fn lane_data(ctx: &AppContext, org_id: i64, lane: &str) -> Result<serde_json::Value> {
     let names: HashMap<i64, String> = team(ctx, org_id)
         .await?
         .into_iter()
         .map(|p| (p.id, p.username))
         .collect();
     let projects = projects::Model::list_for_org(&ctx.db, org_id).await?;
-    Ok(LANES
+    let all_tasks = tasks::Model::list_for_org(&ctx.db, org_id).await?;
+    let lanes: Vec<serde_json::Value> = LANES
         .iter()
-        .enumerate()
-        .map(|(i, &key)| Lane {
-            key,
-            number: i + 1,
-            subtitle: match key {
-                "now" => "In progress now",
-                "next" => "Coming next",
-                _ => "Ideas for later",
-            },
-            cards: projects
-                .iter()
-                .filter(|p| p.lane == key)
-                .map(|p| {
-                    let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
-                    Card {
-                        id: p.id,
-                        name: p.name.clone(),
-                        status: p.status.clone(),
-                        progress: p.progress,
-                        accent: p.accent.clone(),
-                        summary: p.summary.clone(),
-                        owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
-                        owner,
-                    }
-                })
-                .collect(),
+        .map(|key| {
+            serde_json::json!({
+                "key": key,
+                "label": match *key { "now" => "Now", "next" => "Next", _ => "Later" },
+                "count": projects.iter().filter(|p| p.lane == *key).count(),
+                "current": *key == lane,
+            })
         })
-        .collect())
+        .collect();
+    let cards: Vec<Card> = projects
+        .iter()
+        .filter(|p| p.lane == lane)
+        .map(|p| {
+            let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
+            let own_tasks = all_tasks.iter().filter(|t| t.project_id == p.id);
+            Card {
+                id: p.id,
+                name: p.name.clone(),
+                status: p.status.clone(),
+                progress: p.progress,
+                accent: p.accent.clone(),
+                summary: p.summary.clone(),
+                owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
+                owner,
+                open: own_tasks.clone().filter(|t| t.status != "done").count(),
+                blocked: own_tasks.filter(|t| t.status == "blocked").count(),
+            }
+        })
+        .collect();
+    let hint = match lane {
+        "now" => "What the team is building right now",
+        "next" => "Starting once the current work lands",
+        _ => "Ideas we are keeping for later",
+    };
+    Ok(serde_json::json!({ "lane": lane, "lanes": lanes, "cards": cards, "hint": hint }))
 }
 
 #[debug_handler]
@@ -89,13 +105,24 @@ async fn index(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<LaneQuery>,
 ) -> Result<Response> {
-    let lanes = lanes(&ctx, member.org.id).await?;
-    format::render().view(
-        &v,
-        "roadmap/index.html",
-        member.page("roadmap", data!({ "lanes": lanes })),
-    )
+    let lane = lane_or_default(query.lane.as_deref());
+    let data = lane_data(&ctx, member.org.id, lane).await?;
+    format::render().view(&v, "roadmap/index.html", member.page("roadmap", data))
+}
+
+/// The lane on its own, for HTMX refreshes after a project changes.
+#[debug_handler]
+async fn list_partial(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<LaneQuery>,
+) -> Result<Response> {
+    let lane = lane_or_default(query.lane.as_deref());
+    let data = lane_data(&ctx, member.org.id, lane).await?;
+    format::render().view(&v, "roadmap/_lane.html", data)
 }
 
 /// The values a form starts with, or shows back after a failed submit.
@@ -216,8 +243,8 @@ async fn update(
     .await
 }
 
-/// Success refreshes the lanes (or redirects without HTMX); validation errors
-/// re-render the form in place.
+/// Success closes the dialog and refreshes the lane (or redirects without
+/// HTMX); validation errors re-render the form in place.
 #[allow(clippy::too_many_arguments)]
 async fn saved(
     ctx: &AppContext,
@@ -232,10 +259,11 @@ async fn saved(
     match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(headers, "/roadmap")),
         Ok(_) => {
-            let lanes = lanes(ctx, member.org.id).await?;
+            let trigger = serde_json::json!({ "toast": { "kind": "success", "message": message }, "roadmap-changed": true });
             format::render()
-                .header("HX-Trigger", toast("success", message))
-                .view(v, "roadmap/_lanes.html", data!({ "lanes": lanes }))
+                .header("HX-Trigger", trigger.to_string())
+                .header("HX-Reswap", "none")
+                .empty()
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
@@ -255,6 +283,7 @@ async fn saved(
 pub fn routes() -> Routes {
     Routes::new()
         .add("/roadmap", get(index))
+        .add("/roadmap/list", get(list_partial))
         .add("/roadmap/projects/new", get(new))
         .add("/roadmap/projects", post(create))
         .add("/roadmap/projects/{id}/edit", get(edit))

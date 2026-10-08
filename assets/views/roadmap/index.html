@@ -1,18 +1,12 @@
 {% extends "layouts/app.html" %}
 {% block title %}Roadmap · {{ org.name }}{% endblock title %}
+{% block heading %}Roadmap{% endblock heading %}
+{% block actions %}
+<button type="button" class="btn btn-primary"
+        hx-get="/roadmap/projects/new" hx-target="#project-dialog-body"
+        hx-on::after-request="document.getElementById('project-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}Project</button>
+{% endblock actions %}
 {% block content %}
-<section class="space-y-5">
-  <div class="flex flex-col justify-between gap-5 py-3 md:flex-row md:items-end">
-    {{<page_header eyebrow="Roadmap" title="The path ahead" description="What the team is building now, what comes next, and what can wait."/>}}
-    <button type="button" class="btn btn-primary self-start md:self-auto"
-            hx-get="/roadmap/projects/new" hx-target="#project-dialog-body"
-            hx-on::after-request="document.getElementById('project-dialog').showModal()">
-      {{<icon name="plus"/>}}New project
-    </button>
-  </div>
-  {% include "roadmap/_lanes.html" %}
-</section>
-<dialog id="project-dialog" class="modal" aria-label="Project">
-  <div id="project-dialog-body"></div>
-</dialog>
+{% include "roadmap/_lane.html" %}
+<dialog id="project-dialog" class="sheet" aria-label="Project"><div class="sheet-handle"></div><div id="project-dialog-body" class="sheet-body"></div></dialog>
 {% endblock content %}

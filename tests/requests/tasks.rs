@@ -48,7 +48,7 @@ async fn creating_a_task_puts_it_in_to_do() {
 
         let res = request
             .post("/tasks")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .add_header("HX-Request", "true")
             .form(&task_form(
                 "Write the launch email",
@@ -57,10 +57,27 @@ async fn creating_a_task_puts_it_in_to_do() {
             ))
             .await;
         assert_eq!(res.status_code(), 200);
-        let body = res.text();
-        assert!(body.contains(r#"id="task-board""#));
+        let trigger = res
+            .headers()
+            .get("HX-Trigger")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            trigger.contains("tasks-changed") && trigger.contains("Task added"),
+            "{trigger}"
+        );
+
+        // It shows under "Mine" (alice owns it) in the To do group, with its due date.
+        let body = request
+            .get("/tasks")
+            .add_header(owner.0, owner.1)
+            .await
+            .text();
         assert!(body.contains("Write the launch email"));
-        assert!(body.contains("03 Nov"));
+        assert!(body.contains("To do · 1"));
+        assert!(body.contains("Due Tue 3 Nov"));
 
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         assert_eq!(task.status, "todo");
@@ -182,7 +199,7 @@ async fn notes_are_posted_and_counted() {
             .unwrap()
             .to_str()
             .unwrap()
-            .contains("board-changed"));
+            .contains("tasks-changed"));
         assert_eq!(task_notes::Entity::find().count(&ctx.db).await.unwrap(), 1);
 
         let sheet = request
@@ -190,14 +207,11 @@ async fn notes_are_posted_and_counted() {
             .add_header(owner.0.clone(), owner.1.clone())
             .await;
         assert!(sheet.text().contains("alice"));
-        let board = request
-            .get("/tasks/board")
+        let list = request
+            .get("/tasks/list?filter=all")
             .add_header(owner.0, owner.1)
             .await;
-        assert!(
-            !board.text().contains("Add note"),
-            "the card shows a count instead"
-        );
+        assert!(list.text().contains("Ship it"));
     })
     .await;
 }
@@ -229,7 +243,7 @@ async fn search_filters_by_title_owner_and_project() {
             ("alice", "Spreadsheet", "Email copy"),
         ] {
             let page = request
-                .get(&format!("/tasks?q={q}"))
+                .get(&format!("/tasks?filter=all&q={q}"))
                 .add_header(owner.0.clone(), owner.1.clone())
                 .await;
             let body = page.text();
@@ -290,6 +304,109 @@ async fn other_orgs_tasks_are_out_of_reach() {
             "todo"
         );
         assert_eq!(task_notes::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn filters_show_the_right_tasks() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let project = project_in(&ctx, "acme", "Launch").await;
+        let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap();
+        let mine = alice.id.to_string();
+        for (title, who) in [
+            ("Mine open", mine.as_str()),
+            ("Mine stuck", mine.as_str()),
+            ("Mine finished", mine.as_str()),
+            ("Unowned", ""),
+        ] {
+            request
+                .post("/tasks")
+                .add_header(owner.0.clone(), owner.1.clone())
+                .form(&task_form(title, project.id, who))
+                .await;
+        }
+        for (title, status) in [("Mine stuck", "blocked"), ("Mine finished", "done")] {
+            let task = tasks::Entity::find()
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|t| t.title == title)
+                .unwrap();
+            request
+                .post(&format!("/tasks/{}/status", task.id))
+                .add_header(owner.0.clone(), owner.1.clone())
+                .form(&serde_json::json!({ "status": status }))
+                .await;
+        }
+
+        let page = |filter: &'static str| {
+            let request = &request;
+            let cookie = owner.clone();
+            async move {
+                request
+                    .get(&format!("/tasks?filter={filter}"))
+                    .add_header(cookie.0, cookie.1)
+                    .await
+                    .text()
+            }
+        };
+        let mine_page = page("mine").await;
+        assert!(mine_page.contains("Mine open") && mine_page.contains("Mine stuck"));
+        assert!(!mine_page.contains("Mine finished") && !mine_page.contains("Unowned"));
+        let blocked = page("blocked").await;
+        assert!(blocked.contains("Mine stuck") && !blocked.contains("Mine open"));
+        let done = page("done").await;
+        assert!(done.contains("Mine finished") && !done.contains("Mine open"));
+        let all = page("all").await;
+        assert!(all.contains("Unowned") && !all.contains("Mine finished"));
+        assert!(
+            all.contains("Mine 2")
+                && all.contains("All 3")
+                && all.contains("Blocked 1")
+                && all.contains("Done 1")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn changing_status_from_the_sheet_refreshes_it() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let project = project_in(&ctx, "acme", "Launch").await;
+        request
+            .post("/tasks")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .form(&task_form("Ship it", project.id, ""))
+            .await;
+        let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
+
+        let res = request
+            .post(&format!("/tasks/{}/status", task.id))
+            .add_header(owner.0, owner.1)
+            .add_header("HX-Request", "true")
+            .form(&serde_json::json!({ "status": "blocked" }))
+            .await;
+        assert_eq!(res.status_code(), 200);
+        assert!(res
+            .headers()
+            .get("HX-Trigger")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("tasks-changed"));
+        let compact: String = res.text().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            compact.contains(r#"aria-checked="true" class="status-blocked""#),
+            "the sheet shows the new status"
+        );
     })
     .await;
 }

@@ -1,39 +1,33 @@
 {% extends "layouts/app.html" %}
 {% block title %}Members · {{ org.name }}{% endblock title %}
+{% block heading %}Members{% endblock heading %}
 {% block content %}
-<section class="space-y-5">
-  {{<page_header eyebrow="Members" title="Who is on the team" description="Everyone in this organisation, and anyone waiting to join."/>}}
-
+<div class="flex flex-col gap-5">
   {% if me.can_manage %}
-  <div class="panel p-5 md:p-6">
-    <span class="eyebrow">Invite people</span>
-    <p class="mt-2 text-sm text-white/55">Share this link. People who use it can sign up, then wait for you or another admin to approve them.</p>
-    <div class="mt-4 flex flex-col gap-2 sm:flex-row">
-      <input class="input font-mono text-sm" readonly value="{{ join_url }}" aria-label="Join link" onclick="this.select()">
+  <section class="card flex flex-col gap-2 p-4">
+    <h2 class="m-0 text-[17px] font-semibold">Invite people</h2>
+    <p class="meta m-0 text-sm">Share this link. People who use it sign up, then wait for you or another admin to approve them.</p>
+    <div class="flex gap-2">
+      <input class="input font-mono text-sm" readonly value="{{ join_url }}" aria-label="Join link" id="join-url" onclick="this.select()">
+      <button type="button" class="btn btn-secondary shrink-0" data-copy="#join-url">Copy</button>
     </div>
-  </div>
+  </section>
 
-  <div class="panel p-5 md:p-6">
-    <div class="flex items-center justify-between">
-      <span class="eyebrow">Waiting for approval</span>
-      <span class="count-badge">{{ pending | length }}</span>
-    </div>
-    <div class="mt-4 grid gap-2" id="pending-list">
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Waiting for approval · {{ pending | length }}</h2>
+    <div class="list" id="pending-list">
       {% for row in pending %}{% include "members/_pending_row.html" %}{% else %}
-      <p class="py-3 text-sm text-white/40">No one is waiting right now.</p>
+      <p class="empty">No one is waiting right now.</p>
       {% endfor %}
     </div>
-  </div>
+  </section>
   {% endif %}
 
-  <div class="panel p-5 md:p-6">
-    <div class="flex items-center justify-between">
-      <span class="eyebrow">Members</span>
-      <span class="count-badge">{{ active_members | length }}</span>
-    </div>
-    <div class="mt-4 grid gap-2">
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Members · {{ active_members | length }}</h2>
+    <div class="list">
       {% for row in active_members %}{% include "members/_row.html" %}{% endfor %}
     </div>
-  </div>
-</section>
+  </section>
+</div>
 {% endblock content %}

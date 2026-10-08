@@ -1,0 +1,38 @@
+<div class="topbar">
+  <h1>Chat</h1>
+  <button type="button" class="icon-btn" aria-label="New group" title="New group"
+          hx-get="/chat/groups/new" hx-target="#chat-dialog-body"
+          hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="users" class="h-5 w-5"/>}}</button>
+  <button type="button" class="icon-btn" aria-label="New direct message" title="New direct message"
+          hx-get="/chat/dms/new" hx-target="#chat-dialog-body"
+          hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="square-pen" class="h-5 w-5"/>}}</button>
+</div>
+<div class="px-4 pb-3">
+  <label class="flex h-10 items-center gap-2 rounded-xl bg-chip px-3 text-muted">
+    {{<icon name="search" class="h-[18px] w-[18px]"/>}}
+    <input type="search" data-filter="#conversation-list" aria-label="Search conversations" placeholder="Search" class="min-w-0 flex-1 border-0 bg-transparent text-base text-text outline-none">
+  </label>
+</div>
+<div id="conversation-list" class="pb-28 min-[900px]:pb-4">
+  {% for item in items %}
+  <a href="/chat/{{ item.id }}" data-filter-text="{{ item.label }}" class="flex min-h-16 items-center gap-3 px-4 py-2.5 hover:bg-chip {% if conversation and conversation.id == item.id %}bg-active{% endif %}" {% if conversation and conversation.id == item.id %}aria-current="page"{% endif %}>
+    {% if item.kind == "dm" %}
+    {{<avatar name={item.label} color={item.color} size="lg"/>}}
+    {% else %}
+    <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-chip text-muted">{{<icon name="hash" class="h-5 w-5"/>}}</span>
+    {% endif %}
+    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span class="flex items-baseline justify-between gap-2">
+        <span class="truncate-1 text-base {% if item.unread > 0 %}font-bold{% else %}font-medium{% endif %}">{{ item.label }}</span>
+        <span class="meta shrink-0">{{ item.time }}</span>
+      </span>
+      <span class="flex items-center gap-2">
+        <span class="truncate-1 flex-1 text-sm text-muted">{{ item.last | default(value="No messages yet") }}</span>
+        {% if item.unread > 0 %}<span class="badge" aria-label="{{ item.unread }} unread">{{ item.unread }}</span>{% endif %}
+      </span>
+    </span>
+  </a>
+  {% else %}
+  <p class="empty">No conversations yet.</p>
+  {% endfor %}
+</div>

@@ -1,0 +1,33 @@
+<div id="roadmap-lane" class="flex flex-col gap-3"
+     hx-get="/roadmap/list?lane={{ lane }}" hx-trigger="roadmap-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
+  <nav class="segmented" aria-label="Lane">
+    {% for l in lanes %}<a href="/roadmap?lane={{ l.key }}" {% if l.current %}aria-current="true"{% endif %}>{{ l.label }} {{ l.count }}</a>{% endfor %}
+  </nav>
+  <p class="meta m-0 px-1 text-sm">{{ hint }}</p>
+  <div class="grid gap-2.5 md:grid-cols-2">
+    {% for card in cards %}
+    <article class="card flex flex-col gap-2.5 p-3.5">
+      <div class="flex items-center gap-2.5">
+        <span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background: {{ card.accent }}"></span>
+        <h2 class="truncate-1 m-0 flex-1 text-base font-semibold">{{ card.name }}</h2>
+        {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} size="sm"/>}}{% endif %}
+        <button type="button" class="icon-btn -my-2 -mr-2 h-9 w-9" aria-label="Edit {{ card.name }}"
+                hx-get="/roadmap/projects/{{ card.id }}/edit" hx-target="#project-dialog-body"
+                hx-on::after-request="document.getElementById('project-dialog').showModal()">{{<icon name="pencil" class="h-4 w-4"/>}}</button>
+      </div>
+      {% if card.summary %}<p class="m-0 text-sm leading-relaxed text-muted">{{ card.summary }}</p>{% endif %}
+      <div class="flex items-center gap-2.5">
+        <span class="bar flex-1" style="--bar: {{ card.accent }}" role="progressbar" aria-label="Progress" aria-valuenow="{{ card.progress }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ card.progress }}%"></span></span>
+        <span class="w-9 text-right text-[13px] font-semibold">{{ card.progress }}%</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <span class="pill">{{ card.status }}</span>
+        <span class="pill font-medium text-muted">{{ card.open }} open task{% if card.open != 1 %}s{% endif %}</span>
+        {% if card.blocked > 0 %}<span class="pill pill-blocked">{{ card.blocked }} blocked</span>{% endif %}
+      </div>
+    </article>
+    {% else %}
+    <div class="card empty md:col-span-2">No projects here yet.</div>
+    {% endfor %}
+  </div>
+</div>

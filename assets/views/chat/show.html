@@ -1,0 +1,32 @@
+{% extends "layouts/app.html" %}
+{% block title %}{{ conversation.label }} · {{ org.name }}{% endblock title %}
+{% block main %}
+<div class="chat-layout">
+  <div class="chat-list-pane hidden min-[900px]:block">
+    {% include "chat/_list.html" %}
+  </div>
+  <section class="chat-screen" aria-label="{{ conversation.label }}"
+           hx-ext="ws" ws-connect="/chat/{{ conversation.id }}/ws" data-chat-feed-url="/chat/{{ conversation.id }}/feed">
+    <header class="chat-head">
+      <a href="/chat" class="icon-btn min-[900px]:hidden" aria-label="Back to chats">{{<icon name="chevron-left" class="h-6 w-6"/>}}</a>
+      {% if conversation.kind == "dm" %}{{<avatar name={conversation.label} color={conversation.color} size="md"/>}}{% endif %}
+      <div class="ml-1 min-w-0 flex-1">
+        <h1 class="truncate-1 m-0 text-[17px] font-semibold">{% if conversation.kind != "dm" %}# {% endif %}{{ conversation.label }}</h1>
+        <p class="meta m-0">{% if conversation.kind == "dm" %}Direct message{% else %}{{ conversation.members | length }} members{% endif %}</p>
+      </div>
+      <div class="hidden -space-x-2 pr-2 sm:flex">{% for person in conversation.members %}{{<avatar name={person.username} color={person.color} size="sm"/>}}{% endfor %}</div>
+    </header>
+    <div id="chat-feed" class="chat-feed" data-autoscroll aria-live="polite">
+      {% include "chat/_feed.html" %}
+    </div>
+    <form class="composer" method="post" action="/chat/{{ conversation.id }}/messages" ws-send>
+      <label class="sr-only" for="composer-body">Message</label>
+      <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
+      <button type="submit" class="btn btn-primary h-11 w-11 p-0" aria-label="Send">{{<icon name="send" class="h-5 w-5"/>}}</button>
+    </form>
+  </section>
+</div>
+<dialog id="chat-dialog" class="sheet" aria-label="Chat"><div class="sheet-handle"></div><div id="chat-dialog-body" class="sheet-body"></div></dialog>
+{% endblock main %}
+{# A conversation fills the phone screen; the tab bar comes back on the list. #}
+{% block tabbar %}{% endblock tabbar %}

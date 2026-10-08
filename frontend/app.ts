@@ -87,3 +87,58 @@ document.body.addEventListener("htmx:wsOpen", (event) => {
   const url = elt.getAttribute("data-chat-feed-url");
   if (url) void htmx.ajax("GET", url, { target: "#chat-feed", swap: "innerHTML" });
 });
+
+// Search-as-you-type for lists: <input data-filter="#list"> hides rows whose
+// data-filter-text does not contain the query.
+document.addEventListener("input", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.dataset.filter) return;
+  const query = input.value.trim().toLowerCase();
+  document.querySelectorAll<HTMLElement>(`${input.dataset.filter} [data-filter-text]`).forEach((row) => {
+    row.hidden = query !== "" && !(row.dataset.filterText ?? "").toLowerCase().includes(query);
+  });
+});
+
+// Textareas marked data-autogrow grow with their content (up to their CSS max-height).
+function autogrow(el: HTMLTextAreaElement) {
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+document.addEventListener("input", (event) => {
+  if (event.target instanceof HTMLTextAreaElement && event.target.hasAttribute("data-autogrow")) autogrow(event.target);
+});
+document.body.addEventListener("htmx:wsAfterSend", () => {
+  document.querySelectorAll<HTMLTextAreaElement>("textarea[data-autogrow]").forEach(autogrow);
+});
+
+// Greeting and date in the viewer's own time zone (the server runs in UTC).
+document.querySelectorAll<HTMLElement>("[data-greeting]").forEach((el) => {
+  const hour = new Date().getHours();
+  const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  el.textContent = `${part}, ${el.dataset.greeting}`;
+});
+document.querySelectorAll<HTMLElement>("[data-local-date]").forEach((el) => {
+  el.textContent = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+});
+
+// <button data-toggle="#id"> shows or hides an element and focuses its first input.
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLElement>("[data-toggle]");
+  if (!button) return;
+  const target = document.querySelector<HTMLElement>(button.dataset.toggle ?? "");
+  if (!target) return;
+  target.classList.toggle("hidden");
+  if (!target.classList.contains("hidden")) target.querySelector<HTMLInputElement>("input:not([type=hidden])")?.focus();
+});
+
+// <button data-copy="#input"> copies that input's value.
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLElement>("[data-copy]");
+  if (!button) return;
+  const input = document.querySelector<HTMLInputElement>(button.dataset.copy ?? "");
+  if (!input) return;
+  void navigator.clipboard.writeText(input.value).then(
+    () => showToast({ kind: "success", message: "Link copied" }),
+    () => input.select(),
+  );
+});

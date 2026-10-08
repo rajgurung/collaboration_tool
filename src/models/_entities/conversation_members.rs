@@ -15,6 +15,7 @@ pub struct Model {
     pub conversation_id: i64,
     #[sea_orm(unique_key = "user")]
     pub user_id: i64,
+    pub last_read_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
