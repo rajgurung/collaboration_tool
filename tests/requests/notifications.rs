@@ -177,8 +177,8 @@ async fn assignments_and_notes_notify_the_right_people() {
             .text();
         assert!(sheet.contains(r#"<span class="mention">@alice</span>"#));
         assert!(
-            sheet.contains(r#"data-mentions="alice,bob""#),
-            "picker offers the team"
+            sheet.contains(r#"data-mentions="alice,bob,carol""#),
+            "picker offers the team, with you last"
         );
     })
     .await;
