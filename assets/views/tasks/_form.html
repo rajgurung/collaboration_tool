@@ -41,7 +41,11 @@
       <span class="field-label">Project</span>
       <select name="project_id" class="input">
         <option value="">No project (a chore)</option>
-        {% for p in projects %}<option value="{{ p.id }}" {% if form.project_id == p.id | str %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        {% for group in project_groups %}
+        <optgroup label="{{ group.label }}">
+          {% for p in group.projects %}<option value="{{ p.id }}" {% if form.project_id == p.id | str %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </optgroup>
+        {% endfor %}
       </select>
       {% if errors.project_id %}<span class="field-error">{{ errors.project_id }}</span>{% endif %}
     </label>
