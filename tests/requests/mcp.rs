@@ -488,6 +488,19 @@ async fn other_organisations_are_out_of_reach() {
         let (error, _) = tool(
             &request,
             &alice,
+            "add_task_note",
+            json!({ "task_id": secret["id"], "body": "Peeking" }),
+        )
+        .await;
+        assert!(error, "no notes on another org's task");
+        assert!(collab::models::task_notes::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .is_empty());
+        let (error, _) = tool(
+            &request,
+            &alice,
             "create_task",
             json!({ "title": "Sneaky", "project_id": theirs.id }),
         )

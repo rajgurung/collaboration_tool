@@ -259,8 +259,13 @@ fn task_json(
 }
 
 /// One task as the tools show it, with its project name and assignees.
-async fn show_task(ctx: &AppContext, member: &CurrentMember, task: &tasks::Model) -> Outcome {
-    let names = Team::load(ctx, member).await?.names();
+async fn show_task(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    team: &Team,
+    task: &tasks::Model,
+) -> Outcome {
+    let names = team.names();
     let projects = project_names(ctx, member).await?;
     let assignees = task_assignees::Model::for_task(&ctx.db, member.org.id, task.id).await?;
     Ok(task_json(task, &projects, &names, &assignees))
@@ -488,8 +493,9 @@ impl CollabServer {
     async fn get_task_for(&self, parts: &Parts, input: TaskId) -> Outcome {
         let member = member(parts)?;
         let task = tasks::Model::find_in_org(&self.ctx.db, member.org.id, input.task_id).await?;
-        let mut shown = show_task(&self.ctx, &member, &task).await?;
-        let names = Team::load(&self.ctx, &member).await?.names();
+        let team = Team::load(&self.ctx, &member).await?;
+        let mut shown = show_task(&self.ctx, &member, &team, &task).await?;
+        let names = team.names();
         let notes: Vec<Value> = task_notes::Model::list_for_task(&self.ctx.db, &task)
             .await?
             .into_iter()
@@ -521,7 +527,7 @@ impl CollabServer {
         };
         let task = tasks::Model::create(&self.ctx.db, member.org.id, &params).await?;
         notifications::task_saved(&self.ctx, &member, None, &task).await?;
-        show_task(&self.ctx, &member, &task).await
+        show_task(&self.ctx, &member, &team, &task).await
     }
 
     async fn update_task_for(&self, parts: &Parts, input: UpdateTask) -> Outcome {
@@ -529,8 +535,9 @@ impl CollabServer {
         let db = &self.ctx.db;
         let task = tasks::Model::find_in_org(db, member.org.id, input.task_id).await?;
         let current = task_assignees::Model::for_task(db, member.org.id, task.id).await?;
+        let team = Team::load(&self.ctx, &member).await?;
         let assignee_ids = match &input.assignees {
-            Some(names) => Team::load(&self.ctx, &member).await?.ids(&member, names)?,
+            Some(names) => team.ids(&member, names)?,
             None => current.clone(),
         };
         let project_id = input.project_id.unwrap_or(task.project_id);
@@ -552,7 +559,7 @@ impl CollabServer {
         };
         let task = task.update_from(db, &params).await?;
         notifications::task_saved(&self.ctx, &member, Some(before), &task).await?;
-        show_task(&self.ctx, &member, &task).await
+        show_task(&self.ctx, &member, &team, &task).await
     }
 
     async fn add_task_note_for(&self, parts: &Parts, input: AddTaskNote) -> Outcome {
