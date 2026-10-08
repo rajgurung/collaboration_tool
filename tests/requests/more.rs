@@ -17,6 +17,14 @@ async fn more_lists_the_other_sections_and_pending_count() {
             assert!(body.contains(link), "{link}");
         }
         assert!(body.contains("1 waiting"));
+        // Appearance: System, Light or Dark, applied before the page draws.
+        for choice in ["system", "light", "dark"] {
+            assert!(
+                body.contains(&format!(r#"data-theme-choice="{choice}""#)),
+                "{choice}"
+            );
+        }
+        assert!(body.contains(r#"localStorage.getItem("theme")"#));
     })
     .await;
 }

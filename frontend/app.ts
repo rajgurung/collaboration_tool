@@ -359,3 +359,37 @@ if (welcome) {
   show(0);
   welcome.showModal();
 }
+
+// Light or dark: "system" follows the device; a choice is saved on this device.
+// The head of the page applies it before drawing, so it never flashes.
+type Theme = "system" | "light" | "dark";
+function savedTheme(): Theme {
+  try {
+    const t = localStorage.getItem("theme");
+    return t === "light" || t === "dark" ? t : "system";
+  } catch {
+    return "system";
+  }
+}
+function applyTheme(theme: Theme) {
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  try {
+    if (theme === "system") localStorage.removeItem("theme");
+    else localStorage.setItem("theme", theme);
+  } catch {
+    // Storage can be refused (private browsing); the choice still applies to this page.
+  }
+  document.querySelectorAll<HTMLElement>("[data-theme-choice]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeChoice === theme)));
+}
+applyTheme(savedTheme());
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const choice = target?.closest<HTMLElement>("[data-theme-choice]")?.dataset.themeChoice as Theme | undefined;
+  if (choice) return applyTheme(choice);
+  if (target?.closest("[data-theme-toggle]")) {
+    const theme = savedTheme();
+    const dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+    applyTheme(dark ? "light" : "dark");
+  }
+});

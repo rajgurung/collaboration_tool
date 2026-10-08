@@ -33,7 +33,11 @@
   <section class="flex flex-col gap-2">
     <h2 class="section-label">Account</h2>
     <div class="list">
-      <div class="list-row">{{<icon name="sun-moon" class="h-5 w-5"/>}}<span class="flex-1 text-base">Appearance</span><span class="meta text-[15px]">Matches your device</span></div>
+      <div class="list-row">{{<icon name="sun-moon" class="h-5 w-5"/>}}<span class="flex-1 text-base" id="appearance-label">Appearance</span>
+        <span class="segmented segmented-sm" role="group" aria-labelledby="appearance-label" data-theme-picker>
+          <button type="button" data-theme-choice="system">System</button><button type="button" data-theme-choice="light">Light</button><button type="button" data-theme-choice="dark">Dark</button>
+        </span>
+      </div>
       <form action="/logout" method="post"><button type="submit" class="list-row w-full border-0 bg-transparent text-left text-base text-danger">{{<icon name="log-out" class="h-5 w-5"/>}}Sign out</button></form>
     </div>
   </section>

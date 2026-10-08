@@ -12,7 +12,7 @@
   font-display: swap;
 }
 
-/* Colour tokens. Light by default, dark when the phone or computer is in dark mode. */
+/* Colour tokens. Light by default; dark follows the device unless a theme is chosen. */
 :root {
   color-scheme: light dark;
   --bg: #f4f3ef;
@@ -42,8 +42,11 @@
   --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
   --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
 }
+/* Dark colours: when the device is dark and no theme was chosen, or when
+   Dark was chosen on the account page (sets data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #121214;
     --side: #17171a;
     --surface: #1f1f23;
@@ -72,6 +75,36 @@
     --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121214;
+  --side: #17171a;
+  --surface: #1f1f23;
+  --lane: #18181c;
+  --line: #2c2c32;
+  --line-soft: #29292f;
+  --chip: #26262b;
+  --text: #edece8;
+  --muted: #a6a29b;
+  --link: #ffc77a;
+  --accent: #ffb454;
+  --accent-hover: #ffc475;
+  --on-accent: #1b1300;
+  --active-bg: #4a3618;
+  --own-bubble: #5a3f16;
+  --own-text: #fff1dc;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --todo: #a6a29b;
+  --progress: #7c9dff;
+  --blocked: #ff8466;
+  --blocked-bg: #3a2019;
+  --done: #4cc38a;
+  --danger: #ff8466;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 @theme inline {
   --color-bg: var(--bg);
@@ -148,7 +181,7 @@
   .chip[aria-current="true"], .chip[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
   .segmented { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 4px; padding: 4px; border-radius: 12px; background: var(--chip); }
   .segmented > * { min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; display: grid; place-items: center; }
-  .segmented > [aria-checked="true"], .segmented > [aria-current="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  .segmented > [aria-checked="true"], .segmented > [aria-current="true"], .segmented > [aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 
   .segmented-sm { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; }
   .segmented-sm > * { min-height: 30px; padding: 0 12px; border-radius: 7px; font-size: 13px; }
