@@ -59,3 +59,78 @@ fn renders_app_layout_with_nav() {
     assert!(rendered.contains(r#"href="/tasks" class="tab" aria-current="page""#));
     assert!(rendered.contains("<svg"), "icons should render");
 }
+
+#[test]
+fn renders_read_receipts_as_live_swaps() {
+    let engine = view_engine();
+    let person = |name: &str| serde_json::json!({ "id": 1, "username": name, "color": "#ffb454" });
+    let readers: Vec<_> = ["bob", "carol", "dev", "eve", "fay"]
+        .into_iter()
+        .map(person)
+        .collect();
+    let read = engine
+        .render(
+            "chat/_receipt.html",
+            serde_json::json!({
+                "message": { "id": 42, "receipt": {
+                    "dm": false,
+                    "text": "Read by bob, carol, dev, eve, fay",
+                    "readers": readers,
+                    "shown": readers[..3],
+                    "more": 2,
+                    "all": false,
+                } },
+                "oob": true,
+            }),
+        )
+        .expect("receipt should render");
+    assert!(
+        read.contains(r#"id="receipt-42" hx-swap-oob="true""#),
+        "{read}"
+    );
+    assert!(
+        read.contains(r#"aria-label="Read by bob, carol, dev, eve, fay""#),
+        "{read}"
+    );
+    assert_eq!(read.matches("avatar avatar-2xs").count(), 3, "{read}");
+    assert!(
+        read.contains(r#"<span class="receipt-more">+2</span>"#),
+        "{read}"
+    );
+    assert_eq!(read.matches("receipt-pop-row").count(), 5, "{read}");
+    assert!(
+        read.contains(r##"data-toggle="#receipt-names-42""##),
+        "{read}"
+    );
+    assert!(!read.contains("title="), "the popover replaces tooltips");
+    // 3 stacked avatars and 5 list rows, none read out again by screen readers.
+    assert_eq!(
+        read.matches(r#"aria-hidden="true" class="avatar"#).count(),
+        8,
+        "{read}"
+    );
+    assert!(read.contains(r#"aria-expanded="false""#), "{read}");
+
+    let dm = engine
+        .render(
+            "chat/_receipt.html",
+            serde_json::json!({ "message": { "id": 43, "receipt": {
+                "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0, "all": true,
+            } } }),
+        )
+        .expect("a DM receipt should render");
+    assert!(dm.contains("msg-receipt msg-receipt-all"), "{dm}");
+    assert!(dm.contains("</svg>Read</span>"), "{dm}");
+    assert!(!dm.contains("avatar"), "{dm}");
+
+    let unread = engine
+        .render(
+            "chat/_receipt.html",
+            serde_json::json!({ "message": { "id": 42, "receipt": null } }),
+        )
+        .expect("an empty slot should render");
+    assert!(
+        unread.contains(r#"<span class="msg-receipt" id="receipt-42"></span>"#),
+        "{unread}"
+    );
+}

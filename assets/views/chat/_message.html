@@ -5,6 +5,6 @@
   <div class="msg-body">
     {% if message.start and not message.own %}<span class="msg-name">{{ message.author }}</span>{% endif %}
     <div class="bubble">{% for p in message.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</div>
-    {% if message.show_time %}<span class="msg-time">{{ message.at }}</span>{% endif %}
+    {% if message.show_time or message.read_receipts %}<div class="msg-meta">{% if message.show_time %}<span class="msg-time">{{ message.at }}</span>{% endif %}{% if message.read_receipts %}{% include "chat/_receipt.html" %}{% endif %}</div>{% endif %}
   </div>
 </div>

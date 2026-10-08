@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
-        conversation_members,
+        conversation_members::{self, ReadMark},
         conversations::{self, kind, GroupParams},
         memberships,
         messages::{self, MessageParams},
@@ -52,8 +52,31 @@ pub struct ListItem {
     pub unread: u64,
 }
 
+/// How many reader avatars a group receipt shows before "+N".
+const RECEIPT_AVATARS: usize = 3;
+/// Past this many readers, the screen-reader label names two and counts the rest.
+const RECEIPT_LABEL_NAMES: usize = 5;
+
+/// Who has read a message, for its author. Only DMs and groups have receipts.
+/// A DM shows `text` ("Read"); a group shows avatars and uses `text` as the
+/// screen-reader label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Receipt {
+    pub dm: bool,
+    pub text: String,
+    /// Everyone who has read it, by name.
+    pub readers: Vec<Person>,
+    /// The first few readers, shown as avatars.
+    pub shown: Vec<Person>,
+    /// Readers beyond `shown`.
+    pub more: usize,
+    pub all: bool,
+}
+
 /// One rendered chat message. `own` decides the bubble style for the viewer;
 /// `start` and `show_time` group consecutive messages from the same person.
+/// `read_receipts` is set on the viewer's own messages in a DM or group, so
+/// the page has a slot for `receipt` even before anyone has read it.
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageView {
     pub id: i64,
@@ -67,6 +90,8 @@ pub struct MessageView {
     pub own: bool,
     pub start: bool,
     pub show_time: bool,
+    pub read_receipts: bool,
+    pub receipt: Option<Receipt>,
 }
 
 impl MessageView {
@@ -100,20 +125,93 @@ impl MessageView {
             own: message.user_id == viewer_id,
             start: true,
             show_time: true,
+            read_receipts: false,
+            receipt: None,
         }
     }
 }
 
-/// Marks where each run of messages from one person starts and ends.
+/// Who has read a message. Reading is in order, so a member has read it once
+/// their `last_read_at` reaches its `created_at`. The author never counts, nor
+/// do people no longer on the team. Nothing shows until someone has read it.
+#[must_use]
+pub fn receipt(
+    conversation_kind: &str,
+    author_id: i64,
+    created_at: DateTime<FixedOffset>,
+    marks: &[ReadMark],
+    names: &HashMap<i64, String>,
+) -> Option<Receipt> {
+    if conversation_kind == kind::CHANNEL {
+        return None;
+    }
+    let others: Vec<(i64, &String, Option<DateTime<FixedOffset>>)> = marks
+        .iter()
+        .filter(|(id, _)| *id != author_id)
+        .filter_map(|(id, at)| names.get(id).map(|name| (*id, name, *at)))
+        .collect();
+    let mut readers: Vec<Person> = others
+        .iter()
+        .filter(|(_, _, at)| at.is_some_and(|at| at >= created_at))
+        .map(|(id, name, _)| Person {
+            id: *id,
+            color: avatar_color(name),
+            username: (*name).clone(),
+        })
+        .collect();
+    if readers.is_empty() {
+        return None;
+    }
+    readers.sort_by(|a, b| a.username.cmp(&b.username));
+    let all = readers.len() == others.len();
+    let dm = conversation_kind == kind::DM;
+    let text = if dm {
+        "Read".to_string()
+    } else if all {
+        "Read by everyone".to_string()
+    } else {
+        let names: Vec<&str> = readers.iter().map(|p| p.username.as_str()).collect();
+        if names.len() > RECEIPT_LABEL_NAMES {
+            format!(
+                "Read by {} and {} others",
+                names[..2].join(", "),
+                names.len() - 2
+            )
+        } else {
+            format!("Read by {}", names.join(", "))
+        }
+    };
+    let shown: Vec<Person> = readers.iter().take(RECEIPT_AVATARS).cloned().collect();
+    Some(Receipt {
+        dm,
+        text,
+        more: readers.len() - shown.len(),
+        shown,
+        readers,
+        all,
+    })
+}
+
+/// Marks where each run of messages from one person starts and ends, and adds
+/// receipts to the viewer's own messages.
 fn grouped(
+    conversation: &conversations::Model,
     list: &[messages::Model],
+    marks: &[ReadMark],
     names: &HashMap<i64, String>,
     viewer_id: i64,
     tz: Tz,
 ) -> Vec<MessageView> {
     let mut views: Vec<MessageView> = list
         .iter()
-        .map(|m| MessageView::new(m, names, viewer_id, tz))
+        .map(|m| {
+            let mut view = MessageView::new(m, names, viewer_id, tz);
+            if view.own && conversation.kind != kind::CHANNEL {
+                view.read_receipts = true;
+                view.receipt = receipt(&conversation.kind, m.user_id, m.created_at, marks, names);
+            }
+            view
+        })
         .collect();
     for i in 0..views.len() {
         let same_as_prev = i > 0 && views[i - 1].author_id == views[i].author_id;
@@ -243,7 +341,7 @@ async fn show(
     let me = member.user.id;
     let conversation =
         conversations::Model::find_for_member(&ctx.db, member.org.id, id, me).await?;
-    conversation_members::Model::mark_read(&ctx.db, member.org.id, conversation.id, me).await?;
+    super::chat_ws::mark_read(&ctx, member.org.id, conversation.id, &conversation.kind, me).await?;
     let names = names(&ctx, member.org.id).await?;
     let items = list_items(&ctx, &member, &names).await?;
     let members = conversation.member_ids(&ctx.db).await?;
@@ -257,7 +355,9 @@ async fn show(
         })
         .collect();
     let feed = grouped(
+        &conversation,
         &messages::Model::recent(&ctx.db, &conversation).await?,
+        &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
         &names,
         me,
         member.tz(),
@@ -341,7 +441,8 @@ async fn send(
         )),
         Ok(message) => {
             let names = names(&ctx, member.org.id).await?;
-            let view = MessageView::new(&message, &names, member.user.id, member.tz());
+            let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
+            view.read_receipts = conversation.kind != kind::CHANNEL;
             format::render().view(&v, "chat/_message.html", data!({ "message": view }))
         }
         Err(err) => {
@@ -366,11 +467,19 @@ async fn feed(
 ) -> Result<Response> {
     let conversation =
         conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
-    conversation_members::Model::mark_read(&ctx.db, member.org.id, conversation.id, member.user.id)
-        .await?;
+    super::chat_ws::mark_read(
+        &ctx,
+        member.org.id,
+        conversation.id,
+        &conversation.kind,
+        member.user.id,
+    )
+    .await?;
     let names = names(&ctx, member.org.id).await?;
     let feed = grouped(
+        &conversation,
         &messages::Model::recent(&ctx.db, &conversation).await?,
+        &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
         &names,
         member.user.id,
         member.tz(),
@@ -461,4 +570,116 @@ pub fn routes() -> Routes {
         .add("/chat/{id}", get(show))
         .add("/chat/{id}/messages", post(send))
         .add("/chat/{id}/feed", get(feed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(minute: u32) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(&format!("2026-10-08T10:{minute:02}:00+00:00")).unwrap()
+    }
+
+    fn team() -> HashMap<i64, String> {
+        [
+            (1, "alice"),
+            (2, "bob"),
+            (3, "carol"),
+            (4, "dev"),
+            (5, "eve"),
+        ]
+        .into_iter()
+        .map(|(id, n)| (id, n.to_string()))
+        .collect()
+    }
+
+    fn names(people: &[Person]) -> Vec<&str> {
+        people.iter().map(|p| p.username.as_str()).collect()
+    }
+
+    #[test]
+    fn dms_say_read_once_the_other_person_has_read() {
+        let sent = at(5);
+        let unread = [(1, Some(at(9))), (2, Some(at(4)))];
+        assert_eq!(receipt(kind::DM, 1, sent, &unread, &team()), None);
+        let never_opened = [(1, Some(at(9))), (2, None)];
+        assert_eq!(receipt(kind::DM, 1, sent, &never_opened, &team()), None);
+        let read = [(1, None), (2, Some(at(5)))];
+        let r = receipt(kind::DM, 1, sent, &read, &team()).unwrap();
+        assert_eq!(r.text, "Read");
+        assert!(r.dm);
+        assert_eq!(names(&r.readers), vec!["bob"]);
+        assert!(r.all);
+    }
+
+    #[test]
+    fn groups_count_readers_and_never_the_author() {
+        let sent = at(5);
+        let some = [(1, Some(at(9))), (2, Some(at(6))), (3, Some(at(1)))];
+        let r = receipt(kind::GROUP, 1, sent, &some, &team()).unwrap();
+        assert_eq!(r.text, "Read by bob");
+        assert_eq!(names(&r.readers), vec!["bob"]);
+        assert_eq!(r.readers[0].color, avatar_color("bob"));
+        assert!(!r.all && !r.dm);
+
+        let all = [(3, Some(at(7))), (1, None), (2, Some(at(6)))];
+        let r = receipt(kind::GROUP, 1, sent, &all, &team()).unwrap();
+        assert_eq!(r.text, "Read by everyone");
+        assert_eq!(names(&r.readers), vec!["bob", "carol"]);
+        assert!(r.all);
+    }
+
+    #[test]
+    fn people_off_the_team_are_ignored() {
+        let sent = at(5);
+        let marks = [(1, None), (2, Some(at(6))), (99, Some(at(6)))];
+        let r = receipt(kind::GROUP, 1, sent, &marks, &team()).unwrap();
+        assert_eq!(r.text, "Read by everyone");
+        assert_eq!(names(&r.readers), vec!["bob"]);
+    }
+
+    #[test]
+    fn groups_show_three_avatars_then_a_count() {
+        let marks = [
+            (1, None),
+            (5, Some(at(9))),
+            (4, Some(at(9))),
+            (3, Some(at(9))),
+            (2, Some(at(9))),
+        ];
+        let r = receipt(kind::GROUP, 1, at(5), &marks, &team()).unwrap();
+        assert_eq!(names(&r.shown), vec!["bob", "carol", "dev"]);
+        assert_eq!(r.more, 1);
+        assert_eq!(r.readers.len(), 4);
+
+        let partial = [(1, None), (2, Some(at(9))), (3, Some(at(9))), (4, None)];
+        let r = receipt(kind::GROUP, 1, at(5), &partial, &team()).unwrap();
+        assert_eq!(r.text, "Read by bob, carol");
+        assert_eq!(r.more, 0);
+    }
+
+    #[test]
+    fn big_groups_name_two_readers_and_count_the_rest() {
+        let team: HashMap<i64, String> = (1..=8).map(|id| (id, format!("u{id}"))).collect();
+        let mut marks: Vec<ReadMark> = (2..=7).map(|id| (id, Some(at(9)))).collect();
+        marks.push((1, None));
+        marks.push((8, None));
+        let r = receipt(kind::GROUP, 1, at(5), &marks, &team).unwrap();
+        assert_eq!(r.text, "Read by u2, u3 and 4 others");
+        assert_eq!(r.readers.len(), 6);
+        assert_eq!(r.more, 3);
+    }
+
+    #[test]
+    fn nobody_left_to_read_means_no_receipt() {
+        // Everyone else has left the group: no readers is checked before "everyone".
+        let marks = [(1, Some(at(9))), (99, Some(at(9)))];
+        assert_eq!(receipt(kind::GROUP, 1, at(5), &marks, &team()), None);
+    }
+
+    #[test]
+    fn channels_have_no_receipts() {
+        let marks = [(1, None), (2, Some(at(9))), (3, Some(at(9)))];
+        assert_eq!(receipt(kind::CHANNEL, 1, at(5), &marks, &team()), None);
+    }
 }
