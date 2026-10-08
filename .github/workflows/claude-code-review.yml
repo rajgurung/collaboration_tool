@@ -27,8 +27,10 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          # A random delimiter, so text in PR comments cannot end the block early.
+          delim="EOF_$(openssl rand -hex 16)"
           {
-            echo "REVIEW_HISTORY<<ENDOFHISTORY"
+            echo "REVIEW_HISTORY<<$delim"
             echo "=== PREVIOUS REVIEW COMMENTS ON THIS PR ==="
             echo ""
             gh pr view "$PR_NUMBER" --json reviews --jq '.reviews[] | "[\(.state)] \(.body)"' 2>/dev/null || echo "No prior reviews"
@@ -40,7 +42,7 @@ jobs:
             echo "=== PR COMMENTS ==="
             echo ""
             gh pr view "$PR_NUMBER" --json comments --jq '.comments[] | "\(.author.login): \(.body)"' 2>/dev/null || echo "No PR comments"
-            echo "ENDOFHISTORY"
+            echo "$delim"
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
