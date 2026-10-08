@@ -29,7 +29,9 @@ const SHOWN: u64 = 50;
 struct NotificationView {
     id: i64,
     kind: String,
+    /// The avatar's name; `who` is how the line reads, "You" for your own tags.
     actor: String,
+    who: String,
     color: &'static str,
     headline: String,
     excerpt: String,
@@ -287,16 +289,25 @@ async fn index(
                     .actor_id
                     .and_then(|id| names.get(&id).cloned())
                     .unwrap_or_else(|| "Someone".to_string());
-                let (headline, excerpt) = n
+                let (mut headline, excerpt) = n
                     .body
                     .split_once('\n')
                     .map_or((n.body.clone(), String::new()), |(h, e)| {
                         (h.to_string(), e.to_string())
                     });
+                let mine = n.actor_id == Some(member.user.id);
+                if mine {
+                    headline = headline.replacen("mentioned you", "mentioned yourself", 1);
+                }
                 NotificationView {
                     id: n.id,
                     kind: n.kind,
                     color: avatar_color(&actor),
+                    who: if mine {
+                        "You".to_string()
+                    } else {
+                        actor.clone()
+                    },
                     actor,
                     headline,
                     excerpt,

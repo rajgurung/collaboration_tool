@@ -17,7 +17,7 @@
           <span class="notice-kind notice-{{ n.kind }}">{% if n.kind == "mention" %}{{<icon name="at-sign" class="h-3 w-3"/>}}{% elif n.kind == "assigned" %}{{<icon name="user-round" class="h-3 w-3"/>}}{% elif n.kind == "note" %}{{<icon name="message-circle" class="h-3 w-3"/>}}{% else %}{{<icon name="map" class="h-3 w-3"/>}}{% endif %}</span>
         </span>
         <span class="flex min-w-0 flex-1 flex-col text-left">
-          <span class="text-[15px] {% if n.unread %}font-semibold{% endif %}"><strong>{{ n.actor }}</strong> {{ n.headline }}</span>
+          <span class="text-[15px] {% if n.unread %}font-semibold{% endif %}"><strong>{{ n.who }}</strong> {{ n.headline }}</span>
           {% if n.excerpt %}<span class="truncate-1 text-sm text-muted">{{ n.excerpt }}</span>{% endif %}
         </span>
         <span class="meta shrink-0 self-start pt-0.5 text-[13px]">{{ n.at }}</span>

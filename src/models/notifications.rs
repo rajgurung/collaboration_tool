@@ -102,7 +102,8 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
-    /// Sends `notice` to each recipient once, never to the person who caused it.
+    /// Sends `notice` to each recipient once. The person who caused it is
+    /// skipped, except for mentions: tagging yourself is a reminder you asked for.
     /// Returns who was notified, so callers can skip them for a second notice
     /// about the same action. Callers pass ids from the organisation's team.
     ///
@@ -117,7 +118,8 @@ impl Model {
     ) -> ModelResult<Vec<i64>> {
         let mut sent = Vec::new();
         for user_id in recipients {
-            if *user_id == actor_id || sent.contains(user_id) {
+            let skip_actor = notice.kind != kind::MENTION && *user_id == actor_id;
+            if skip_actor || sent.contains(user_id) {
                 continue;
             }
             ActiveModel {

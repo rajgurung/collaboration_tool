@@ -66,7 +66,17 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
             )]
         );
         assert_eq!(inbox(&ctx, carol_id).await.len(), 1);
-        assert!(inbox(&ctx, alice_id).await.is_empty(), "never yourself");
+        assert_eq!(
+            inbox(&ctx, alice_id).await.len(),
+            1,
+            "tagging yourself is a reminder"
+        );
+        let own = request
+            .get("/notifications")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert!(own.contains("<strong>You</strong> mentioned yourself in #general"));
 
         // A group bob is not in: mentioning him there tells him nothing.
         request
@@ -134,7 +144,10 @@ async fn assignments_and_notes_notify_the_right_people() {
                 "assigned you to “Write the FAQ”".to_string()
             )]
         );
-        assert!(inbox(&ctx, alice_id).await.is_empty());
+        assert!(
+            inbox(&ctx, alice_id).await.is_empty(),
+            "assigning yourself is not a notification"
+        );
 
         // Adding carol tells carol only; bob was already on it.
         request
