@@ -523,8 +523,11 @@ async fn dms_show_read_once_the_other_person_opens_them() {
 
         let page = open(&request, &alice, dm.id).await;
         let slot = receipt_slot(&page, hello.id);
-        assert!(slot.contains("</svg>Read</button>"), "{slot}");
-        assert!(slot.contains(r#"title="Read by bob""#), "{slot}");
+        assert!(
+            slot.contains("</svg>Read</span>"),
+            "DMs keep the word: {slot}"
+        );
+        assert!(!slot.contains("avatar"), "{slot}");
 
         // A message sent after bob last read is not read yet.
         let later = post(&request, &ctx, &alice, dm.id, "Never mind").await;
@@ -546,9 +549,10 @@ async fn groups_count_who_has_read() {
         open(&request, &bob, group.id).await;
         let page = open(&request, &alice, group.id).await;
         let slot = receipt_slot(&page, message.id);
-        assert!(slot.contains("Read by 1</button>"), "{slot}");
-        assert!(slot.contains(r#"title="Read by bob""#), "{slot}");
-        assert!(!slot.contains("msg-receipt-all"));
+        assert!(slot.contains(r#"aria-label="Read by bob""#), "{slot}");
+        assert!(slot.contains("avatar avatar-2xs"), "{slot}");
+        assert!(!slot.contains("receipt-more"), "{slot}");
+        assert!(!page.contains("msg-receipt-all"));
 
         let carols = open(&request, &carol, group.id).await;
         assert!(
@@ -557,11 +561,13 @@ async fn groups_count_who_has_read() {
         );
         let page = open(&request, &alice, group.id).await;
         let slot = receipt_slot(&page, message.id);
-        assert!(slot.contains("Read by everyone</button>"), "{slot}");
-        assert!(slot.contains(r#"title="Read by bob, carol""#), "{slot}");
+        assert!(slot.contains(r#"aria-label="Read by everyone""#), "{slot}");
+        assert_eq!(slot.matches("avatar avatar-2xs").count(), 2, "{slot}");
         assert!(
-            slot.contains(r#"id="receipt-names-"#),
-            "names to tap open on a phone"
+            slot.contains(r#"id="receipt-names-"#)
+                && slot.contains("<span>bob</span>")
+                && slot.contains("<span>carol</span>"),
+            "the reader list to hover or tap open: {slot}"
         );
         assert!(page.contains("msg-receipt msg-receipt-all"));
     })
@@ -614,7 +620,7 @@ async fn reading_publishes_receipts_for_the_authors() {
         assert_eq!(receipts.len(), 1);
         assert_eq!(receipts[0].message_id, message.id);
         assert_eq!(receipts[0].author_id, alice_id);
-        assert_eq!(receipts[0].receipt.as_ref().unwrap().text, "Read by 1");
+        assert_eq!(receipts[0].receipt.as_ref().unwrap().text, "Read by bob");
 
         // Nothing new since: nothing published.
         request

@@ -15,7 +15,7 @@ pub enum ChatEvent {
     Message {
         conversation_id: i64,
         author_id: i64,
-        message: MessageView,
+        message: Box<MessageView>,
     },
     /// Someone read up to now. Carries the new receipts for the messages that
     /// read covered; each socket forwards only those its viewer wrote.

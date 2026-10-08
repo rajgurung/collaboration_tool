@@ -164,6 +164,7 @@
 
   /* Avatars */
   .avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
+  .avatar-2xs { width: 16px; height: 16px; font-size: 8px; font-weight: 700; }
   .avatar-xs { width: 22px; height: 22px; font-size: 10px; font-weight: 700; }
   .avatar-sm { width: 28px; height: 28px; font-size: 12px; }
   .avatar-stack { display: inline-flex; }
@@ -396,11 +397,18 @@
   .msg-name { margin-left: 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
   .msg-meta { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 8px; margin: 1px 12px 0; }
   .msg-time { font-size: 11px; color: var(--muted); }
-  .msg-receipt { display: flex; flex-direction: column; align-items: flex-end; font-size: 11px; color: var(--muted); }
+  .msg-receipt { position: relative; display: inline-flex; font-size: 11px; color: var(--muted); }
   .msg-receipt:empty { display: none; }
-  .msg-receipt-btn { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+  .msg-receipt-dm, .msg-receipt-btn { display: inline-flex; align-items: center; gap: 3px; }
+  .msg-receipt-btn { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
   .msg-receipt-all svg { color: var(--accent); }
-  .msg-receipt-names { max-width: 240px; text-align: right; }
+  .receipt-stack { display: inline-flex; align-items: center; }
+  .receipt-stack > * { box-shadow: 0 0 0 1.5px var(--bg); }
+  .receipt-stack > * + * { margin-left: -4px; }
+  .receipt-more { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: var(--chip); color: var(--text); font-size: 9px; font-weight: 700; }
+  /* Reader list: above the receipt, right-aligned so it stays on a phone screen. */
+  .receipt-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column; gap: 6px; min-width: 140px; max-width: 220px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); color: var(--text); font-size: 13px; }
+  .receipt-pop-row { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
   /* Only the last message in a run of your own shows its receipt. */
   /* Live messages land after .chat-empty, so a run can straddle it. */
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-receipt,
@@ -487,4 +495,12 @@
   .mention-menu li { padding: 8px 10px; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; }
   .mention-menu li[aria-selected="true"], .mention-menu li:hover { background: var(--chip); }
   .msg-own .mention { color: inherit; background: color-mix(in srgb, var(--own-text) 10%, transparent); }
+}
+
+/* Desktop: hover or keyboard focus opens the reader list. In the utilities
+   layer so it beats `.hidden`; phones use the tap toggle instead. */
+@layer utilities {
+  @media (hover: hover) {
+    .msg-receipt:hover .receipt-pop, .msg-receipt:focus-within .receipt-pop { display: flex; }
+  }
 }

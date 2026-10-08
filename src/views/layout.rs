@@ -13,7 +13,7 @@ pub fn avatar_color(name: &str) -> &'static str {
 }
 
 /// Someone on the team, as shown in pickers and on cards.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Person {
     pub id: i64,
     pub username: String,

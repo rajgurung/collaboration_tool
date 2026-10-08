@@ -95,7 +95,7 @@ async fn run(mut socket: WebSocket, session: Session) {
                 Ok(ChatEvent::Message { conversation_id, author_id, message })
                     if conversation_id == session.conversation_id =>
                 {
-                    match render(&session, author_id, message) {
+                    match render(&session, author_id, *message) {
                         Ok(html) => {
                             if socket.send(Message::Text(html.into())).await.is_err() {
                                 break;
@@ -192,7 +192,12 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
     hub.publish(ChatEvent::Message {
         conversation_id: message.conversation_id,
         author_id: message.user_id,
-        message: MessageView::new(message, &names, 0, time::zone(&org.timezone)),
+        message: Box::new(MessageView::new(
+            message,
+            &names,
+            0,
+            time::zone(&org.timezone),
+        )),
     });
     Ok(())
 }
@@ -306,7 +311,7 @@ pub fn routes() -> Routes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::controllers::chat::Receipt;
+    use crate::{controllers::chat::Receipt, views::layout::Person};
 
     fn update(message_id: i64, author_id: i64) -> ReceiptUpdate {
         ReceiptUpdate {
@@ -339,8 +344,18 @@ mod tests {
             message_id,
             author_id: 1,
             receipt: Some(Receipt {
+                dm: false,
                 text: String::new(),
-                readers: readers.iter().map(ToString::to_string).collect(),
+                readers: readers
+                    .iter()
+                    .map(|name| Person {
+                        id: 0,
+                        username: (*name).to_string(),
+                        color: "#ffb454",
+                    })
+                    .collect(),
+                shown: Vec::new(),
+                more: 0,
                 all: false,
             }),
         }
@@ -380,7 +395,12 @@ mod tests {
         let event = ChatEvent::Message {
             conversation_id: 7,
             author_id: 1,
-            message: MessageView::new(&message, &HashMap::new(), 1, chrono_tz::UTC),
+            message: Box::new(MessageView::new(
+                &message,
+                &HashMap::new(),
+                1,
+                chrono_tz::UTC,
+            )),
         };
         assert!(receipts_for(&event, 7, 1).is_empty());
     }

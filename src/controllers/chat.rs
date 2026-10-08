@@ -52,11 +52,22 @@ pub struct ListItem {
     pub unread: u64,
 }
 
+/// How many reader avatars a group receipt shows before "+N".
+const RECEIPT_AVATARS: usize = 3;
+
 /// Who has read a message, for its author. Only DMs and groups have receipts.
+/// A DM shows `text` ("Read"); a group shows avatars and uses `text` as the
+/// screen-reader label.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Receipt {
+    pub dm: bool,
     pub text: String,
-    pub readers: Vec<String>,
+    /// Everyone who has read it, by name.
+    pub readers: Vec<Person>,
+    /// The first few readers, shown as avatars.
+    pub shown: Vec<Person>,
+    /// Readers beyond `shown`.
+    pub more: usize,
     pub all: bool,
 }
 
@@ -132,29 +143,43 @@ pub fn receipt(
     if conversation_kind == kind::CHANNEL {
         return None;
     }
-    let others: Vec<(&String, Option<DateTime<FixedOffset>>)> = marks
+    let others: Vec<(i64, &String, Option<DateTime<FixedOffset>>)> = marks
         .iter()
         .filter(|(id, _)| *id != author_id)
-        .filter_map(|(id, at)| names.get(id).map(|name| (name, *at)))
+        .filter_map(|(id, at)| names.get(id).map(|name| (*id, name, *at)))
         .collect();
-    let mut readers: Vec<String> = others
+    let mut readers: Vec<Person> = others
         .iter()
-        .filter(|(_, at)| at.is_some_and(|at| at >= created_at))
-        .map(|(name, _)| (*name).clone())
+        .filter(|(_, _, at)| at.is_some_and(|at| at >= created_at))
+        .map(|(id, name, _)| Person {
+            id: *id,
+            color: avatar_color(name),
+            username: (*name).clone(),
+        })
         .collect();
     if readers.is_empty() {
         return None;
     }
-    readers.sort();
+    readers.sort_by(|a, b| a.username.cmp(&b.username));
     let all = readers.len() == others.len();
-    let text = if conversation_kind == kind::DM {
+    let dm = conversation_kind == kind::DM;
+    let text = if dm {
         "Read".to_string()
     } else if all {
         "Read by everyone".to_string()
     } else {
-        format!("Read by {}", readers.len())
+        let names: Vec<&str> = readers.iter().map(|p| p.username.as_str()).collect();
+        format!("Read by {}", names.join(", "))
     };
-    Some(Receipt { text, readers, all })
+    let shown: Vec<Person> = readers.iter().take(RECEIPT_AVATARS).cloned().collect();
+    Some(Receipt {
+        dm,
+        text,
+        more: readers.len() - shown.len(),
+        shown,
+        readers,
+        all,
+    })
 }
 
 /// Marks where each run of messages from one person starts and ends, and adds
@@ -546,10 +571,20 @@ mod tests {
     }
 
     fn team() -> HashMap<i64, String> {
-        [(1, "alice"), (2, "bob"), (3, "carol")]
-            .into_iter()
-            .map(|(id, n)| (id, n.to_string()))
-            .collect()
+        [
+            (1, "alice"),
+            (2, "bob"),
+            (3, "carol"),
+            (4, "dev"),
+            (5, "eve"),
+        ]
+        .into_iter()
+        .map(|(id, n)| (id, n.to_string()))
+        .collect()
+    }
+
+    fn names(people: &[Person]) -> Vec<&str> {
+        people.iter().map(|p| p.username.as_str()).collect()
     }
 
     #[test]
@@ -562,7 +597,8 @@ mod tests {
         let read = [(1, None), (2, Some(at(5)))];
         let r = receipt(kind::DM, 1, sent, &read, &team()).unwrap();
         assert_eq!(r.text, "Read");
-        assert_eq!(r.readers, vec!["bob"]);
+        assert!(r.dm);
+        assert_eq!(names(&r.readers), vec!["bob"]);
         assert!(r.all);
     }
 
@@ -571,14 +607,15 @@ mod tests {
         let sent = at(5);
         let some = [(1, Some(at(9))), (2, Some(at(6))), (3, Some(at(1)))];
         let r = receipt(kind::GROUP, 1, sent, &some, &team()).unwrap();
-        assert_eq!(r.text, "Read by 1");
-        assert_eq!(r.readers, vec!["bob"]);
-        assert!(!r.all);
+        assert_eq!(r.text, "Read by bob");
+        assert_eq!(names(&r.readers), vec!["bob"]);
+        assert_eq!(r.readers[0].color, avatar_color("bob"));
+        assert!(!r.all && !r.dm);
 
         let all = [(3, Some(at(7))), (1, None), (2, Some(at(6)))];
         let r = receipt(kind::GROUP, 1, sent, &all, &team()).unwrap();
         assert_eq!(r.text, "Read by everyone");
-        assert_eq!(r.readers, vec!["bob", "carol"]);
+        assert_eq!(names(&r.readers), vec!["bob", "carol"]);
         assert!(r.all);
     }
 
@@ -588,7 +625,27 @@ mod tests {
         let marks = [(1, None), (2, Some(at(6))), (99, Some(at(6)))];
         let r = receipt(kind::GROUP, 1, sent, &marks, &team()).unwrap();
         assert_eq!(r.text, "Read by everyone");
-        assert_eq!(r.readers, vec!["bob"]);
+        assert_eq!(names(&r.readers), vec!["bob"]);
+    }
+
+    #[test]
+    fn groups_show_three_avatars_then_a_count() {
+        let marks = [
+            (1, None),
+            (5, Some(at(9))),
+            (4, Some(at(9))),
+            (3, Some(at(9))),
+            (2, Some(at(9))),
+        ];
+        let r = receipt(kind::GROUP, 1, at(5), &marks, &team()).unwrap();
+        assert_eq!(names(&r.shown), vec!["bob", "carol", "dev"]);
+        assert_eq!(r.more, 1);
+        assert_eq!(r.readers.len(), 4);
+
+        let partial = [(1, None), (2, Some(at(9))), (3, Some(at(9))), (4, None)];
+        let r = receipt(kind::GROUP, 1, at(5), &partial, &team()).unwrap();
+        assert_eq!(r.text, "Read by bob, carol");
+        assert_eq!(r.more, 0);
     }
 
     #[test]
