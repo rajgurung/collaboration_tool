@@ -1,7 +1,10 @@
 //! OAuth for Claude: discovery, registration, the Allow page and tokens.
 use collab::{
     app::App,
-    models::{access_tokens, oauth_codes, organisations},
+    models::{
+        access_tokens::{self, CodeExchange},
+        oauth_clients, oauth_codes, organisations,
+    },
 };
 use loco_rs::{testing::prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
@@ -433,22 +436,52 @@ async fn codes_must_match_and_work_once() {
     .await;
 }
 
+/// A second connection pool to the test database. The app's pool has one
+/// connection, so requests through it never overlap; races need two.
+async fn second_connection(ctx: &loco_rs::app::AppContext) -> sea_orm::DatabaseConnection {
+    sea_orm::Database::connect(&ctx.config.database.uri)
+        .await
+        .unwrap()
+}
+
+/// Whether an access token still works, checked straight on the model.
+async fn usable(db: &sea_orm::DatabaseConnection, token: &str) -> bool {
+    access_tokens::Model::find_usable(db, token, RESOURCE)
+        .await
+        .unwrap()
+        .is_some()
+}
+
 #[tokio::test]
 #[serial]
 async fn racing_for_one_code_lets_one_win_then_revokes_it() {
-    request::<App, _, _>(|request, _ctx| async move {
+    request::<App, _, _>(|request, ctx| async move {
         let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
-        let code = code_for(&request, &alice, &client_id).await;
-        let (a, b) = tokio::join!(
-            exchange(&request, &client_id, &code),
-            exchange(&request, &client_id, &code)
-        );
-        let mut statuses = [a.0, b.0];
-        statuses.sort_unstable();
-        assert_eq!(statuses, [200, 400]);
-        let winner = if a.0 == 200 { a.1 } else { b.1 };
-        assert!(!works(&request, winner["access_token"].as_str().unwrap()).await);
+        let client = oauth_clients::Model::find_by_client_id(&ctx.db, &client_id)
+            .await
+            .unwrap();
+        let other = second_connection(&ctx).await;
+        for round in 0..5 {
+            let code = code_for(&request, &alice, &client_id).await;
+            let exchange = CodeExchange {
+                code: &code,
+                code_verifier: VERIFIER,
+                redirect_uri: CLAUDE,
+                resource: RESOURCE,
+                client: &client,
+            };
+            let (a, b) = tokio::join!(
+                access_tokens::Model::exchange_code(&ctx.db, &exchange),
+                access_tokens::Model::exchange_code(&other, &exchange)
+            );
+            let winners: Vec<_> = [a.unwrap(), b.unwrap()].into_iter().flatten().collect();
+            assert_eq!(winners.len(), 1, "round {round}: exactly one wins");
+            assert!(
+                !usable(&ctx.db, &winners[0].access_token).await,
+                "round {round}: the reuse revokes the winner's token"
+            );
+        }
     })
     .await;
 }
@@ -517,21 +550,28 @@ async fn refresh_rotates_and_reuse_revokes_the_grant() {
 #[tokio::test]
 #[serial]
 async fn racing_refreshes_let_one_win_then_revoke_it() {
-    request::<App, _, _>(|request, _ctx| async move {
+    request::<App, _, _>(|request, ctx| async move {
         let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
-        let code = code_for(&request, &alice, &client_id).await;
-        let (_, first) = exchange(&request, &client_id, &code).await;
-        let old_refresh = first["refresh_token"].as_str().unwrap();
-        let (a, b) = tokio::join!(
-            refresh(&request, &client_id, old_refresh),
-            refresh(&request, &client_id, old_refresh)
-        );
-        let mut statuses = [a.0, b.0];
-        statuses.sort_unstable();
-        assert_eq!(statuses, [200, 400]);
-        let winner = if a.0 == 200 { a.1 } else { b.1 };
-        assert!(!works(&request, winner["access_token"].as_str().unwrap()).await);
+        let client = oauth_clients::Model::find_by_client_id(&ctx.db, &client_id)
+            .await
+            .unwrap();
+        let other = second_connection(&ctx).await;
+        for round in 0..5 {
+            let code = code_for(&request, &alice, &client_id).await;
+            let (_, first) = exchange(&request, &client_id, &code).await;
+            let old_refresh = first["refresh_token"].as_str().unwrap();
+            let (a, b) = tokio::join!(
+                access_tokens::Model::refresh(&ctx.db, old_refresh, &client, RESOURCE),
+                access_tokens::Model::refresh(&other, old_refresh, &client, RESOURCE)
+            );
+            let winners: Vec<_> = [a.unwrap(), b.unwrap()].into_iter().flatten().collect();
+            assert_eq!(winners.len(), 1, "round {round}: exactly one wins");
+            assert!(
+                !usable(&ctx.db, &winners[0].access_token).await,
+                "round {round}: the reuse revokes the winner's token"
+            );
+        }
     })
     .await;
 }
