@@ -1,0 +1,30 @@
+<dialog id="welcome" class="welcome" aria-labelledby="welcome-title" data-welcome>
+  <button type="button" class="icon-btn welcome-close text-muted" data-welcome-done aria-label="Close welcome">{{<icon name="x" class="h-5 w-5"/>}}</button>
+  <div class="welcome-slide" data-slide>
+    <div class="welcome-art welcome-art-hello" aria-hidden="true">{{<logo letter={org.name | truncate(length=1, end="")}/>}}</div>
+    <h2 id="welcome-title">Welcome to {{ org.name }}</h2>
+    <p>This is where your team plans, tracks and talks. Here's a one-minute tour.</p>
+  </div>
+  <div class="welcome-slide" data-slide hidden>
+    <div class="welcome-art welcome-art-roadmap" aria-hidden="true"><span><i style="--w: 70%"></i></span><span><i style="--w: 35%"></i></span><span><i style="--w: 10%"></i></span></div>
+    <h2>The roadmap</h2>
+    <p>What the team is building now, next and later. Each project's progress fills in as its tasks get done.</p>
+  </div>
+  <div class="welcome-slide" data-slide hidden>
+    <div class="welcome-art welcome-art-board" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <h2>Tasks on a board</h2>
+    <p>Tasks move from To do to Done. Drag cards between columns, share a task with a few people, or add a quick chore with no project.</p>
+  </div>
+  <div class="welcome-slide" data-slide hidden>
+    <div class="welcome-art welcome-art-chat" aria-hidden="true"><span>Can <b>@alex</b> check this?</span><span>On it, thanks</span></div>
+    <h2>Chat and @mentions</h2>
+    <p>Talk in #general, groups or direct messages. Type @ to tag someone, and they'll see it in their notifications.</p>
+  </div>
+  <div class="welcome-foot">
+    <div class="welcome-dots" aria-hidden="true">{% for i in [1, 2, 3, 4] %}<i></i>{% endfor %}</div>
+    <span class="sr-only" aria-live="polite" data-welcome-status></span>
+    <button type="button" class="btn btn-secondary" data-welcome-back hidden>Back</button>
+    <button type="button" class="btn btn-secondary" data-welcome-done data-welcome-skip>Skip</button>
+    <button type="button" class="btn btn-primary" data-welcome-next>Next</button>
+  </div>
+</dialog>

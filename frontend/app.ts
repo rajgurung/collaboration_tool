@@ -326,3 +326,36 @@ mentionMenu.addEventListener("mousedown", (event) => {
 document.addEventListener("focusout", (event) => {
   if (event.target === mentionField) closeMentions();
 });
+
+// Welcome pop-up on Home: shown once, a few slides with Next and Back. Closing
+// it any way (Skip, ×, Escape, Get started) records that it was seen.
+const welcome = document.querySelector<HTMLDialogElement>("dialog[data-welcome]");
+if (welcome) {
+  const slides = Array.from(welcome.querySelectorAll<HTMLElement>("[data-slide]"));
+  const dots = Array.from(welcome.querySelectorAll<HTMLElement>(".welcome-dots i"));
+  const next = welcome.querySelector<HTMLButtonElement>("[data-welcome-next]")!;
+  const back = welcome.querySelector<HTMLButtonElement>("[data-welcome-back]")!;
+  const skip = welcome.querySelector<HTMLButtonElement>("[data-welcome-skip]")!;
+  const status = welcome.querySelector<HTMLElement>("[data-welcome-status]")!;
+  let at = 0;
+  const show = (i: number) => {
+    at = i;
+    slides.forEach((s, n) => (s.hidden = n !== i));
+    dots.forEach((d, n) => d.classList.toggle("on", n === i));
+    const last = i === slides.length - 1;
+    next.textContent = last ? "Get started" : "Next";
+    back.hidden = i === 0;
+    skip.hidden = last;
+    status.textContent = `Step ${i + 1} of ${slides.length}`;
+  };
+  welcome.addEventListener("click", (event) => {
+    const button = (event.target as Element).closest("button");
+    if (!button) return;
+    if (button === next && at < slides.length - 1) show(at + 1);
+    else if (button === back) show(at - 1);
+    else if (button === next || button.hasAttribute("data-welcome-done")) welcome.close();
+  });
+  welcome.addEventListener("close", () => htmx.ajax("POST", "/guide/welcomed", { swap: "none" }), { once: true });
+  show(0);
+  welcome.showModal();
+}

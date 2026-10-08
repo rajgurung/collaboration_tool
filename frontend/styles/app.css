@@ -356,6 +356,50 @@
   .toast-error { background: var(--danger); color: #fff; }
   @media (min-width: 900px) { .toast-region { left: auto; right: 24px; bottom: 24px; justify-items: end; } }
 
+  /* Getting started guide and welcome pop-up */
+  .guide { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 6px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-1); }
+  .guide-close { position: absolute; top: 8px; right: 8px; }
+  .guide-top { display: flex; align-items: center; gap: 14px; padding-right: 36px; }
+  .guide-ring { flex-shrink: 0; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--chip) 0); }
+  .guide-ring > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--surface); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .guide-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+  .guide-step { display: flex; align-items: center; gap: 12px; padding: 11px 2px; border-top: 1px solid var(--line-soft); }
+  .guide-tick { flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid var(--line); border-radius: 50%; color: #fff; }
+  .guide-step-done .guide-tick { border-color: var(--done); background: var(--done); }
+  .guide-step-done strong { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+  .guide-go { flex-shrink: 0; min-height: 34px; padding: 0 14px; font-size: 14px; }
+  .guide-finish { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 2px; border-top: 1px solid var(--line-soft); }
+  @media (max-width: 899px) {
+    .guide { padding: 14px 12px 4px; }
+    .guide-how { display: none; }
+  }
+  .welcome { width: min(440px, calc(100% - 32px)); margin: auto; padding: 52px 24px 24px; border: 0; border-radius: 20px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-lift); }
+  .welcome::backdrop { background: var(--scrim); }
+  .welcome-close { position: absolute; top: 10px; right: 10px; }
+  .welcome-slide { display: flex; flex-direction: column; gap: 10px; }
+  .welcome-slide h2 { margin: 6px 0 0; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; text-wrap: balance; }
+  .welcome-slide p { margin: 0; color: var(--muted); line-height: 1.55; }
+  .welcome-art { display: grid; gap: 8px; height: 132px; padding: 14px; box-sizing: border-box; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--lane); }
+  .welcome-art-hello { place-items: center; }
+  .welcome-art-hello > span { width: 56px; height: 56px; border-radius: 16px; font-size: 24px; }
+  .welcome-art-roadmap { align-content: center; }
+  .welcome-art-roadmap span { height: 10px; border-radius: 5px; background: var(--chip); overflow: hidden; }
+  .welcome-art-roadmap i { display: block; width: var(--w); height: 100%; background: var(--accent); }
+  .welcome-art-board { grid-template-columns: repeat(4, 1fr); }
+  .welcome-art-board span { border-radius: 8px; background: color-mix(in srgb, var(--todo) 22%, var(--chip)); }
+  .welcome-art-board span:nth-child(2) { background: color-mix(in srgb, var(--progress) 28%, var(--chip)); }
+  .welcome-art-board span:nth-child(3) { background: color-mix(in srgb, var(--blocked) 28%, var(--chip)); }
+  .welcome-art-board span:nth-child(4) { background: color-mix(in srgb, var(--done) 28%, var(--chip)); }
+  .welcome-art-chat { align-content: center; font-size: 14px; }
+  .welcome-art-chat span { justify-self: start; padding: 7px 12px; border: 1px solid var(--line); border-radius: 16px 16px 16px 6px; background: var(--surface); }
+  .welcome-art-chat span:last-child { justify-self: end; border-color: transparent; border-radius: 16px 16px 6px 16px; background: var(--own-bubble); color: var(--own-text); }
+  .welcome-art-chat b { color: var(--progress); }
+  .welcome-foot { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+  .welcome-dots { display: flex; flex: 1; gap: 6px; }
+  .welcome-dots i { width: 7px; height: 7px; border-radius: 4px; background: var(--line); transition: width 0.2s; }
+  .welcome-dots i.on { width: 18px; background: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .welcome-dots i { transition: none; } }
+
   /* Notifications and mentions */
   .bell-btn { position: relative; }
   .bell-badge { position: absolute; top: 4px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; display: grid; place-items: center; }

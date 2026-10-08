@@ -14,7 +14,7 @@
     <a href="/members" class="side-link" {% if active == "members" %}aria-current="page"{% endif %}>{{<icon name="users" class="h-5 w-5"/>}}Members</a>
     {% if me.is_super_admin %}<a href="/admin" class="side-link" {% if active == "admin" %}aria-current="page"{% endif %}>{{<icon name="shield" class="h-5 w-5"/>}}Admin</a>{% endif %}
     <div class="mt-auto flex items-center gap-3 border-t border-line px-2 pt-3">
-      {% if me %}{{<avatar name={me.username} color={me.color | default(value="#e8dfce")} size="md"/>}}<span class="truncate-1 flex-1 text-sm font-medium">{{ me.username }}</span>{% endif %}
+      {% if me %}<a href="/more" class="flex min-w-0 flex-1 items-center gap-3 rounded-[10px]" title="Your account">{{<avatar name={me.username} color={me.color | default(value="#e8dfce")} size="md"/>}}<span class="truncate-1 flex-1 text-sm font-medium">{{ me.username }}</span></a>{% endif %}
       <form action="/logout" method="post"><button type="submit" class="icon-btn" aria-label="Sign out" title="Sign out">{{<icon name="log-out" class="h-5 w-5"/>}}</button></form>
     </div>
   </aside>

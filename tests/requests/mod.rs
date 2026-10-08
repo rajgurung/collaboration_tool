@@ -27,3 +27,5 @@ pub mod tenancy;
 pub mod more;
 
 pub mod notifications;
+
+pub mod guide;

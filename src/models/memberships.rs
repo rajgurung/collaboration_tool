@@ -261,6 +261,71 @@ impl Model {
             .is_some())
     }
 
+    /// The viewer's own approved membership in this organisation, if any.
+    /// A platform admin visiting another organisation has none.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn active_in<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<Option<Self>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::Status.eq(status::ACTIVE))
+            .one(db)
+            .await?)
+    }
+
+    /// Closes the "Getting started" guide (`hidden`) or brings it back.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn set_guide_hidden<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+        hidden: bool,
+    ) -> ModelResult<()> {
+        let at = hidden.then(|| chrono::Utc::now().fixed_offset());
+        Self::set_for(db, org_id, user_id, Column::GuideDismissedAt, at).await
+    }
+
+    /// Records that the welcome pop-up was seen, so it shows only once.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn mark_welcomed<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        let at = Some(chrono::Utc::now().fixed_offset());
+        Self::set_for(db, org_id, user_id, Column::WelcomedAt, at).await
+    }
+
+    async fn set_for<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+        column: Column,
+        at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    ) -> ModelResult<()> {
+        Entity::update_many()
+            .col_expr(column, sea_orm::sea_query::Expr::value(at))
+            .col_expr(
+                Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(chrono::Utc::now().fixed_offset()),
+            )
+            .filter(Column::OrganisationId.eq(org_id))
+            .filter(Column::UserId.eq(user_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
     #[must_use]
     pub fn is_active(&self) -> bool {
         self.status == status::ACTIVE

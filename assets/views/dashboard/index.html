@@ -14,6 +14,8 @@
     <a href="/tasks?new=1" class="btn btn-primary desktop-only">{{<icon name="plus" class="h-4 w-4"/>}}New task</a>
   </div>
 
+  {% if guide %}{% include "dashboard/_guide.html" %}{% endif %}
+
   <div class="grid grid-cols-2 gap-3 min-[900px]:grid-cols-4">
     <a href="/tasks?view=list&filter=mine" class="stat" style="--dot: var(--progress)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ my_open }}</span><span class="meta">Your open tasks</span></span></a>
     <a href="/tasks?view=list&filter=blocked" class="stat" style="--dot: var(--blocked)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ blocked }}</span><span class="meta">Blocked</span></span></a>
@@ -91,4 +93,5 @@
     </div>
   </div>
 </div>
+{% if welcome %}{% include "dashboard/_welcome.html" %}{% endif %}
 {% endblock content %}

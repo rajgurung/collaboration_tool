@@ -1,0 +1,29 @@
+<section class="guide" id="guide" aria-labelledby="guide-title">
+  <button type="button" class="icon-btn guide-close text-muted" aria-label="Close the getting started guide"
+          hx-post="/guide/dismiss" hx-target="#guide" hx-swap="outerHTML">{{<icon name="x" class="h-[18px] w-[18px]"/>}}</button>
+  <div class="guide-top">
+    <span class="guide-ring" style="--pct: {{ guide.pct }}" role="img" aria-label="{{ guide.done }} of {{ guide.total }} done"><span>{{ guide.done }}/{{ guide.total }}</span></span>
+    <div class="min-w-0">
+      <h2 id="guide-title" class="m-0 text-[17px] font-extrabold tracking-tight">Getting started</h2>
+      <p class="meta m-0 text-sm">{% if guide.done == guide.total %}All done. You know your way around.{% else %}A few quick steps to find your way around {{ org.name }}. They tick themselves as you go.{% endif %}</p>
+    </div>
+  </div>
+  <ul class="guide-steps">
+    {% for step in guide.steps %}
+    <li class="guide-step {% if step.done %}guide-step-done{% endif %}">
+      <span class="guide-tick" aria-hidden="true">{% if step.done %}{{<icon name="check" class="h-3.5 w-3.5"/>}}{% endif %}</span>
+      <span class="flex min-w-0 flex-1 flex-col">
+        <strong class="text-[15px]">{{ step.title }}{% if step.done %}<span class="sr-only"> (done)</span>{% endif %}</strong>
+        <span class="meta guide-how text-[13px]">{{ step.how }}</span>
+      </span>
+      {% if not step.done %}<a href="{{ step.href }}" class="btn {% if loop.first %}btn-primary{% else %}btn-secondary{% endif %} guide-go">{{ step.action }}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if guide.done == guide.total %}
+  <div class="guide-finish">
+    <span class="flex items-center gap-2 font-bold text-done">{{<icon name="check" class="h-4 w-4"/>}}You're all set.</span>
+    <button type="button" class="btn btn-secondary" hx-post="/guide/dismiss" hx-target="#guide" hx-swap="outerHTML">Hide guide</button>
+  </div>
+  {% endif %}
+</section>
