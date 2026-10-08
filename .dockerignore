@@ -4,7 +4,7 @@ target
 assets/static/css
 assets/static/js
 
-# Git and editor files
+# Git, editor and agent files
 .git
 .gitignore
 .idea
@@ -12,17 +12,8 @@ assets/static/js
 Dockerfile
 .dockerignore
 
-# Old Next.js app (removed in Task 17)
-node_modules
-.next
-app
-components
-db
-drizzle
-lib
-hooks
-public
-scripts
-vendor
-build
-examples/d1
+# Not needed in the image
+docs
+tests
+SPEC.md
+TASKS.md

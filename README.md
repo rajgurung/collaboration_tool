@@ -1,45 +1,78 @@
 # Collaboration Tool
 
-A polished, mobile-friendly project collaboration workspace with persistent tasks, roadmaps, progress tracking, meeting minutes, channels, group conversations and direct messages.
+A multi-tenant team workspace: roadmap, task board with notes, meeting minutes, and live chat with channels, groups and direct messages.
 
-The repository contains anonymised demo data and fictional team members.
+Live at https://collab.rajgurung.me.
 
-## Features
+## How it works
 
-- One-tap demo identity selection
-- Roadmap lanes and project progress
-- Task board with owners, priorities, status changes and comments
-- Founder/team progress dashboard
-- Persistent meeting minutes and decisions
-- Slack-style channels, custom groups and direct messages
-- Responsive desktop and mobile navigation
-- Durable SQLite storage through Cloudflare D1
+- Anyone can sign up and create an organisation. They become its owner.
+- Others join through the organisation's link (`/join/<slug>`) and wait until an owner or admin approves them.
+- Roles are owner, admin and member. A platform super admin can see and enter every organisation from `/admin`.
+- Every page and query is scoped to the signed-in member's organisation.
 
 ## Stack
 
-- Next.js-compatible Vinext runtime
-- React 19 and TypeScript
-- Tailwind CSS and Shadcn UI primitives
-- Drizzle ORM
-- Cloudflare Workers and D1
+- Rust with [Loco](https://loco.rs) 1.2 (SeaORM, Tera 2 templates)
+- PostgreSQL
+- HTMX for interactivity, a small amount of TypeScript built with esbuild
+- Tailwind CSS (standalone CLI)
+- Live chat over WebSockets
+- Email through Resend's HTTPS API in production, SMTP locally
+- Deployed on Railway from the `Dockerfile`
 
 ## Local development
 
-```bash
-pnpm install
-pnpm run dev
+Requirements: Rust (stable), Docker.
+
+```sh
+# Postgres 17 for development and tests (port 5433)
+docker run -d --name collab-postgres -p 5433:5432 \
+  -e POSTGRES_USER=loco -e POSTGRES_PASSWORD=loco -e POSTGRES_DB=collab_development postgres:17
+docker exec collab-postgres psql -U loco -d collab_development -c "create database collab_test"
+
+# Optional: catch outgoing email at http://localhost:8025
+docker run -d --name collab-mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit
+
+# Run the app with Tailwind and esbuild watching (http://localhost:5150)
+bin/dev
 ```
 
-Type-check, lint and build:
+Create a platform super admin for local use:
 
-```bash
-pnpm exec tsc --noEmit
-pnpm run lint
-pnpm run build
+```sh
+SUPER_ADMIN_PASSWORD=choose-one cargo loco task super_admin
 ```
 
-Schema definitions live in `db/schema.ts`, with generated SQL migrations under `drizzle/`.
+Use `http://localhost:5150`, not `127.0.0.1`: form posts from any other origin are rejected.
 
-## Important
+## Checks
 
-The included one-tap sign-in is intentionally designed for a product demo. Replace it with production authentication and authorization before storing sensitive information or deploying for real users.
+```sh
+cargo fmt --all
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+CI runs the same three on every pull request.
+
+## Layout
+
+| Path | What is there |
+|---|---|
+| `src/controllers` | One file per area: auth, signup, join, dashboard, roadmap, tasks, meetings, chat, chat_ws, members, admin |
+| `src/models` | Domain logic. Generated SeaORM entities are in `_entities` (do not edit) |
+| `src/extractors` | `CurrentUser` and `CurrentMember`, the access checks every page goes through |
+| `src/workers` | Background jobs (sending email through Resend) |
+| `src/data` | Typed settings and the in-memory chat hub |
+| `assets/views` | Tera templates and components |
+| `frontend` | Tailwind input and TypeScript helpers |
+| `migration` | Database migrations |
+| `tests` | Request, model, task and view tests, including `tests/requests/tenancy.rs` |
+| `docs` | Deployment guide and design notes |
+
+`SPEC.md` and `TASKS.md` record the plan this was built from.
+
+## Deploying
+
+See `docs/deploy.md`. Merges to `main` deploy to Railway.

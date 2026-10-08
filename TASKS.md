@@ -2,7 +2,7 @@
 
 Generated from SPEC.md on 2026-10-07.
 
-Work happens on a `loco` branch. The Loco app lives at the repo root next to the Next.js code (no path clashes) until Task 17 removes the old code.
+The Loco app was built on a `loco` branch next to the old Next.js code, which Task 17 removed.
 
 Parallel tasks share a few files: `src/app.rs` (route registration), `src/controllers/mod.rs`, and the nav in the base layout. Task 5 registers every controller and nav item up front as stubs, so Group 3 tasks only fill in their own files.
 
@@ -115,7 +115,7 @@ Parallel tasks share a few files: `src/app.rs` (route registration), `src/contro
   - Depends on: Tasks 12, 15.
   - Verify: SPEC.md success criteria checked off on the live URL.
 
-- [ ] **Task 17**: Remove the Next.js app.
+- [x] **Task 17**: Remove the Next.js app.
   - What: delete `app/`, `components/`, `db/`, `drizzle/`, `lib/`, `hooks/`, `examples/`, `build/`, `scripts/`, `vendor/`, `public/`, `.openai/`, Node and Cloudflare config files. Rewrite README for the Loco app.
   - Depends on: Task 16.
   - Verify: repo contains only the Loco app. `cargo test` and `docker build` still pass.
