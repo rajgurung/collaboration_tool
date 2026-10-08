@@ -18,8 +18,7 @@ use crate::{
     },
     extractors::current_member::CurrentMember,
     models::{
-        conversation_members,
-        conversations::{self, kind},
+        conversation_members, conversations, memberships,
         messages::{self, MessageParams},
         organisations,
     },
@@ -202,8 +201,8 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
     Ok(())
 }
 
-/// Marks a conversation read for `reader_id` and, in a DM or group, tells the
-/// authors of the messages that read covered who has now read them.
+/// Marks a conversation read for `reader_id` and tells the authors of the
+/// messages that read covered who has now read them.
 ///
 /// # Errors
 /// On database errors, or when the hub is missing.
@@ -217,16 +216,18 @@ pub async fn mark_read(
     let span =
         conversation_members::Model::mark_read(&ctx.db, org_id, conversation_id, reader_id).await?;
     let Some(span) = span else { return Ok(()) };
-    if conversation_kind == kind::CHANNEL {
-        return Ok(());
-    }
     let read =
         messages::Model::read_in_span(&ctx.db, org_id, conversation_id, reader_id, &span).await?;
     if read.is_empty() {
         return Ok(());
     }
     let marks = conversation_members::Model::read_marks(&ctx.db, org_id, conversation_id).await?;
-    let names = names(ctx, org_id).await?;
+    // Only this conversation's members: everyone has General open, so this runs often.
+    let names: HashMap<i64, String> =
+        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|(id, _)| *id))
+            .await?
+            .into_iter()
+            .collect();
     let receipts = read
         .iter()
         .map(|m| ReceiptUpdate {
@@ -248,7 +249,7 @@ pub async fn mark_read(
 /// The message as HTML for this socket's viewer, wrapped for an out-of-band append.
 fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result<String> {
     message.own = author_id == session.user_id;
-    message.read_receipts = message.own && session.conversation_kind != kind::CHANNEL;
+    message.read_receipts = message.own;
     session
         .view
         .render("chat/_message_oob.html", data!({ "message": message }))

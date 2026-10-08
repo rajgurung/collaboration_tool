@@ -142,9 +142,6 @@ pub fn receipt(
     marks: &[ReadMark],
     names: &HashMap<i64, String>,
 ) -> Option<Receipt> {
-    if conversation_kind == kind::CHANNEL {
-        return None;
-    }
     let others: Vec<(i64, &String, Option<DateTime<FixedOffset>>)> = marks
         .iter()
         .filter(|(id, _)| *id != author_id)
@@ -206,7 +203,7 @@ fn grouped(
         .iter()
         .map(|m| {
             let mut view = MessageView::new(m, names, viewer_id, tz);
-            if view.own && conversation.kind != kind::CHANNEL {
+            if view.own {
                 view.read_receipts = true;
                 view.receipt = receipt(&conversation.kind, m.user_id, m.created_at, marks, names);
             }
@@ -442,7 +439,7 @@ async fn send(
         Ok(message) => {
             let names = names(&ctx, member.org.id).await?;
             let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
-            view.read_receipts = conversation.kind != kind::CHANNEL;
+            view.read_receipts = true;
             format::render().view(&v, "chat/_message.html", data!({ "message": view }))
         }
         Err(err) => {
@@ -678,8 +675,11 @@ mod tests {
     }
 
     #[test]
-    fn channels_have_no_receipts() {
+    fn channels_show_receipts_like_groups() {
         let marks = [(1, None), (2, Some(at(9))), (3, Some(at(9)))];
-        assert_eq!(receipt(kind::CHANNEL, 1, at(5), &marks, &team()), None);
+        let r = receipt(kind::CHANNEL, 1, at(5), &marks, &team()).unwrap();
+        assert!(!r.dm);
+        assert!(r.all);
+        assert_eq!(r.text, "Read by everyone");
     }
 }
