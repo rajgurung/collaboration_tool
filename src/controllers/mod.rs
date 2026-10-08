@@ -24,3 +24,5 @@ pub mod chat_ws;
 pub mod more;
 
 pub mod notifications;
+
+pub mod guide;

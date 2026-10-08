@@ -5,7 +5,7 @@ use loco_rs::prelude::*;
 use crate::{
     controllers::chat,
     extractors::current_member::CurrentMember,
-    models::{meetings, memberships, projects, task_assignees, tasks},
+    models::{guide, meetings, memberships, projects, task_assignees, tasks},
     views::layout::avatar_color,
 };
 
@@ -130,6 +130,21 @@ async fn index(
             })
         });
 
+    // The "Getting started" guide until it's closed, and the welcome pop-up once.
+    let membership = memberships::Model::active_in(&ctx.db, org_id, me).await?;
+    let guide = match &membership {
+        Some(m) if m.guide_dismissed_at.is_none() => {
+            let steps = guide::steps(&ctx.db, org_id, me, member.can_manage()).await?;
+            let done = steps.iter().filter(|s| s.done).count();
+            let pct = (done * 100).checked_div(steps.len()).unwrap_or(0);
+            Some(
+                serde_json::json!({ "steps": steps, "done": done, "total": steps.len(), "pct": pct }),
+            )
+        }
+        _ => None,
+    };
+    let welcome = membership.as_ref().is_some_and(|m| m.welcomed_at.is_none());
+
     format::render().view(
         &v,
         "dashboard/index.html",
@@ -144,6 +159,8 @@ async fn index(
                 "roadmap_now": roadmap_now,
                 "recent_chats": recent,
                 "decision": decision,
+                "guide": guide,
+                "welcome": welcome,
                 "today": chrono::Utc::now().format("%A %-d %B").to_string(),
             }),
         ),

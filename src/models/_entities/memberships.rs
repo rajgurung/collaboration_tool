@@ -19,6 +19,8 @@ pub struct Model {
     #[sea_orm(unique)]
     pub user_id: i64,
     pub approved_by_id: Option<i64>,
+    pub guide_dismissed_at: Option<DateTimeWithTimeZone>,
+    pub welcomed_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
