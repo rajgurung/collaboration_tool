@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}Collaboration Tool{% endblock title %}</title>
   <meta name="description" content="A shared workspace for roadmaps, tasks, meetings and team chat.">
+  <!-- Apply a chosen theme before anything is drawn, so it never flashes. -->
+  <script>try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
   <!-- Swap 422 responses (forms re-rendered with errors) but still treat them as errors. -->
