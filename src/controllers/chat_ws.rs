@@ -1,7 +1,7 @@
 //! Live chat. The browser opens `/chat/{id}/ws` with the HTMX ws extension,
 //! sends messages as JSON (`{"body": "...", "HEADERS": {...}}`) and receives
 //! rendered message HTML that HTMX appends to `#chat-feed`.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::ws::{rejection::WebSocketUpgradeRejection, Message, WebSocket, WebSocketUpgrade},
@@ -124,7 +124,9 @@ async fn run(mut socket: WebSocket, session: Session) {
                         Err(err) => tracing::error!(error = %err, "could not render read receipts"),
                     }
                 }
-                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Lagged(skipped)) => {
+                    tracing::warn!(skipped, user_id = session.user_id, "chat socket fell behind");
+                }
                 Err(RecvError::Closed) => break,
             },
         }
@@ -224,11 +226,11 @@ pub async fn mark_read(
     let marks = conversation_members::Model::read_marks(&ctx.db, org_id, conversation_id).await?;
     // Only this conversation's members: everyone has General open, so this runs often.
     let names: HashMap<i64, String> =
-        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|(id, _)| *id))
+        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|m| m.user_id))
             .await?
             .into_iter()
             .collect();
-    let receipts = read
+    let receipts: Vec<ReceiptUpdate> = read
         .iter()
         .map(|m| ReceiptUpdate {
             message_id: m.id,
@@ -241,7 +243,7 @@ pub async fn mark_read(
         .ok_or_else(|| Error::string("chat hub missing"))?
         .publish(ChatEvent::Read {
             conversation_id,
-            receipts,
+            receipts: Arc::new(receipts),
         });
     Ok(())
 }
@@ -326,7 +328,7 @@ mod tests {
     fn sockets_only_get_receipts_for_their_viewers_messages() {
         let event = ChatEvent::Read {
             conversation_id: 7,
-            receipts: vec![update(10, 1), update(11, 2), update(12, 1)],
+            receipts: Arc::new(vec![update(10, 1), update(11, 2), update(12, 1)]),
         };
         let mine: Vec<i64> = receipts_for(&event, 7, 1)
             .iter()
