@@ -13,7 +13,6 @@ pub struct Model {
     pub name: String,
     pub lane: String,
     pub status: String,
-    pub progress: i64,
     pub accent: String,
     #[sea_orm(column_type = "Text")]
     pub summary: String,

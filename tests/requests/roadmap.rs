@@ -3,14 +3,14 @@ use collab::{
     models::{projects, users},
 };
 use loco_rs::testing::prelude::*;
-use sea_orm::{EntityTrait, PaginatorTrait};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serial_test::serial;
 
 use super::prepare_data::{join, sign_up};
 
 fn project_form(name: &str, lane: &str, owner_id: &str) -> serde_json::Value {
     serde_json::json!({
-        "name": name, "lane": lane, "status": "In progress", "progress": "40",
+        "name": name, "lane": lane, "status": "In progress",
         "accent": "#72e5b4", "owner_id": owner_id, "summary": "Ship the first version.",
     })
 }
@@ -56,7 +56,6 @@ async fn creating_a_project_shows_it_in_its_lane() {
             .unwrap();
         assert_eq!(saved.lane, "next");
         assert_eq!(saved.owner_id, Some(alice.id));
-        assert_eq!(saved.progress, 40);
 
         // Every lane is on the page (side by side on desktop). Phones see the
         // current lane, "Now" by default, and the switcher counts it under "Next".
@@ -83,7 +82,6 @@ async fn invalid_projects_rerender_the_form_with_errors() {
     request::<App, _, _>(|request, ctx| async move {
         let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
         let mut form = project_form("", "someday", "");
-        form["progress"] = serde_json::json!("150");
         form["accent"] = serde_json::json!("red");
 
         let res = request
@@ -98,7 +96,6 @@ async fn invalid_projects_rerender_the_form_with_errors() {
         for message in [
             "Give the project a name",
             "Choose now, next or later.",
-            "0 to 100",
             "Choose a colour.",
         ] {
             assert!(body.contains(message), "{message}: {body}");
@@ -217,6 +214,56 @@ async fn projects_from_other_orgs_are_invisible() {
             .unwrap()
             .unwrap();
         assert_eq!(unchanged.name, "Secret plan");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn progress_is_the_share_of_tasks_done() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        for name in ["Launch", "Someday"] {
+            request
+                .post("/roadmap/projects")
+                .add_header(owner.0.clone(), owner.1.clone())
+                .form(&project_form(name, "now", ""))
+                .await;
+        }
+        let launch = projects::Entity::find()
+            .filter(projects::Column::Name.eq("Launch"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        for (title, status) in [
+            ("A", "done"),
+            ("B", "progress"),
+            ("C", "todo"),
+            ("D", "blocked"),
+        ] {
+            request
+                .post("/tasks")
+                .add_header(owner.0.clone(), owner.1.clone())
+                .form(&serde_json::json!({
+                    "title": title, "project_id": launch.id.to_string(),
+                    "priority": "medium", "status": status,
+                }))
+                .await;
+        }
+
+        let page = request
+            .get("/roadmap")
+            .add_header(owner.0, owner.1)
+            .await
+            .text();
+        let compact: String = page.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            compact.contains(r#"aria-valuenow="25""#),
+            "1 of 4 done is 25%"
+        );
+        assert!(compact.contains("1 of 4 tasks done"));
+        assert!(compact.contains("No tasks yet"), "a project without tasks");
     })
     .await;
 }

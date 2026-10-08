@@ -19,7 +19,6 @@ pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> proj
             name: name.to_string(),
             lane: "now".to_string(),
             status: "Active".to_string(),
-            progress: 0,
             accent: "#ffb454".to_string(),
             owner_id: String::new(),
             summary: String::new(),

@@ -1,12 +1,35 @@
 use std::sync::LazyLock;
 
 use loco_rs::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub use super::_entities::projects::{ActiveModel, Column, Entity, Model};
-use super::{field_error, memberships};
+use super::{field_error, memberships, tasks};
 
 pub type Projects = Entity;
+
+/// How far along a project is: the share of its tasks that are done, rounded
+/// down so 100% means everything is finished.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct Progress {
+    pub done: usize,
+    pub total: usize,
+    pub percent: usize,
+}
+
+impl Progress {
+    #[must_use]
+    pub fn of(project_id: i64, all_tasks: &[tasks::Model]) -> Self {
+        let theirs = all_tasks.iter().filter(|t| t.project_id == project_id);
+        let total = theirs.clone().count();
+        let done = theirs.filter(|t| t.status == "done").count();
+        Self {
+            done,
+            total,
+            percent: (done * 100).checked_div(total).unwrap_or(0),
+        }
+    }
+}
 
 pub const LANES: [&str; 3] = ["now", "next", "later"];
 pub const ACCENTS: [&str; 6] = [
@@ -35,8 +58,6 @@ pub struct ProjectParams {
         message = "Add a short status (up to 40 characters)."
     ))]
     pub status: String,
-    #[validate(range(min = 0, max = 100, message = "Progress is a number from 0 to 100."))]
-    pub progress: i64,
     #[validate(regex(path = *ACCENT_RE, message = "Choose a colour."))]
     pub accent: String,
     #[serde(default)]
@@ -151,7 +172,6 @@ fn apply(project: &mut ActiveModel, params: &ProjectParams, owner_id: Option<i64
     project.name = ActiveValue::Set(params.name.trim().to_string());
     project.lane = ActiveValue::Set(params.lane.clone());
     project.status = ActiveValue::Set(params.status.trim().to_string());
-    project.progress = ActiveValue::Set(params.progress);
     project.accent = ActiveValue::Set(params.accent.to_lowercase());
     project.owner_id = ActiveValue::Set(owner_id);
     project.summary = ActiveValue::Set(params.summary.trim().to_string());

@@ -8,7 +8,7 @@ use crate::{
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
         memberships,
-        projects::{self, ProjectParams, ACCENTS, LANES},
+        projects::{self, Progress, ProjectParams, ACCENTS, LANES},
         tasks,
     },
     views::{
@@ -29,12 +29,11 @@ struct Card {
     id: i64,
     name: String,
     status: String,
-    progress: i64,
+    progress: Progress,
     accent: String,
     summary: String,
     owner: Option<String>,
     owner_color: &'static str,
-    open: usize,
     blocked: usize,
 }
 
@@ -75,12 +74,11 @@ async fn lane_data(ctx: &AppContext, org_id: i64, lane: &str) -> Result<serde_js
                         id: p.id,
                         name: p.name.clone(),
                         status: p.status.clone(),
-                        progress: p.progress,
+                        progress: Progress::of(p.id, &all_tasks),
                         accent: p.accent.clone(),
                         summary: p.summary.clone(),
                         owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
                         owner,
-                        open: own_tasks.clone().filter(|t| t.status != "done").count(),
                         blocked: own_tasks.filter(|t| t.status == "blocked").count(),
                     }
                 })
@@ -135,16 +133,16 @@ fn form_values(
 ) -> serde_json::Value {
     match (params, project) {
         (Some(p), _) => serde_json::json!({
-            "name": p.name, "lane": p.lane, "status": p.status, "progress": p.progress,
+            "name": p.name, "lane": p.lane, "status": p.status,
             "accent": p.accent, "owner_id": p.owner_id, "summary": p.summary,
         }),
         (None, Some(p)) => serde_json::json!({
-            "name": p.name, "lane": p.lane, "status": p.status, "progress": p.progress,
+            "name": p.name, "lane": p.lane, "status": p.status,
             "accent": p.accent, "owner_id": p.owner_id.map(|id| id.to_string()).unwrap_or_default(),
             "summary": p.summary,
         }),
         (None, None) => serde_json::json!({
-            "name": "", "lane": "now", "status": "Planned", "progress": 0,
+            "name": "", "lane": "now", "status": "Planned",
             "accent": ACCENTS[0], "owner_id": "", "summary": "",
         }),
     }
