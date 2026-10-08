@@ -35,6 +35,8 @@ sea-orm = { version = "2.0", features = [
   "macros",
 ] }
 chrono = { version = "0.4" }
+# IANA time zones (e.g. Europe/London) for showing times to each organisation.
+chrono-tz = "0.10"
 validator = { version = "0.20" }
 uuid = { version = "1.6", features = ["v4"] }
 # ts-rs derives the TypeScript bindings for the `dtos` (the typed JSON API

@@ -917,6 +917,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "chrono",
+ "chrono-tz 0.10.4",
  "cookie",
  "fluent-templates",
  "futures-util",

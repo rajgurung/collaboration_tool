@@ -71,6 +71,24 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
+    /// Sets the time zone people in this organisation read times in. Times
+    /// stay in UTC in the database.
+    ///
+    /// # Errors
+    /// A field error for an unknown zone, or database errors.
+    pub async fn set_timezone<C: ConnectionTrait>(self, db: &C, name: &str) -> ModelResult<Self> {
+        let name = name.trim();
+        if name.parse::<chrono_tz::Tz>().is_err() {
+            return Err(super::field_error(
+                "timezone",
+                "Choose a time zone from the list.",
+            ));
+        }
+        let mut org = self.into_active_model();
+        org.timezone = ActiveValue::Set(name.to_string());
+        Ok(org.update(db).await?)
+    }
+
     /// Every organisation with headline counts, newest first. For the platform admin only.
     ///
     /// # Errors

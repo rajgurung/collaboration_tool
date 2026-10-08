@@ -11,6 +11,7 @@ pub mod dashboard;
 pub mod roadmap;
 
 pub mod tasks;
+pub mod timezone;
 
 pub mod meetings;
 

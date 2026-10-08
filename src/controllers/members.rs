@@ -5,8 +5,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     data::settings::Settings,
     extractors::{current_member::CurrentMember, session::redirect_response},
-    models::{memberships, users},
-    views::layout::avatar_color,
+    models::{memberships, organisations, users},
+    views::{
+        forms::{field_errors, toast},
+        layout::avatar_color,
+        time,
+    },
 };
 
 #[derive(Debug, Serialize)]
@@ -68,6 +72,9 @@ async fn index(
                 "active_members": active,
                 "pending": if member.can_manage() { pending } else { Vec::new() },
                 "join_url": join_url,
+                "timezone": member.org.timezone,
+                "timezones": time::all_names(),
+                "local_now": chrono::Utc::now().with_timezone(&member.tz()).format("%H:%M %Z").to_string(),
             }),
         ),
     )
@@ -156,9 +163,47 @@ async fn respond(
         .view(v, template, member.page("members", data!({ "row": row })))
 }
 
+#[derive(Debug, Deserialize)]
+struct TimezoneForm {
+    timezone: String,
+}
+
+/// Owners and admins choose the organisation's time zone. Times are stored in
+/// UTC and shown in this zone everywhere in the app.
+#[debug_handler]
+async fn set_timezone(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Form(form): Form<TimezoneForm>,
+) -> Result<Response> {
+    member.require_manager()?;
+    let org = organisations::Model::find_by_id(&ctx.db, member.org.id).await?;
+    match org.set_timezone(&ctx.db, &form.timezone).await {
+        Ok(org) if headers.contains_key("hx-request") => format::render()
+            .header(
+                "HX-Trigger",
+                toast("success", &format!("Times now show in {}", org.timezone)),
+            )
+            .empty(),
+        Ok(_) => Ok(redirect_response(&headers, "/members")),
+        Err(err) => {
+            let message = field_errors(&err)
+                .and_then(|e| e.values().next().cloned())
+                .ok_or(err)?;
+            format::render()
+                .status(422)
+                .header("HX-Reswap", "none")
+                .header("HX-Trigger", toast("error", &message))
+                .empty()
+        }
+    }
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .add("/members", get(index))
+        .add("/members/timezone", post(set_timezone))
         .add("/members/{id}/approve", post(approve))
         .add("/members/{id}/reject", post(reject))
         .add("/members/{id}/role", post(change_role))

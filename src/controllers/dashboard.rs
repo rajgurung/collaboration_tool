@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
+use chrono::Timelike;
 use loco_rs::prelude::*;
 
 use crate::{
     controllers::chat,
     extractors::current_member::CurrentMember,
     models::{guide, meetings, memberships, projects, task_assignees, tasks},
-    views::layout::avatar_color,
+    views::{layout::avatar_color, time},
 };
 
 /// How many of your open tasks Home lists.
@@ -74,7 +75,8 @@ async fn index(
         .collect();
 
     let blocked = all_tasks.iter().filter(|t| t.status == "blocked").count();
-    let week_end = chrono::Utc::now().date_naive() + chrono::Days::new(7);
+    let tz = member.tz();
+    let week_end = time::today(tz) + chrono::Days::new(7);
     let due_this_week = all_tasks
         .iter()
         .filter(|t| t.status != "done" && t.due_on.is_some_and(|d| d <= week_end))
@@ -161,7 +163,8 @@ async fn index(
                 "decision": decision,
                 "guide": guide,
                 "welcome": welcome,
-                "today": chrono::Utc::now().format("%A %-d %B").to_string(),
+                "today": chrono::Utc::now().with_timezone(&tz).format("%A %-d %B").to_string(),
+                "greeting": greeting(chrono::Utc::now().with_timezone(&tz).hour()),
             }),
         ),
     )
@@ -169,4 +172,13 @@ async fn index(
 
 pub fn routes() -> Routes {
     Routes::new().add("/dashboard", get(index))
+}
+
+/// "Good morning" before noon, "Good afternoon" until six, then "Good evening".
+fn greeting(hour: u32) -> &'static str {
+    match hour {
+        0..12 => "Good morning",
+        12..18 => "Good afternoon",
+        _ => "Good evening",
+    }
 }
