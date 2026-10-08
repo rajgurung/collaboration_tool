@@ -25,6 +25,7 @@ A calm workspace for small teams. Plan the roadmap, track tasks, keep meeting no
 - ✅ **Tasks.** A board with swimlanes by project or person. Drag cards between columns, share a task with several people, and add notes.
 - 📝 **Meetings.** Keep the summary and the decisions in one place.
 - 💬 **Chat.** Channels, groups and direct messages, live.
+- 🔔 **Notifications.** @mention someone in chat or a task note, and they see it in their bell straight away. Assignments and project activity show up there too.
 - 🌗 **Light and dark.** Follows your system setting, on desktop and phone.
 - 🔒 **Private by default.** Each organisation sees only its own work. New people join through a link, and an owner approves them.
 
