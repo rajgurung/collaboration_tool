@@ -86,11 +86,11 @@ async fn dashboard_numbers_follow_the_tasks() {
             .text();
         let compact: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            compact.contains(r#"font-semibold">1</span><span class="meta">Your open tasks"#),
+            compact.contains(r#"stat-value">1</span><span class="meta">Your open tasks"#),
             "alice has one open task"
         );
         assert!(
-            compact.contains(r#"text-blocked">1</span><span class="meta">Blocked"#),
+            compact.contains(r#"stat-value">1</span><span class="meta">Blocked"#),
             "one blocked task in the org"
         );
         assert!(

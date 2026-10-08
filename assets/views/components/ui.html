@@ -1,6 +1,6 @@
 {# Shared UI components, available in every template. #}
 
-{% component logo() %}<span class="inline-grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-accent text-sm font-bold text-on-accent">C</span>{% endcomponent logo %}
+{% component logo(letter: string = "C") %}<span class="inline-grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-accent text-sm font-bold text-on-accent shadow-sm">{{ letter | upper }}</span>{% endcomponent logo %}
 
 {% component avatar(name: string, color: string = "#e8dfce", size: string = "md") %}<span title="{{ name }}" aria-label="{{ name }}" class="avatar avatar-{{ size }}" style="background: {{ color }}">{{ name | truncate(length=1, end="") | upper }}</span>{% endcomponent avatar %}
 

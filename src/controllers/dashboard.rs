@@ -6,6 +6,7 @@ use crate::{
     controllers::chat,
     extractors::current_member::CurrentMember,
     models::{meetings, memberships, projects, task_assignees, tasks},
+    views::layout::avatar_color,
 };
 
 /// How many of your open tasks Home lists.
@@ -64,19 +65,46 @@ async fn index(
                 .copied()
                 .collect::<Vec<_>>()
                 .join(" · ");
-            serde_json::json!({ "id": t.id, "title": t.title, "status": t.status, "meta": meta })
+            let accent = all_projects
+                .iter()
+                .find(|p| p.id == t.project_id)
+                .map_or("#9a968d", |p| p.accent.as_str());
+            serde_json::json!({ "id": t.id, "title": t.title, "status": t.status, "meta": meta, "accent": accent })
         })
         .collect();
 
     let blocked = all_tasks.iter().filter(|t| t.status == "blocked").count();
+    let week_end = chrono::Utc::now().date_naive() + chrono::Days::new(7);
+    let due_this_week = all_tasks
+        .iter()
+        .filter(|t| t.status != "done" && t.due_on.is_some_and(|d| d <= week_end))
+        .count();
 
-    // The "now" lane, with how much of each project is stuck.
+    // The "now" lane: progress, open and stuck work, and who is working on it.
     let roadmap_now: Vec<serde_json::Value> = all_projects
         .iter()
         .filter(|p| p.lane == "now")
         .map(|p| {
-            let stuck = all_tasks.iter().filter(|t| t.project_id == p.id && t.status == "blocked").count();
-            serde_json::json!({ "name": p.name, "progress": p.progress, "accent": p.accent, "blocked": stuck })
+            let theirs: Vec<&tasks::Model> =
+                all_tasks.iter().filter(|t| t.project_id == p.id).collect();
+            let stuck = theirs.iter().filter(|t| t.status == "blocked").count();
+            let open = theirs.iter().filter(|t| t.status != "done").count();
+            let mut people: Vec<i64> = Vec::new();
+            for id in theirs.iter().filter_map(|t| assignees.get(&t.id)).flatten() {
+                if !people.contains(id) {
+                    people.push(*id);
+                }
+            }
+            let people: Vec<serde_json::Value> = people
+                .iter()
+                .filter_map(|id| names.get(id))
+                .take(4)
+                .map(|n| serde_json::json!({ "name": n, "color": avatar_color(n) }))
+                .collect();
+            serde_json::json!({
+                "name": p.name, "progress": p.progress, "accent": p.accent, "status": p.status,
+                "blocked": stuck, "open": open, "people": people,
+            })
         })
         .collect();
 
@@ -108,6 +136,7 @@ async fn index(
             data!({
                 "my_open": my_open,
                 "blocked": blocked,
+                "due_this_week": due_this_week,
                 "unread": unread,
                 "my_tasks": my_tasks,
                 "roadmap_now": roadmap_now,
