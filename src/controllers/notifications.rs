@@ -24,12 +24,16 @@ use crate::{
 };
 
 const SHOWN: u64 = 50;
+/// Mention headlines start with this; the list rewrites it for your own tags.
+const MENTIONED_YOU: &str = "mentioned you";
 
 #[derive(Debug, Serialize)]
 struct NotificationView {
     id: i64,
     kind: String,
+    /// The avatar's name; `who` is how the line reads, "You" for your own tags.
     actor: String,
+    who: String,
     color: &'static str,
     headline: String,
     excerpt: String,
@@ -173,7 +177,7 @@ pub async fn note_added(
         &notifications::mentioned_ids(&note.body, &team),
         &Notice {
             kind: kind::MENTION,
-            body: format!("mentioned you on “{}”\n{quote}", task.title),
+            body: format!("{MENTIONED_YOU} on “{}”\n{quote}", task.title),
             link: link.clone(),
         },
     )
@@ -259,7 +263,7 @@ pub async fn message_sent(
         &visible,
         &Notice {
             kind: kind::MENTION,
-            body: format!("mentioned you in {place}\n{}", excerpt(&message.body)),
+            body: format!("{MENTIONED_YOU} in {place}\n{}", excerpt(&message.body)),
             link: format!("/chat/{}", conversation.id),
         },
     )
@@ -287,16 +291,25 @@ async fn index(
                     .actor_id
                     .and_then(|id| names.get(&id).cloned())
                     .unwrap_or_else(|| "Someone".to_string());
-                let (headline, excerpt) = n
+                let (mut headline, excerpt) = n
                     .body
                     .split_once('\n')
                     .map_or((n.body.clone(), String::new()), |(h, e)| {
                         (h.to_string(), e.to_string())
                     });
+                let mine = n.actor_id == Some(member.user.id);
+                if mine {
+                    headline = headline.replacen(MENTIONED_YOU, "mentioned yourself", 1);
+                }
                 NotificationView {
                     id: n.id,
                     kind: n.kind,
                     color: avatar_color(&actor),
+                    who: if mine {
+                        "You".to_string()
+                    } else {
+                        actor.clone()
+                    },
                     actor,
                     headline,
                     excerpt,
