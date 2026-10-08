@@ -1,13 +1,16 @@
 use collab::{
     app::App,
-    models::{conversations, notifications, organisations, tasks, users},
+    models::{
+        conversation_members, conversations, memberships, notifications, organisations, tasks,
+        users,
+    },
 };
 use loco_rs::{app::AppContext, testing::prelude::*};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serial_test::serial;
 
 use super::{
-    prepare_data::sign_up,
+    prepare_data::{join, sign_up},
     tasks::{approved_member, form_body, project_in, task_form},
 };
 
@@ -109,6 +112,179 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
             .await
             .text();
         assert!(badge.contains(">1<"), "{badge}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn everyone_tells_each_active_member_once() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
+        let (_, carol_id) =
+            approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
+        let (_, dave_id) =
+            approved_member(&request, &ctx, &alice, "dave", "dave@example.com").await;
+        join(&request, "acme", "erin", "erin@example.com").await;
+        let erin_id = user_id(&ctx, "erin@example.com").await;
+        let alice_id = user_id(&ctx, "alice@example.com").await;
+        let org = organisations::Model::find_by_slug(&ctx.db, "acme")
+            .await
+            .unwrap();
+        let general = conversations::Model::find_general(&ctx.db, org.id)
+            .await
+            .unwrap();
+
+        // Dave is no longer on the team but still has his General row.
+        let dave = memberships::Entity::find()
+            .filter(memberships::Column::UserId.eq(dave_id))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        memberships::ActiveModel {
+            id: ActiveValue::Unchanged(dave.id),
+            status: ActiveValue::Set(memberships::status::REJECTED.to_string()),
+            ..Default::default()
+        }
+        .update(&ctx.db)
+        .await
+        .unwrap();
+        assert!(conversation_members::Entity::find()
+            .filter(conversation_members::Column::ConversationId.eq(general.id))
+            .filter(conversation_members::Column::UserId.eq(dave_id))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_some());
+
+        let page = request
+            .get(&format!("/chat/{}", general.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert!(
+            page.contains(r#"data-mentions="everyone,"#),
+            "the picker offers everyone first"
+        );
+
+        let res = request
+            .post(&format!("/chat/{}/messages", general.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .add_header("HX-Request", "true")
+            .form(&serde_json::json!({ "body": "@everyone launch at 3, @bob runs it" }))
+            .await;
+        assert!(res
+            .text()
+            .contains(r#"<span class="mention">@everyone</span>"#));
+
+        assert_eq!(
+            inbox(&ctx, carol_id).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned everyone in #general\n@everyone launch at 3, @bob runs it".to_string()
+            )]
+        );
+        assert_eq!(
+            inbox(&ctx, bob_id).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned you in #general\n@everyone launch at 3, @bob runs it".to_string()
+            )],
+            "named people get one notice, not two"
+        );
+        assert!(inbox(&ctx, alice_id).await.is_empty(), "not the sender");
+        assert!(inbox(&ctx, dave_id).await.is_empty(), "not off the team");
+        assert!(inbox(&ctx, erin_id).await.is_empty(), "not pending");
+
+        // Tagging yourself alongside everyone is still one reminder.
+        request
+            .post(&format!("/chat/{}/messages", general.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .form(&serde_json::json!({ "body": "@everyone @alice check the doc" }))
+            .await;
+        assert_eq!(
+            inbox(&ctx, alice_id).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned you in #general\n@everyone @alice check the doc".to_string()
+            )]
+        );
+        assert_eq!(inbox(&ctx, carol_id).await.len(), 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn everyone_stays_inside_groups_and_dms() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
+        let (_, carol_id) =
+            approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
+
+        request
+            .post("/chat/groups")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(format!("name=leads&member_ids={bob_id}").into())
+            .await;
+        let group = conversations::Entity::find()
+            .filter(conversations::Column::Kind.eq("group"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        request
+            .post(&format!("/chat/{}/messages", group.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .form(&serde_json::json!({ "body": "@everyone standup moved" }))
+            .await;
+        assert_eq!(
+            inbox(&ctx, bob_id).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned everyone in leads\n@everyone standup moved".to_string()
+            )]
+        );
+        assert!(
+            inbox(&ctx, carol_id).await.is_empty(),
+            "carol is not in the group"
+        );
+
+        // In a DM it reaches the one other person; the picker doesn't offer it.
+        request
+            .post("/chat/dms")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .form(&serde_json::json!({ "user_id": carol_id }))
+            .await;
+        let dm = conversations::Entity::find()
+            .filter(conversations::Column::Kind.eq("dm"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let page = request
+            .get(&format!("/chat/{}", dm.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert!(page.contains("data-mentions=\"carol,alice\""), "{page}");
+        request
+            .post(&format!("/chat/{}/messages", dm.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .form(&serde_json::json!({ "body": "@everyone hi" }))
+            .await;
+        assert_eq!(
+            inbox(&ctx, carol_id).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned everyone in a message\n@everyone hi".to_string()
+            )]
+        );
+        assert_eq!(inbox(&ctx, bob_id).await.len(), 1);
     })
     .await;
 }
@@ -381,7 +557,7 @@ async fn unseen_mentions_are_emailed_once() {
             .await
             .unwrap();
         let project = project_in(&ctx, "acme", "Launch").await;
-        for body in ["Can @bob and @carol look?", "@carol one more thing"] {
+        for body in ["Can @bob and @carol look?", "@everyone one more thing"] {
             request
                 .post(&format!("/chat/{}/messages", general.id))
                 .add_header(alice.0.clone(), alice.1.clone())
@@ -402,16 +578,9 @@ async fn unseen_mentions_are_emailed_once() {
         // Too soon: nothing goes out.
         assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 0);
 
-        // Bob reads his mention; carol hasn't opened either of hers.
-        let bobs = notifications::Entity::find()
-            .filter(notifications::Column::UserId.eq(bob_id))
-            .filter(notifications::Column::Kind.eq("mention"))
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
+        // Bob reads his mentions; carol hasn't opened either of hers.
         request
-            .post(&format!("/notifications/{}/open", bobs.id))
+            .post("/notifications/read")
             .add_header(bob.0, bob.1)
             .await;
         age_notifications(&ctx, 20).await;
@@ -422,6 +591,7 @@ async fn unseen_mentions_are_emailed_once() {
         let email = deliveries.messages[0].replace("=\r\n", "");
         assert!(email.contains("carol@example.com"));
         assert!(email.contains("2 mentions waiting for you in Acme"));
+        assert!(email.contains("alice mentioned everyone in #general"));
         assert!(email.contains(&format!("/chat/{}", general.id)));
 
         // Never twice.

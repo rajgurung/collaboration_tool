@@ -788,7 +788,7 @@ async fn sheet_data(
 }
 
 /// Names the @ picker offers: teammates first, then the viewer, who can tag
-/// themselves (it highlights, but never notifies them).
+/// themselves as a reminder (it notifies them too).
 pub fn mention_names(people: &[(i64, String)], me: i64) -> String {
     let (mine, others): (Vec<_>, Vec<_>) = people.iter().partition(|(id, _)| *id == me);
     others

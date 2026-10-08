@@ -19,6 +19,21 @@ pub static USERNAME_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^[A-Za-z][A-Za-z0-9]{2,29}$").expect("username regex is valid")
 });
 
+/// Usernames can't be an @ keyword such as `@everyone`, in any case.
+///
+/// # Errors
+/// A field error when the name is reserved.
+pub fn not_reserved(name: &str) -> Result<(), validator::ValidationError> {
+    if name
+        .trim()
+        .eq_ignore_ascii_case(super::notifications::EVERYONE)
+    {
+        return Err(validator::ValidationError::new("reserved")
+            .with_message("That name is reserved.".into()));
+    }
+    Ok(())
+}
+
 /// Emails are compared and stored lowercase.
 #[must_use]
 pub fn normalize_email(email: &str) -> String {
@@ -38,7 +53,10 @@ pub struct RegisterParams {
     pub email: String,
     #[validate(length(min = PASSWORD_MIN_LENGTH, max = 128, message = "Use at least 8 characters."))]
     pub password: String,
-    #[validate(regex(path = *USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."))]
+    #[validate(
+        regex(path = *USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."),
+        custom(function = "not_reserved")
+    )]
     pub name: String,
 }
 
@@ -50,7 +68,10 @@ pub struct PasswordParams {
 
 #[derive(Debug, Validate, Deserialize)]
 pub struct Validator {
-    #[validate(regex(path = *USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."))]
+    #[validate(
+        regex(path = *USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."),
+        custom(function = "not_reserved")
+    )]
     pub name: String,
     #[validate(email(message = "Enter a valid email address."))]
     pub email: String,

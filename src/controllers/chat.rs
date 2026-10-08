@@ -13,7 +13,7 @@ use crate::{
         conversations::{self, kind, GroupParams},
         memberships,
         messages::{self, MessageParams},
-        notifications::{mention_parts, Part},
+        notifications::{mention_parts, Part, EVERYONE},
     },
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
@@ -115,6 +115,8 @@ impl MessageView {
                 &names
                     .iter()
                     .map(|(id, n)| (*id, n.clone()))
+                    // Not a person; only its name is used here.
+                    .chain([(0, EVERYONE.to_string())])
                     .collect::<Vec<_>>(),
             ),
             body: message.body.clone(),
@@ -353,6 +355,16 @@ async fn show(
         member.tz(),
     );
     let label = label(&conversation, &members, &names, me);
+    let mut mention_names = super::tasks::mention_names(
+        &people
+            .iter()
+            .map(|p| (p.id, p.username.clone()))
+            .collect::<Vec<_>>(),
+        me,
+    );
+    if conversation.kind != kind::DM {
+        mention_names = format!("{EVERYONE},{mention_names}");
+    }
     format::render().view(
         &v,
         "chat/show.html",
@@ -366,10 +378,7 @@ async fn show(
                     "color": avatar_color(&label),
                     "label": label,
                     "members": people,
-                    "mention_names": super::tasks::mention_names(
-                        &people.iter().map(|p| (p.id, p.username.clone())).collect::<Vec<_>>(),
-                        me,
-                    ),
+                    "mention_names": mention_names,
                 },
                 "messages": feed,
             }),
