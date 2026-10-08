@@ -21,6 +21,7 @@ mod m20261008_155033_notifications;
 mod m20261008_162805_remove_progress_from_projects;
 mod m20261008_165224_allow_tasks_without_project;
 mod m20261008_171153_add_guide_to_memberships;
+mod m20261008_173439_add_emailed_at_to_notifications;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -46,6 +47,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_162805_remove_progress_from_projects::Migration),
             Box::new(m20261008_165224_allow_tasks_without_project::Migration),
             Box::new(m20261008_171153_add_guide_to_memberships::Migration),
+            Box::new(m20261008_173439_add_emailed_at_to_notifications::Migration),
             // inject-above (do not remove this comment)
         ]
     }

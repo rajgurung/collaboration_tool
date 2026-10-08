@@ -352,3 +352,80 @@ async fn opening_marks_read_and_stays_private() {
     })
     .await;
 }
+
+/// Makes every notification look `minutes` old.
+async fn age_notifications(ctx: &AppContext, minutes: i64) {
+    notifications::Entity::update_many()
+        .col_expr(
+            notifications::Column::CreatedAt,
+            sea_orm::sea_query::Expr::value(
+                chrono::Utc::now() - chrono::Duration::minutes(minutes),
+            ),
+        )
+        .exec(&ctx.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn unseen_mentions_are_emailed_once() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let (bob, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
+        approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
+        let org = organisations::Model::find_by_slug(&ctx.db, "acme")
+            .await
+            .unwrap();
+        let general = conversations::Model::find_general(&ctx.db, org.id)
+            .await
+            .unwrap();
+        let project = project_in(&ctx, "acme", "Launch").await;
+        for body in ["Can @bob and @carol look?", "@carol one more thing"] {
+            request
+                .post(&format!("/chat/{}/messages", general.id))
+                .add_header(alice.0.clone(), alice.1.clone())
+                .form(&serde_json::json!({ "body": body }))
+                .await;
+        }
+        // An assignment is not a mention, so it is never emailed.
+        request
+            .post("/tasks")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .form(&task_form(
+                "Book the venue",
+                project.id,
+                &bob_id.to_string(),
+            ))
+            .await;
+
+        // Too soon: nothing goes out.
+        assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 0);
+
+        // Bob reads his mention; carol hasn't opened either of hers.
+        let bobs = notifications::Entity::find()
+            .filter(notifications::Column::UserId.eq(bob_id))
+            .filter(notifications::Column::Kind.eq("mention"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        request
+            .post(&format!("/notifications/{}/open", bobs.id))
+            .add_header(bob.0, bob.1)
+            .await;
+        age_notifications(&ctx, 20).await;
+
+        assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 1);
+        let deliveries = ctx.mailer.as_ref().unwrap().deliveries();
+        assert_eq!(deliveries.count, 1, "one email, to carol only");
+        let email = deliveries.messages[0].replace("=\r\n", "");
+        assert!(email.contains("carol@example.com"));
+        assert!(email.contains("2 mentions waiting for you in Acme"));
+        assert!(email.contains(&format!("/chat/{}", general.id)));
+
+        // Never twice.
+        assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 0);
+    })
+    .await;
+}
