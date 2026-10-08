@@ -10,10 +10,10 @@
   <!-- Swap 422 responses (forms re-rendered with errors) but still treat them as errors. -->
   <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true,"error":true},{"code":"[45]..","swap":false,"error":true}]}'>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/vendor/htmx.min.js" defer></script>
-  <script src="/static/vendor/htmx-ext-ws.js" defer></script>
-  <script src="/static/js/app.js" defer></script>
+  <link rel="stylesheet" href="{{ asset_url(path="css/app.css") }}">
+  <script src="{{ asset_url(path="vendor/htmx.min.js") }}" defer></script>
+  <script src="{{ asset_url(path="vendor/htmx-ext-ws.js") }}" defer></script>
+  <script src="{{ asset_url(path="js/app.js") }}" defer></script>
 </head>
 <body {% block body_attrs %}{% endblock body_attrs %}>
   {% block body %}{% endblock body %}
