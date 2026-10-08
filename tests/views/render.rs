@@ -102,10 +102,14 @@ fn renders_read_receipts_as_live_swaps() {
         read.contains(r##"data-toggle="#receipt-names-42""##),
         "{read}"
     );
-    assert!(
-        !read.contains("title=\"Read"),
-        "the popover replaces the tooltip"
+    assert!(!read.contains("title="), "the popover replaces tooltips");
+    // 3 stacked avatars and 5 list rows, none read out again by screen readers.
+    assert_eq!(
+        read.matches(r#"aria-hidden="true" class="avatar"#).count(),
+        8,
+        "{read}"
     );
+    assert!(read.contains(r#"aria-expanded="false""#), "{read}");
 
     let dm = engine
         .render(

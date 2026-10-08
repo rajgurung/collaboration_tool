@@ -54,6 +54,8 @@ pub struct ListItem {
 
 /// How many reader avatars a group receipt shows before "+N".
 const RECEIPT_AVATARS: usize = 3;
+/// Past this many readers, the screen-reader label names two and counts the rest.
+const RECEIPT_LABEL_NAMES: usize = 5;
 
 /// Who has read a message, for its author. Only DMs and groups have receipts.
 /// A DM shows `text` ("Read"); a group shows avatars and uses `text` as the
@@ -169,7 +171,15 @@ pub fn receipt(
         "Read by everyone".to_string()
     } else {
         let names: Vec<&str> = readers.iter().map(|p| p.username.as_str()).collect();
-        format!("Read by {}", names.join(", "))
+        if names.len() > RECEIPT_LABEL_NAMES {
+            format!(
+                "Read by {} and {} others",
+                names[..2].join(", "),
+                names.len() - 2
+            )
+        } else {
+            format!("Read by {}", names.join(", "))
+        }
     };
     let shown: Vec<Person> = readers.iter().take(RECEIPT_AVATARS).cloned().collect();
     Some(Receipt {
@@ -646,6 +656,18 @@ mod tests {
         let r = receipt(kind::GROUP, 1, at(5), &partial, &team()).unwrap();
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(r.more, 0);
+    }
+
+    #[test]
+    fn big_groups_name_two_readers_and_count_the_rest() {
+        let team: HashMap<i64, String> = (1..=8).map(|id| (id, format!("u{id}"))).collect();
+        let mut marks: Vec<ReadMark> = (2..=7).map(|id| (id, Some(at(9)))).collect();
+        marks.push((1, None));
+        marks.push((8, None));
+        let r = receipt(kind::GROUP, 1, at(5), &marks, &team).unwrap();
+        assert_eq!(r.text, "Read by u2, u3 and 4 others");
+        assert_eq!(r.readers.len(), 6);
+        assert_eq!(r.more, 3);
     }
 
     #[test]

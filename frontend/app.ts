@@ -113,12 +113,14 @@ document.body.addEventListener("htmx:wsAfterSend", () => {
 
 
 // <button data-toggle="#id"> shows or hides an element and focuses its first input.
+// Buttons that carry aria-expanded have it kept in step.
 document.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLElement>("[data-toggle]");
   if (!button) return;
   const target = document.querySelector<HTMLElement>(button.dataset.toggle ?? "");
   if (!target) return;
   target.classList.toggle("hidden");
+  if (button.hasAttribute("aria-expanded")) button.setAttribute("aria-expanded", String(!target.classList.contains("hidden")));
   if (!target.classList.contains("hidden")) target.querySelector<HTMLInputElement>("input:not([type=hidden])")?.focus();
 });
 

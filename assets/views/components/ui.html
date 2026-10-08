@@ -2,6 +2,6 @@
 
 {% component logo(letter: string = "C") %}<span class="inline-grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-accent text-sm font-bold text-on-accent shadow-sm">{{ letter | upper }}</span>{% endcomponent logo %}
 
-{% component avatar(name: string, color: string = "#e8dfce", size: string = "md") %}<span title="{{ name }}" aria-label="{{ name }}" class="avatar avatar-{{ size }}" style="background: {{ color }}">{{ name | truncate(length=1, end="") | upper }}</span>{% endcomponent avatar %}
+{% component avatar(name: string, color: string = "#e8dfce", size: string = "md", label: bool = true) %}<span {% if label %}title="{{ name }}" aria-label="{{ name }}"{% else %}aria-hidden="true"{% endif %} class="avatar avatar-{{ size }}" style="background: {{ color }}">{{ name | truncate(length=1, end="") | upper }}</span>{% endcomponent avatar %}
 
 {% component status_icon(status: string, class: string = "h-5 w-5") %}<span class="status-{{ status }} inline-grid shrink-0" title="{% if status == "todo" %}To do{% elif status == "progress" %}In progress{% elif status == "blocked" %}Blocked{% else %}Done{% endif %}">{{<icon name={"status-" ~ status} class={class}/>}}</span>{% endcomponent status_icon %}
