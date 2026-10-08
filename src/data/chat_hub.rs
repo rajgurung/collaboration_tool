@@ -1,5 +1,7 @@
 //! In-memory fan-out for live chat. One process holds every subscriber, so the
 //! app must run as a single instance (see docs/deploy.md).
+use std::sync::Arc;
+
 use tokio::sync::broadcast;
 
 use crate::controllers::chat::{MessageView, Receipt};
@@ -18,10 +20,11 @@ pub enum ChatEvent {
         message: Box<MessageView>,
     },
     /// Someone read up to now. Carries the new receipts for the messages that
-    /// read covered; each socket forwards only those its viewer wrote.
+    /// read covered; each socket forwards only those its viewer wrote. Shared,
+    /// since every subscriber gets its own copy of the event.
     Read {
         conversation_id: i64,
-        receipts: Vec<ReceiptUpdate>,
+        receipts: Arc<Vec<ReceiptUpdate>>,
     },
 }
 

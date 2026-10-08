@@ -2,6 +2,7 @@ use collab::{
     app::App,
     data::chat_hub::{ChatEvent, ChatHub},
     models::{
+        conversation_members,
         conversations::{self, GroupParams},
         memberships, messages, organisations, users,
     },
@@ -576,15 +577,38 @@ async fn groups_count_who_has_read() {
 
 #[tokio::test]
 #[serial]
-async fn general_has_no_receipts() {
+async fn general_shows_receipts_like_groups() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
-        post(&request, &ctx, &alice, general.id, "Morning all").await;
+        // Dave is still pending. Even with a read mark in General he never counts.
+        join(&request, "acme", "dave", "dave@example.com").await;
+        let dave_id = user_id(&ctx, "dave@example.com").await;
+        conversation_members::Model::add(&ctx.db, &general, dave_id)
+            .await
+            .unwrap();
+        let message = post(&request, &ctx, &alice, general.id, "Morning all").await;
+        conversation_members::Model::mark_read(
+            &ctx.db,
+            general.organisation_id,
+            general.id,
+            dave_id,
+        )
+        .await
+        .unwrap();
+
+        let page = open(&request, &alice, general.id).await;
+        let slot = receipt_slot(&page, message.id);
+        assert!(!slot.contains("avatar"), "dave is pending: {slot}");
+
         open(&request, &bob, general.id).await;
         let page = open(&request, &alice, general.id).await;
-        assert!(page.contains("Morning all"));
-        assert!(!page.contains("msg-receipt"));
+        let slot = receipt_slot(&page, message.id);
+        assert!(slot.contains(r#"aria-label="Read by everyone""#), "{slot}");
+        assert_eq!(slot.matches("avatar avatar-2xs").count(), 1, "{slot}");
+        assert!(slot.contains("<span>bob</span>"), "{slot}");
+        assert!(!slot.contains("dave"), "{slot}");
+        assert!(page.contains("msg-receipt msg-receipt-all"));
     })
     .await;
 }
@@ -597,11 +621,25 @@ async fn reading_publishes_receipts_for_the_authors() {
         let (group, _carol) = group_of_three(&request, &ctx).await;
         let general = general(&ctx).await;
         let alice_id = user_id(&ctx, "alice@example.com").await;
+        // Dave is pending but has a read mark in General: he must never count.
+        join(&request, "acme", "dave", "dave@example.com").await;
+        let dave_id = user_id(&ctx, "dave@example.com").await;
+        conversation_members::Model::add(&ctx.db, &general, dave_id)
+            .await
+            .unwrap();
         let hub = ctx.shared_store.get::<ChatHub>().unwrap();
         let mut events = hub.subscribe();
 
         let message = post(&request, &ctx, &alice, group.id, "Launch is Friday").await;
         post(&request, &ctx, &alice, general.id, "Morning all").await;
+        conversation_members::Model::mark_read(
+            &ctx.db,
+            general.organisation_id,
+            general.id,
+            dave_id,
+        )
+        .await
+        .unwrap();
         while events.try_recv().is_ok() {}
 
         // Alice opening her own conversation reads nothing new from others.
@@ -629,9 +667,49 @@ async fn reading_publishes_receipts_for_the_authors() {
             .await;
         assert!(events.try_recv().is_err());
 
-        // Reading General never publishes receipts.
+        // General works the same way.
         open(&request, &bob, general.id).await;
-        assert!(events.try_recv().is_err());
+        let ChatEvent::Read {
+            conversation_id,
+            receipts,
+        } = events
+            .try_recv()
+            .expect("bob's read of General is published")
+        else {
+            panic!("expected a read event");
+        };
+        assert_eq!(conversation_id, general.id);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].author_id, alice_id);
+        // Carol is in General too and has not read it; dave is pending.
+        let receipt = receipts[0].receipt.as_ref().unwrap();
+        assert_eq!(receipt.text, "Read by bob");
+        assert!(receipt.readers.iter().all(|p| p.id != dave_id));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn people_approved_later_do_not_spoil_older_receipts() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let general = general(&ctx).await;
+        let message = post(&request, &ctx, &alice, general.id, "Morning all").await;
+        open(&request, &bob, general.id).await;
+
+        let carol = join(&request, "acme", "carol", "carol@example.com").await;
+        approve(&ctx, "carol@example.com").await;
+        let page = open(&request, &alice, general.id).await;
+        let slot = receipt_slot(&page, message.id);
+        assert!(slot.contains(r#"aria-label="Read by everyone""#), "{slot}");
+        assert!(page.contains("msg-receipt msg-receipt-all"));
+
+        // Carol's first open covers only what was sent after she joined.
+        let hub = ctx.shared_store.get::<ChatHub>().unwrap();
+        let mut events = hub.subscribe();
+        open(&request, &carol, general.id).await;
+        assert!(events.try_recv().is_err(), "nothing new for carol to read");
     })
     .await;
 }

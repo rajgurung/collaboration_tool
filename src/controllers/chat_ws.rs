@@ -1,7 +1,7 @@
 //! Live chat. The browser opens `/chat/{id}/ws` with the HTMX ws extension,
 //! sends messages as JSON (`{"body": "...", "HEADERS": {...}}`) and receives
 //! rendered message HTML that HTMX appends to `#chat-feed`.
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::ws::{rejection::WebSocketUpgradeRejection, Message, WebSocket, WebSocketUpgrade},
@@ -18,8 +18,7 @@ use crate::{
     },
     extractors::current_member::CurrentMember,
     models::{
-        conversation_members,
-        conversations::{self, kind},
+        conversation_members, conversations, memberships,
         messages::{self, MessageParams},
         organisations,
     },
@@ -125,7 +124,9 @@ async fn run(mut socket: WebSocket, session: Session) {
                         Err(err) => tracing::error!(error = %err, "could not render read receipts"),
                     }
                 }
-                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Lagged(skipped)) => {
+                    tracing::warn!(skipped, user_id = session.user_id, "chat socket fell behind");
+                }
                 Err(RecvError::Closed) => break,
             },
         }
@@ -202,8 +203,8 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
     Ok(())
 }
 
-/// Marks a conversation read for `reader_id` and, in a DM or group, tells the
-/// authors of the messages that read covered who has now read them.
+/// Marks a conversation read for `reader_id` and tells the authors of the
+/// messages that read covered who has now read them.
 ///
 /// # Errors
 /// On database errors, or when the hub is missing.
@@ -217,17 +218,19 @@ pub async fn mark_read(
     let span =
         conversation_members::Model::mark_read(&ctx.db, org_id, conversation_id, reader_id).await?;
     let Some(span) = span else { return Ok(()) };
-    if conversation_kind == kind::CHANNEL {
-        return Ok(());
-    }
     let read =
         messages::Model::read_in_span(&ctx.db, org_id, conversation_id, reader_id, &span).await?;
     if read.is_empty() {
         return Ok(());
     }
     let marks = conversation_members::Model::read_marks(&ctx.db, org_id, conversation_id).await?;
-    let names = names(ctx, org_id).await?;
-    let receipts = read
+    // Only this conversation's members: everyone has General open, so this runs often.
+    let names: HashMap<i64, String> =
+        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|m| m.user_id))
+            .await?
+            .into_iter()
+            .collect();
+    let receipts: Vec<ReceiptUpdate> = read
         .iter()
         .map(|m| ReceiptUpdate {
             message_id: m.id,
@@ -240,7 +243,7 @@ pub async fn mark_read(
         .ok_or_else(|| Error::string("chat hub missing"))?
         .publish(ChatEvent::Read {
             conversation_id,
-            receipts,
+            receipts: Arc::new(receipts),
         });
     Ok(())
 }
@@ -248,7 +251,7 @@ pub async fn mark_read(
 /// The message as HTML for this socket's viewer, wrapped for an out-of-band append.
 fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result<String> {
     message.own = author_id == session.user_id;
-    message.read_receipts = message.own && session.conversation_kind != kind::CHANNEL;
+    message.read_receipts = message.own;
     session
         .view
         .render("chat/_message_oob.html", data!({ "message": message }))
@@ -325,7 +328,7 @@ mod tests {
     fn sockets_only_get_receipts_for_their_viewers_messages() {
         let event = ChatEvent::Read {
             conversation_id: 7,
-            receipts: vec![update(10, 1), update(11, 2), update(12, 1)],
+            receipts: Arc::new(vec![update(10, 1), update(11, 2), update(12, 1)]),
         };
         let mine: Vec<i64> = receipts_for(&event, 7, 1)
             .iter()

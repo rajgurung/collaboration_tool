@@ -171,6 +171,26 @@ impl Model {
             .collect())
     }
 
+    /// `(user_id, username)` for the approved members among `user_ids`.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn team_among<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_ids: impl IntoIterator<Item = i64>,
+    ) -> ModelResult<Vec<(i64, String)>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Status.eq(status::ACTIVE))
+            .filter(Column::UserId.is_in(user_ids))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|m| (m.user_id, m.username))
+            .collect())
+    }
+
     /// # Errors
     /// `EntityNotFound` when the membership is not in this organisation.
     pub async fn find_in_org<C: ConnectionTrait>(
