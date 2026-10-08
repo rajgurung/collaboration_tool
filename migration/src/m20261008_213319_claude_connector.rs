@@ -18,6 +18,7 @@ impl MigrationTrait for Migration {
                 ("client_id", ColType::StringUniq),
                 ("client_name", ColType::String),
                 ("redirect_uris", ColType::JsonBinary),
+                ("used_at", ColType::TimestampWithTimeZoneNull),
             ],
             &[],
         )
@@ -71,8 +72,11 @@ impl MigrationTrait for Migration {
             r#"CREATE INDEX "idx-access_tokens-org-user" ON access_tokens (organisation_id, user_id);"#,
             r#"CREATE INDEX "idx-access_tokens-grant" ON access_tokens (grant_id);"#,
             r#"CREATE INDEX "idx-access_tokens-revoked_at" ON access_tokens (revoked_at);"#,
-            r#"CREATE INDEX "idx-access_tokens-expiry" ON access_tokens (expires_at, refresh_expires_at);"#,
+            // Matches the prune query's "expired" test.
+            r#"CREATE INDEX "idx-access_tokens-expiry" ON access_tokens ((coalesce(refresh_expires_at, expires_at)));"#,
+            r#"CREATE INDEX "idx-access_tokens-oauth_client" ON access_tokens (oauth_client_id);"#,
             r#"CREATE INDEX "idx-oauth_codes-grant" ON oauth_codes (grant_id);"#,
+            r#"CREATE INDEX "idx-oauth_codes-oauth_client" ON oauth_codes (oauth_client_id);"#,
             r#"CREATE INDEX "idx-oauth_codes-created_at" ON oauth_codes (created_at);"#,
         ] {
             m.get_connection().execute_unprepared(sql).await?;

@@ -91,6 +91,7 @@ impl Model {
         }
         .insert(db)
         .await?;
+        consent.client.mark_used(db).await?;
         Ok((row, code))
     }
 

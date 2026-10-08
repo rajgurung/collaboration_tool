@@ -15,6 +15,7 @@ pub struct Model {
     pub client_name: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub redirect_uris: Json,
+    pub used_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

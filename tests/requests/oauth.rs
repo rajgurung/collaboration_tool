@@ -717,3 +717,38 @@ async fn revoking_a_connector_ends_every_token_in_it() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn only_old_clients_that_never_got_a_code_are_pruned() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let used = register(&request, CLAUDE).await;
+        code_for(&request, &alice, &used).await;
+        let old_unused = register(&request, CLAUDE).await;
+        let new_unused = register(&request, CLAUDE).await;
+        let age = |days| (chrono::Utc::now() - chrono::Duration::days(days)).into();
+        for (client_id, days) in [(&used, 30), (&old_unused, 8), (&new_unused, 2)] {
+            let row = oauth_clients::Model::find_by_client_id(&ctx.db, client_id)
+                .await
+                .unwrap();
+            let mut row: oauth_clients::ActiveModel = row.into();
+            row.created_at = ActiveValue::Set(age(days));
+            row.update(&ctx.db).await.unwrap();
+        }
+
+        register(&request, CLAUDE).await;
+        let exists = |id: String| {
+            let db = ctx.db.clone();
+            async move {
+                oauth_clients::Model::find_by_client_id(&db, &id)
+                    .await
+                    .is_ok()
+            }
+        };
+        assert!(exists(used).await, "a client that got a code stays");
+        assert!(!exists(old_unused).await, "unused for a week goes");
+        assert!(exists(new_unused).await, "unused but recent stays");
+    })
+    .await;
+}

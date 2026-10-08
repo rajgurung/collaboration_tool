@@ -4,14 +4,15 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 
 pub use super::_entities::oauth_clients::{ActiveModel, Column, Entity, Model};
-use super::{access_tokens, oauth_codes};
+use super::access_tokens;
 
 pub type OauthClients = Entity;
 
 pub const MAX_NAME: usize = 100;
 pub const MAX_REDIRECT_URIS: usize = 5;
-/// A client that never got as far as a code or token is removed after this.
-const UNUSED_CLIENT_HOURS: i64 = 24;
+/// A client that never got as far as a code is removed after this. Used
+/// clients are kept: claude.ai may cache its client id.
+const UNUSED_CLIENT_DAYS: i64 = 7;
 
 /// The only places Claude sends people back to after "Allow". Hosted Claude
 /// uses one fixed callback; Claude Code listens on loopback on any port.
@@ -121,7 +122,7 @@ impl ActiveModelBehavior for ActiveModel {
 
 impl Model {
     /// Registers a public client. Also clears out clients that registered
-    /// more than a day ago and were never used.
+    /// more than a week ago and never got a code.
     ///
     /// # Errors
     /// `RedirectUri` for a missing or non-allowlisted redirect URI, `Metadata`
@@ -194,29 +195,27 @@ impl Model {
             })
     }
 
-    async fn prune<C: ConnectionTrait>(db: &C) -> ModelResult<()> {
-        use sea_orm::sea_query::Query;
+    /// Records that the client got its first code, so it is never pruned.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn mark_used<C: ConnectionTrait>(&self, db: &C) -> ModelResult<()> {
+        if self.used_at.is_none() {
+            Entity::update_many()
+                .col_expr(Column::UsedAt, Expr::value(chrono::Utc::now()))
+                .filter(Column::Id.eq(self.id))
+                .filter(Column::UsedAt.is_null())
+                .exec(db)
+                .await?;
+        }
+        Ok(())
+    }
 
-        let cutoff = chrono::Utc::now() - chrono::Duration::hours(UNUSED_CLIENT_HOURS);
+    async fn prune<C: ConnectionTrait>(db: &C) -> ModelResult<()> {
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(UNUSED_CLIENT_DAYS);
         Entity::delete_many()
             .filter(Column::CreatedAt.lt(cutoff))
-            .filter(
-                Column::Id.not_in_subquery(
-                    Query::select()
-                        .column(oauth_codes::Column::OauthClientId)
-                        .from(oauth_codes::Entity)
-                        .to_owned(),
-                ),
-            )
-            .filter(
-                Column::Id.not_in_subquery(
-                    Query::select()
-                        .column(access_tokens::Column::OauthClientId)
-                        .from(access_tokens::Entity)
-                        .and_where(access_tokens::Column::OauthClientId.is_not_null())
-                        .to_owned(),
-                ),
-            )
+            .filter(Column::UsedAt.is_null())
             .exec(db)
             .await?;
         Ok(())
