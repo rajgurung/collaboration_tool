@@ -10,7 +10,9 @@ use crate::{
     models::{
         memberships,
         notifications::mention_parts,
-        projects, task_assignees,
+        projects,
+        saved_views::{self, Setup},
+        task_assignees,
         task_notes::{self, NoteParams},
         tasks::{self, TaskParams, PRIORITIES, STATUSES},
     },
@@ -253,7 +255,16 @@ fn list_data(ws: &Workspace, me: i64, filter: &str, q: &str) -> serde_json::Valu
 }
 
 /// The board: status columns, with one swimlane per project, person, or none.
-fn board_data(ws: &Workspace, me: i64, scope: &str, group: &str, q: &str) -> serde_json::Value {
+/// The board's lanes and toolbar state. `layout` is "board" or "list"; the
+/// desktop list shows the same lanes as rows.
+fn board_data(
+    ws: &Workspace,
+    me: i64,
+    scope: &str,
+    group: &str,
+    q: &str,
+    layout: &str,
+) -> serde_json::Value {
     let needle = q.trim().to_lowercase();
     let rows: Vec<Row> = ws
         .tasks
@@ -391,7 +402,16 @@ fn board_data(ws: &Workspace, me: i64, scope: &str, group: &str, q: &str) -> ser
         "scopes": options(&SCOPES, scope),
         "groups": options(&GROUPS, group),
         "q": q,
+        "layout": layout,
     })
+}
+
+fn layout(view: Option<&str>) -> &'static str {
+    if view == Some("list") {
+        "list"
+    } else {
+        "board"
+    }
 }
 
 #[debug_handler]
@@ -402,16 +422,46 @@ async fn index(
     Query(query): Query<ListQuery>,
 ) -> Result<Response> {
     let ws = Workspace::load(&ctx, member.org.id).await?;
+    let views = saved_views::Model::list_for(&ctx.db, member.org.id, member.user.id).await?;
+    // A plain visit to Tasks opens your default view, if you starred one.
+    let mut query = query;
+    let plain = query.view.is_none()
+        && query.scope.is_none()
+        && query.group.is_none()
+        && query.filter.is_none()
+        && query.q.is_empty();
+    if let Some(default) = views.iter().find(|v| v.is_default).filter(|_| plain) {
+        let setup = default.setup();
+        query.filter = Some(setup.scope.clone());
+        query.scope = Some(setup.scope);
+        query.group = Some(setup.group);
+        query.view = Some(setup.view);
+        query.q = setup.q;
+    }
     let filter = pick(query.filter.as_deref(), &FILTERS, "mine");
     let scope = pick(query.scope.as_deref(), &SCOPES, "all");
     let group = pick(query.group.as_deref(), &GROUPS, "project");
+    let view = layout(query.view.as_deref());
+    let current = Setup {
+        scope: scope.to_string(),
+        group: group.to_string(),
+        view: view.to_string(),
+        q: query.q.trim().to_string(),
+    };
     let mut data = list_data(&ws, member.user.id, filter, &query.q);
-    data["board"] = board_data(&ws, member.user.id, scope, group, &query.q);
-    data["view"] = serde_json::json!(if query.view.as_deref() == Some("list") {
-        "list"
-    } else {
-        "board"
-    });
+    data["views"] = serde_json::json!(views
+        .iter()
+        .map(|v| serde_json::json!({
+            "id": v.id,
+            "name": v.name,
+            "url": v.setup().url(),
+            "is_default": v.is_default,
+            "current": v.setup() == current,
+        }))
+        .collect::<Vec<_>>());
+    data["setup_query"] = serde_json::json!(current.query());
+    data["board"] = board_data(&ws, member.user.id, scope, group, &query.q, view);
+    data["view"] = serde_json::json!(view);
     data["open_new"] = serde_json::json!(query.new.is_some());
     data["open_task"] = serde_json::json!(query.open);
     format::render().view(&v, "tasks/index.html", member.page("tasks", data))
@@ -434,7 +484,7 @@ async fn list_partial(
     )
 }
 
-/// The board on its own, for HTMX refreshes.
+/// The board (or the desktop list, with `view=list`) on its own, for HTMX refreshes.
 #[debug_handler]
 async fn board_partial(
     member: CurrentMember,
@@ -445,9 +495,16 @@ async fn board_partial(
     let ws = Workspace::load(&ctx, member.org.id).await?;
     let scope = pick(query.scope.as_deref(), &SCOPES, "all");
     let group = pick(query.group.as_deref(), &GROUPS, "project");
-    let data =
-        serde_json::json!({ "board": board_data(&ws, member.user.id, scope, group, &query.q) });
-    format::render().view(&v, "tasks/_board.html", data)
+    let view = layout(query.view.as_deref());
+    let data = serde_json::json!({
+        "board": board_data(&ws, member.user.id, scope, group, &query.q, view),
+    });
+    let template = if view == "list" {
+        "tasks/_table.html"
+    } else {
+        "tasks/_board.html"
+    };
+    format::render().view(&v, template, data)
 }
 
 /// The values a task form shows: a new task's defaults, an existing task, or what was submitted.

@@ -26,3 +26,5 @@ pub mod more;
 pub mod notifications;
 
 pub mod guide;
+
+pub mod saved_views;

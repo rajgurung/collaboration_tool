@@ -1,23 +1,22 @@
 {% extends "layouts/app.html" %}
 {% block title %}Tasks · {{ org.name }}{% endblock title %}
-{% block page_class %}{% if view == "board" %}page-wide{% endif %}{% endblock page_class %}
+{% block page_class %}page-wide{% endblock page_class %}
 {% block heading %}Tasks{% endblock heading %}
 {% block actions %}
 <nav class="segmented segmented-sm desktop-only mr-2" aria-label="View">
-  <a href="/tasks?view=board" {% if view == "board" %}aria-current="true"{% endif %}>Board</a>
-  <a href="/tasks?view=list" {% if view == "list" %}aria-current="true"{% endif %}>List</a>
+  <a href="/tasks?scope={{ board.scope }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if view == "board" %}aria-current="true"{% endif %}>Board</a>
+  <a href="/tasks?view=list&scope={{ board.scope }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if view == "list" %}aria-current="true"{% endif %}>List</a>
 </nav>
-<button type="button" class="icon-btn {% if view == "board" %}mobile-only{% endif %}" aria-label="Search tasks" data-toggle="#task-search">{{<icon name="search" class="h-5 w-5"/>}}</button>
+<button type="button" class="icon-btn mobile-only" aria-label="Search tasks" data-toggle="#task-search">{{<icon name="search" class="h-5 w-5"/>}}</button>
 <button type="button" class="btn btn-primary" id="new-task-button"
         hx-get="/tasks/new" hx-target="#task-dialog-body"
         hx-trigger="click{% if open_new %}, load{% endif %}"
         hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}<span class="mobile-only">Task</span><span class="desktop-only">New task</span></button>
 {% endblock actions %}
 {% block content %}
-{% if view == "board" %}
-<div class="board-view">{% include "tasks/_board.html" %}</div>
-{% endif %}
-<div class="{% if view == "board" %}list-view{% endif %}">
+{% include "tasks/_views.html" %}
+<div class="board-view">{% if view == "list" %}{% include "tasks/_table.html" %}{% else %}{% include "tasks/_board.html" %}{% endif %}</div>
+<div class="list-view">
   <form id="task-search" action="/tasks" method="get" class="mb-3 {% if not q %}hidden{% endif %}">
     <input type="hidden" name="filter" value="{{ filter }}">
     {% if view == "list" %}<input type="hidden" name="view" value="list">{% endif %}

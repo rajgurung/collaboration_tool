@@ -1,0 +1,24 @@
+{# Shared by the board and the desktop list. Links keep the current layout. #}
+{% set base = "/tasks?view=list&" if board.layout == "list" else "/tasks?" %}
+<div class="board-toolbar">
+  <nav class="chips" aria-label="Whose tasks">
+    {% for s in board.scopes %}
+    <a href="{{ base }}scope={{ s.key }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" class="chip" {% if s.current %}aria-current="true"{% endif %}>{{ s.label }}</a>
+    {% endfor %}
+  </nav>
+  <form action="/tasks" method="get" class="board-search" role="search">
+    {% if board.layout == "list" %}<input type="hidden" name="view" value="list">{% endif %}
+    <input type="hidden" name="scope" value="{{ board.scope }}">
+    <input type="hidden" name="group" value="{{ board.group }}">
+    {{<icon name="search" class="h-4 w-4"/>}}
+    <input type="search" name="q" value="{{ board.q }}" aria-label="Search tasks" placeholder="Search tasks">
+  </form>
+  <div class="ml-auto flex items-center gap-2">
+    <span class="meta" id="swimlanes-label-{{ board.layout }}">{% if board.layout == "list" %}Group by{% else %}Swimlanes{% endif %}</span>
+    <nav class="segmented segmented-sm" aria-labelledby="swimlanes-label-{{ board.layout }}">
+      {% for g in board.groups %}
+      <a href="{{ base }}scope={{ board.scope }}&group={{ g.key }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if g.current %}aria-current="true"{% endif %}>{{ g.label }}</a>
+      {% endfor %}
+    </nav>
+  </div>
+</div>

@@ -23,3 +23,5 @@ mod messages;
 mod task_assignees;
 
 mod notifications;
+
+mod saved_views;

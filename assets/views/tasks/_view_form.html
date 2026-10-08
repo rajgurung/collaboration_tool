@@ -1,0 +1,45 @@
+{% set action = "/tasks/views/" ~ view.id if view else "/tasks/views" %}
+<form id="view-form" method="post" action="{{ action }}" hx-post="{{ action }}" class="grid gap-5">
+  <div class="flex items-start gap-2">
+    <div class="flex-1">
+      <h2 class="m-0 text-xl font-bold tracking-tight">{% if view %}Edit view{% else %}Save this view{% endif %}</h2>
+      {% if not view %}<p class="meta mt-1 mb-0 text-sm">{% if setup.scope == "mine" %}Your tasks{% else %}Everyone's tasks{% endif %} · {% if setup.group == "none" %}no grouping{% else %}by {{ setup.group }}{% endif %} · {{ setup.view | capitalize }}{% if setup.q %} · “{{ setup.q }}”{% endif %}</p>{% endif %}
+    </div>
+    <button type="button" class="icon-btn -mt-1.5 -mr-2.5 text-muted" data-dialog-close aria-label="Close">{{<icon name="x" class="h-[22px] w-[22px]"/>}}</button>
+  </div>
+
+  {{<text_field name="name" label="Name" value={name} error={errors.name | default(value="")}/>}}
+
+  <label class="flex items-center gap-2.5 text-[15px]">
+    <input type="checkbox" name="is_default" class="h-4 w-4 accent-[var(--accent)]" {% if is_default %}checked{% endif %}>
+    Open Tasks with this view
+  </label>
+
+  {% if not view %}
+  <input type="hidden" name="scope" value="{{ setup.scope }}">
+  <input type="hidden" name="group" value="{{ setup.group }}">
+  <input type="hidden" name="view" value="{{ setup.view }}">
+  <input type="hidden" name="q" value="{{ setup.q }}">
+  {% endif %}
+
+  <div class="flex justify-end gap-2">
+    <button type="button" class="btn btn-secondary" data-dialog-close>Cancel</button>
+    <button type="submit" class="btn btn-primary">{% if view %}Save changes{% else %}Save view{% endif %}</button>
+  </div>
+</form>
+{% if view %}
+<div class="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+  {% if not view.same %}
+  <form method="post" action="/tasks/views/{{ view.id }}/setup" hx-post="/tasks/views/{{ view.id }}/setup">
+    <input type="hidden" name="scope" value="{{ setup.scope }}"><input type="hidden" name="group" value="{{ setup.group }}">
+    <input type="hidden" name="view" value="{{ setup.view }}"><input type="hidden" name="q" value="{{ setup.q }}">
+    <button type="submit" class="btn btn-secondary">Update to what's on screen</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/tasks/views/{{ view.id }}/delete" hx-post="/tasks/views/{{ view.id }}/delete" class="ml-auto">
+    <input type="hidden" name="scope" value="{{ setup.scope }}"><input type="hidden" name="group" value="{{ setup.group }}">
+    <input type="hidden" name="view" value="{{ setup.view }}"><input type="hidden" name="q" value="{{ setup.q }}">
+    <button type="submit" class="btn-text-danger">Delete view</button>
+  </form>
+</div>
+{% endif %}

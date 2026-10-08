@@ -354,6 +354,33 @@
   .due { padding: 2px 7px; border-radius: 6px; background: var(--chip); font-weight: 600; }
   .due-overdue { background: var(--blocked-bg); color: var(--blocked); }
 
+  /* Tasks: saved views */
+  .views-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+  .views-row::-webkit-scrollbar { display: none; }
+  .views-label { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .view-chip { display: inline-flex; flex-shrink: 0; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+  .view-chip a { display: inline-flex; align-items: center; gap: 5px; padding: 6px 4px 6px 13px; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .view-chip-on { border-color: var(--text); background: var(--text); }
+  .view-chip-on a, .view-chip-on .view-more { color: var(--bg); }
+  .view-star { color: var(--accent); }
+  .view-more { display: grid; place-items: center; width: 30px; height: 30px; margin-right: 2px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+  .view-more:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }
+  .view-save { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; padding: 6px 13px; border: 1px dashed var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .view-save:hover { color: var(--text); border-color: var(--muted); }
+
+  /* Tasks: the desktop list, the board's lanes as rows */
+  .task-row-head, .task-row { display: grid; grid-template-columns: minmax(0, 3fr) 140px minmax(0, 1.4fr) 150px 120px minmax(0, 1fr); gap: 16px; align-items: center; }
+  .task-row-head { padding: 14px 28px 0 30px; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .task-rows { margin: 0 14px 14px; border: 1px solid var(--line-soft); border-radius: 12px; overflow: hidden; background: var(--surface); }
+  .lane-head[aria-expanded="false"] + .task-rows { display: none; }
+  .task-row { min-height: 52px; padding: 8px 14px; font-size: 14px; color: var(--text); }
+  .task-row + .task-row { border-top: 1px solid var(--line-soft); }
+  .task-row:hover { background: var(--chip); }
+  .task-row-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .task-row .due { font-size: 12.5px; }
+  .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--dot) 14%, transparent); font-size: 12.5px; font-weight: 600; }
+  .status-pill .dot { background: var(--dot); }
+
   /* Chat */
   .chat-screen { display: flex; flex-direction: column; height: 100dvh; }
   .chat-head { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: env(safe-area-inset-top) 8px 0 4px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
