@@ -3,7 +3,7 @@ use collab::{
     models::{memberships, organisations, projects, task_assignees, task_notes, tasks, users},
 };
 use loco_rs::{app::AppContext, testing::prelude::*};
-use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serial_test::serial;
 
 use super::prepare_data::sign_up;
@@ -775,6 +775,37 @@ async fn the_board_groups_by_project_person_or_nothing() {
                 && flat.contains("Launch work")
                 && flat.contains("s work")
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_project_picker_groups_projects_by_roadmap_lane() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        project_in(&ctx, "acme", "Launch").await;
+        let later = project_in(&ctx, "acme", "Mobile app").await;
+        let mut later: projects::ActiveModel = later.into();
+        later.lane = Set("later".to_string());
+        later.update(&ctx.db).await.unwrap();
+
+        let form = request
+            .get("/tasks/new")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
+        let now_at = form.find(r#"<optgroup label="Now">"#).expect("a Now group");
+        let later_at = form
+            .find(r#"<optgroup label="Later">"#)
+            .expect("a Later group");
+        assert!(
+            !form.contains(r#"<optgroup label="Next">"#),
+            "empty lanes are left out"
+        );
+        let launch_at = form.find(">Launch<").unwrap();
+        let mobile_at = form.find(">Mobile app<").unwrap();
+        assert!(now_at < launch_at && launch_at < later_at && later_at < mobile_at);
     })
     .await;
 }

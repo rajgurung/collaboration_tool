@@ -528,10 +528,24 @@ async fn task_form_data(
     errors: &FieldErrors,
 ) -> Result<serde_json::Value> {
     let team = Person::from_team(memberships::Model::team(&ctx.db, member.org.id).await?);
-    let projects: Vec<serde_json::Value> = projects::Model::list_for_org(&ctx.db, member.org.id)
-        .await?
-        .into_iter()
-        .map(|p| serde_json::json!({ "id": p.id, "name": p.name, "accent": p.accent }))
+    // Grouped by roadmap lane so the picker reads Now, Next, Later.
+    let all_projects = projects::Model::list_for_org(&ctx.db, member.org.id).await?;
+    let project_groups: Vec<serde_json::Value> = projects::LANES
+        .iter()
+        .filter_map(|lane| {
+            let projects: Vec<serde_json::Value> = all_projects
+                .iter()
+                .filter(|p| p.lane == *lane)
+                .map(|p| serde_json::json!({ "id": p.id, "name": p.name }))
+                .collect();
+            let label = match *lane {
+                "now" => "Now",
+                "next" => "Next",
+                _ => "Later",
+            };
+            (!projects.is_empty())
+                .then(|| serde_json::json!({ "label": label, "projects": projects }))
+        })
         .collect();
     let statuses: Vec<serde_json::Value> = STATUSES
         .iter()
@@ -544,7 +558,7 @@ async fn task_form_data(
         "form": values,
         "errors": errors,
         "team": team,
-        "projects": projects,
+        "project_groups": project_groups,
         "priorities": PRIORITIES,
         "statuses": statuses,
     }))
