@@ -401,7 +401,7 @@
   .msg-receipt:empty { display: none; }
   .msg-receipt-dm, .msg-receipt-btn { display: inline-flex; align-items: center; gap: 3px; }
   .msg-receipt-btn { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-  .msg-receipt-all svg { color: var(--accent); }
+  .msg-receipt-dm svg { color: var(--accent); }
   .receipt-stack { display: inline-flex; align-items: center; }
   .receipt-stack > * { box-shadow: 0 0 0 1.5px var(--bg); }
   .receipt-stack > * + * { margin-left: -4px; } /* about a quarter, so each initial stays readable */

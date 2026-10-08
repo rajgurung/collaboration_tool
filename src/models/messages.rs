@@ -66,12 +66,15 @@ impl Model {
         reader_id: i64,
         span: &ReadSpan,
     ) -> ModelResult<Vec<Self>> {
-        Ok(Entity::find()
+        let mut query = Entity::find()
             .in_tenant(org_id)
             .filter(Column::ConversationId.eq(conversation_id))
             .filter(Column::UserId.ne(reader_id))
-            .filter(Column::CreatedAt.gt(span.from))
-            .filter(Column::CreatedAt.lte(span.to))
+            .filter(Column::CreatedAt.lte(span.to));
+        if let Some(from) = span.from {
+            query = query.filter(Column::CreatedAt.gt(from));
+        }
+        Ok(query
             .order_by_desc(Column::CreatedAt)
             .order_by_desc(Column::Id)
             .limit(HISTORY_LIMIT)

@@ -553,7 +553,6 @@ async fn groups_count_who_has_read() {
         assert!(slot.contains(r#"aria-label="Read by bob""#), "{slot}");
         assert!(slot.contains("avatar avatar-2xs"), "{slot}");
         assert!(!slot.contains("receipt-more"), "{slot}");
-        assert!(!page.contains("msg-receipt-all"));
 
         let carols = open(&request, &carol, group.id).await;
         assert!(
@@ -562,7 +561,10 @@ async fn groups_count_who_has_read() {
         );
         let page = open(&request, &alice, group.id).await;
         let slot = receipt_slot(&page, message.id);
-        assert!(slot.contains(r#"aria-label="Read by everyone""#), "{slot}");
+        assert!(
+            slot.contains(r#"aria-label="Read by bob, carol""#),
+            "{slot}"
+        );
         assert_eq!(slot.matches("avatar avatar-2xs").count(), 2, "{slot}");
         assert!(
             slot.contains(r#"id="receipt-names-"#)
@@ -570,7 +572,7 @@ async fn groups_count_who_has_read() {
                 && slot.contains("<span>carol</span>"),
             "the reader list to hover or tap open: {slot}"
         );
-        assert!(page.contains("msg-receipt msg-receipt-all"));
+        assert!(!slot.contains("everyone"), "{slot}");
     })
     .await;
 }
@@ -604,11 +606,10 @@ async fn general_shows_receipts_like_groups() {
         open(&request, &bob, general.id).await;
         let page = open(&request, &alice, general.id).await;
         let slot = receipt_slot(&page, message.id);
-        assert!(slot.contains(r#"aria-label="Read by everyone""#), "{slot}");
+        assert!(slot.contains(r#"aria-label="Read by bob""#), "{slot}");
         assert_eq!(slot.matches("avatar avatar-2xs").count(), 1, "{slot}");
         assert!(slot.contains("<span>bob</span>"), "{slot}");
         assert!(!slot.contains("dave"), "{slot}");
-        assert!(page.contains("msg-receipt msg-receipt-all"));
     })
     .await;
 }
@@ -691,10 +692,11 @@ async fn reading_publishes_receipts_for_the_authors() {
 
 #[tokio::test]
 #[serial]
-async fn people_approved_later_do_not_spoil_older_receipts() {
+async fn people_approved_later_count_once_they_read_older_messages() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
+        let alice_id = user_id(&ctx, "alice@example.com").await;
         let message = post(&request, &ctx, &alice, general.id, "Morning all").await;
         open(&request, &bob, general.id).await;
 
@@ -702,14 +704,35 @@ async fn people_approved_later_do_not_spoil_older_receipts() {
         approve(&ctx, "carol@example.com").await;
         let page = open(&request, &alice, general.id).await;
         let slot = receipt_slot(&page, message.id);
-        assert!(slot.contains(r#"aria-label="Read by everyone""#), "{slot}");
-        assert!(page.contains("msg-receipt msg-receipt-all"));
+        assert!(slot.contains(r#"aria-label="Read by bob""#), "{slot}");
 
-        // Carol's first open covers only what was sent after she joined.
+        // Carol's first open covers the older message too, and tells alice.
         let hub = ctx.shared_store.get::<ChatHub>().unwrap();
         let mut events = hub.subscribe();
         open(&request, &carol, general.id).await;
-        assert!(events.try_recv().is_err(), "nothing new for carol to read");
+        let ChatEvent::Read {
+            conversation_id,
+            receipts,
+        } = events.try_recv().expect("carol's first read is published")
+        else {
+            panic!("expected a read event");
+        };
+        assert_eq!(conversation_id, general.id);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].message_id, message.id);
+        assert_eq!(receipts[0].author_id, alice_id);
+        assert_eq!(
+            receipts[0].receipt.as_ref().unwrap().text,
+            "Read by bob, carol"
+        );
+
+        let page = open(&request, &alice, general.id).await;
+        let slot = receipt_slot(&page, message.id);
+        assert!(
+            slot.contains(r#"aria-label="Read by bob, carol""#),
+            "{slot}"
+        );
+        assert_eq!(slot.matches("avatar avatar-2xs").count(), 2, "{slot}");
     })
     .await;
 }

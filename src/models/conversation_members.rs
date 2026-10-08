@@ -5,18 +5,13 @@ use super::{conversations, messages};
 
 pub type ConversationMembers = Entity;
 
-/// A member, when they joined the conversation and when they last read it.
-#[derive(Debug, Clone, Copy)]
-pub struct ReadMark {
-    pub user_id: i64,
-    pub joined_at: DateTimeWithTimeZone,
-    pub last_read_at: Option<DateTimeWithTimeZone>,
-}
+/// A member and when they last read the conversation.
+pub type ReadMark = (i64, Option<DateTimeWithTimeZone>);
 
-/// What one read covered: messages after `from` up to `to`.
+/// What one read covered: messages after `from` (from the start when `None`) up to `to`.
 #[derive(Debug, Clone, Copy)]
 pub struct ReadSpan {
-    pub from: DateTimeWithTimeZone,
+    pub from: Option<DateTimeWithTimeZone>,
     pub to: DateTimeWithTimeZone,
 }
 
@@ -68,7 +63,6 @@ impl Model {
     /// Records that `user_id` has seen everything in the conversation up to now,
     /// by the database clock so it compares cleanly with `messages.created_at`.
     /// Returns the span the read covered, or `None` when they are not a member.
-    /// A first read starts at when they joined, like `unread_counts`.
     ///
     /// # Errors
     /// On database errors.
@@ -102,7 +96,7 @@ impl Model {
             .next()
             .and_then(|m| m.last_read_at)
             .map(|to| ReadSpan {
-                from: before.last_read_at.unwrap_or(before.created_at),
+                from: before.last_read_at,
                 to,
             }))
     }
@@ -128,7 +122,7 @@ impl Model {
         Ok(())
     }
 
-    /// When each member of a conversation joined it and last read it.
+    /// When each member of a conversation last read it.
     ///
     /// # Errors
     /// On database errors.
@@ -143,11 +137,7 @@ impl Model {
             .all(db)
             .await?
             .into_iter()
-            .map(|m| ReadMark {
-                user_id: m.user_id,
-                joined_at: m.created_at,
-                last_read_at: m.last_read_at,
-            })
+            .map(|m| (m.user_id, m.last_read_at))
             .collect())
     }
 

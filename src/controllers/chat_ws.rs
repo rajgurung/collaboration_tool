@@ -226,7 +226,7 @@ pub async fn mark_read(
     let marks = conversation_members::Model::read_marks(&ctx.db, org_id, conversation_id).await?;
     // Only this conversation's members: everyone has General open, so this runs often.
     let names: HashMap<i64, String> =
-        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|m| m.user_id))
+        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|(id, _)| *id))
             .await?
             .into_iter()
             .collect();
@@ -359,7 +359,6 @@ mod tests {
                     .collect(),
                 shown: Vec::new(),
                 more: 0,
-                all: false,
             }),
         }
     }
@@ -367,11 +366,11 @@ mod tests {
     #[test]
     fn late_read_events_never_lower_a_count() {
         let mut sent = HashMap::new();
-        let everyone = read_by(10, &["bob", "carol"]);
+        let both = read_by(10, &["bob", "carol"]);
         let other = read_by(11, &["bob"]);
-        assert_eq!(not_older(vec![&everyone, &other], &mut sent).len(), 2);
+        assert_eq!(not_older(vec![&both, &other], &mut sent).len(), 2);
 
-        // Bob's event arrives after carol's: message 10 keeps "everyone".
+        // Bob's event arrives after carol's: message 10 keeps both readers.
         let late = read_by(10, &["bob"]);
         let newer = read_by(11, &["bob", "carol"]);
         let kept: Vec<i64> = not_older(vec![&late, &newer], &mut sent)
@@ -381,7 +380,7 @@ mod tests {
         assert_eq!(kept, vec![11]);
 
         // The same count again is still sent.
-        assert_eq!(not_older(vec![&everyone], &mut sent).len(), 1);
+        assert_eq!(not_older(vec![&both], &mut sent).len(), 1);
     }
 
     #[test]
