@@ -50,7 +50,6 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
             name: format!("{SECRET} project"),
             lane: "now".to_string(),
             status: "Active".to_string(),
-            progress: 10,
             accent: "#ffb454".to_string(),
             owner_id: owner.id.to_string(),
             summary: SECRET.to_string(),
@@ -144,7 +143,6 @@ async fn org_a_cannot_reach_org_b() {
                 name: "Acme project".to_string(),
                 lane: "now".to_string(),
                 status: "Active".to_string(),
-                progress: 0,
                 accent: "#ffb454".to_string(),
                 owner_id: String::new(),
                 summary: String::new(),
@@ -186,7 +184,7 @@ async fn org_a_cannot_reach_org_b() {
         }
         let posts = [
             (format!("/roadmap/projects/{}", globex.project.id), serde_json::json!({
-                "name": "hijacked", "lane": "now", "status": "x", "progress": "1", "accent": "#ffb454", "owner_id": "", "summary": ""
+                "name": "hijacked", "lane": "now", "status": "x", "accent": "#ffb454", "owner_id": "", "summary": ""
             })),
             (format!("/tasks/{}/status", globex.task.id), serde_json::json!({ "status": "done" })),
             (format!("/tasks/{}", globex.task.id), serde_json::json!({ "title": "hijacked", "project_id": "1", "priority": "high" })),
@@ -207,7 +205,7 @@ async fn org_a_cannot_reach_org_b() {
         let refs = [
             ("/tasks", format!("title=t&priority=high&project_id={}", globex.project.id)),
             ("/tasks", format!("title=t&priority=high&project_id={}&assignee_ids={b_user}", acme_project.id)),
-            ("/roadmap/projects", format!("name=p&lane=now&status=s&progress=1&accent=%23ffb454&owner_id={b_user}")),
+            ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_id={b_user}")),
             ("/meetings", format!("title=m&held_on=2026-10-01&summary=s&attendee_ids={b_user}")),
             ("/chat/groups", format!("name=g&member_ids={b_user}")),
         ];

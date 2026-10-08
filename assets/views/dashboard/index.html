@@ -30,9 +30,9 @@
           {% for p in roadmap_now %}
           <a href="/roadmap" class="project-card" style="--accent-bar: {{ p.accent }}">
             <span class="flex items-center gap-2"><span class="truncate-1 flex-1 font-bold">{{ p.name }}</span>{% if p.status %}<span class="pill {% if p.blocked > 0 %}pill-blocked{% endif %}">{{ p.status }}</span>{% endif %}</span>
-            <span class="flex items-center gap-2.5"><span class="bar flex-1" style="--bar: {{ p.accent }}"><span style="width: {{ p.progress }}%"></span></span><span class="meta tabular-nums">{{ p.progress }}%</span></span>
+            <span class="flex items-center gap-2.5"><span class="bar flex-1" style="--bar: {{ p.accent }}" role="progressbar" aria-label="Tasks done" aria-valuenow="{{ p.progress.percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ p.progress.percent }}%"></span></span><span class="meta tabular-nums">{{ p.progress.percent }}%</span></span>
             <span class="flex items-center gap-2">
-              <span class="meta flex-1">{{ p.open }} open{% if p.blocked > 0 %} · <span class="font-semibold text-blocked">{{ p.blocked }} blocked</span>{% endif %}</span>
+              <span class="meta flex-1">{% if p.progress.total > 0 %}{{ p.progress.done }} of {{ p.progress.total }} done{% else %}No tasks yet{% endif %}{% if p.blocked > 0 %} · <span class="font-semibold text-blocked">{{ p.blocked }} blocked</span>{% endif %}</span>
               <span class="avatar-stack">{% for person in p.people %}{{<avatar name={person.name} color={person.color} size="xs"/>}}{% endfor %}</span>
             </span>
           </a>

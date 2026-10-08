@@ -80,7 +80,7 @@ async fn index(
         .filter(|t| t.status != "done" && t.due_on.is_some_and(|d| d <= week_end))
         .count();
 
-    // The "now" lane: progress, open and stuck work, and who is working on it.
+    // The "now" lane: progress from finished tasks, stuck work, and who is on it.
     let roadmap_now: Vec<serde_json::Value> = all_projects
         .iter()
         .filter(|p| p.lane == "now")
@@ -88,7 +88,6 @@ async fn index(
             let theirs: Vec<&tasks::Model> =
                 all_tasks.iter().filter(|t| t.project_id == p.id).collect();
             let stuck = theirs.iter().filter(|t| t.status == "blocked").count();
-            let open = theirs.iter().filter(|t| t.status != "done").count();
             let mut people: Vec<i64> = Vec::new();
             for id in theirs.iter().filter_map(|t| assignees.get(&t.id)).flatten() {
                 if !people.contains(id) {
@@ -102,8 +101,9 @@ async fn index(
                 .map(|n| serde_json::json!({ "name": n, "color": avatar_color(n) }))
                 .collect();
             serde_json::json!({
-                "name": p.name, "progress": p.progress, "accent": p.accent, "status": p.status,
-                "blocked": stuck, "open": open, "people": people,
+                "name": p.name, "progress": projects::Progress::of(p.id, &all_tasks),
+                "accent": p.accent, "status": p.status,
+                "blocked": stuck, "people": people,
             })
         })
         .collect();

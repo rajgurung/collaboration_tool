@@ -50,7 +50,6 @@ async fn dashboard_numbers_follow_the_tasks() {
                 name: "Launch".to_string(),
                 lane: "now".to_string(),
                 status: "Active".to_string(),
-                progress: 40,
                 accent: "#72e5b4".to_string(),
                 owner_id: alice.id.to_string(),
                 summary: String::new(),
@@ -94,8 +93,10 @@ async fn dashboard_numbers_follow_the_tasks() {
             "one blocked task in the org"
         );
         assert!(
-            compact.contains("Launch") && compact.contains("40%"),
-            "now-lane project with progress"
+            compact.contains("Launch")
+                && compact.contains("33%")
+                && compact.contains("1 of 3 done"),
+            "now-lane progress comes from finished tasks"
         );
         assert!(
             compact.contains("1 blocked"),

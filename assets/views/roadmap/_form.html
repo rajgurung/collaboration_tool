@@ -7,7 +7,7 @@
     <p class="meta mt-1 mb-0 text-sm">A workstream on the roadmap, with one owner.</p>
   </div>
   {{<text_field name="name" label="Name" value={form.name} error={errors.name | default(value="")}/>}}
-  <div class="grid gap-4 sm:grid-cols-2">
+  <div class="grid gap-4 sm:grid-cols-3">
     <label class="field">
       <span class="field-label">Lane</span>
       <select name="lane" class="input">
@@ -23,11 +23,6 @@
         {% for person in team %}<option value="{{ person.id }}" {% if form.owner_id == person.id | str %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
       </select>
       {% if errors.owner_id %}<span class="field-error">{{ errors.owner_id }}</span>{% endif %}
-    </label>
-    <label class="field">
-      <span class="field-label">Progress (%)</span>
-      <input class="input" type="number" name="progress" min="0" max="100" step="1" value="{{ form.progress }}" required>
-      {% if errors.progress %}<span class="field-error">{{ errors.progress }}</span>{% endif %}
     </label>
   </div>
   <fieldset class="field m-0 border-0 p-0">
