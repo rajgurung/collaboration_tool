@@ -24,6 +24,8 @@ use crate::{
 };
 
 const SHOWN: u64 = 50;
+/// Mention headlines start with this; the list rewrites it for your own tags.
+const MENTIONED_YOU: &str = "mentioned you";
 
 #[derive(Debug, Serialize)]
 struct NotificationView {
@@ -175,7 +177,7 @@ pub async fn note_added(
         &notifications::mentioned_ids(&note.body, &team),
         &Notice {
             kind: kind::MENTION,
-            body: format!("mentioned you on “{}”\n{quote}", task.title),
+            body: format!("{MENTIONED_YOU} on “{}”\n{quote}", task.title),
             link: link.clone(),
         },
     )
@@ -261,7 +263,7 @@ pub async fn message_sent(
         &visible,
         &Notice {
             kind: kind::MENTION,
-            body: format!("mentioned you in {place}\n{}", excerpt(&message.body)),
+            body: format!("{MENTIONED_YOU} in {place}\n{}", excerpt(&message.body)),
             link: format!("/chat/{}", conversation.id),
         },
     )
@@ -297,7 +299,7 @@ async fn index(
                     });
                 let mine = n.actor_id == Some(member.user.id);
                 if mine {
-                    headline = headline.replacen("mentioned you", "mentioned yourself", 1);
+                    headline = headline.replacen(MENTIONED_YOU, "mentioned yourself", 1);
                 }
                 NotificationView {
                     id: n.id,

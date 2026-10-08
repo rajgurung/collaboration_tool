@@ -185,7 +185,7 @@ async fn assignments_and_notes_notify_the_right_people() {
 
         let sheet = request
             .get(&format!("/tasks/{}", task.id))
-            .add_header(carol.0, carol.1)
+            .add_header(carol.0.clone(), carol.1.clone())
             .await
             .text();
         assert!(sheet.contains(r#"<span class="mention">@alice</span>"#));
@@ -193,6 +193,19 @@ async fn assignments_and_notes_notify_the_right_people() {
             sheet.contains(r#"data-mentions="alice,bob,carol""#),
             "picker offers the team, with you last"
         );
+
+        // Tagging yourself in a note reads as a reminder to you.
+        request
+            .post(&format!("/tasks/{}/notes", task.id))
+            .add_header(carol.0.clone(), carol.1.clone())
+            .form(&serde_json::json!({ "body": "Note to self @carol" }))
+            .await;
+        let own = request
+            .get("/notifications")
+            .add_header(carol.0, carol.1)
+            .await
+            .text();
+        assert!(own.contains("<strong>You</strong> mentioned yourself on “Write the FAQ”"));
     })
     .await;
 }
