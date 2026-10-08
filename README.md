@@ -3,6 +3,7 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/rajgurung/collaboration_tool/ci.yaml?branch=main&label=tests&logo=github)](https://github.com/rajgurung/collaboration_tool/actions/workflows/ci.yaml)
 [![Live site](https://img.shields.io/website?url=https%3A%2F%2Fcollab.rajgurung.me%2F_health&label=live%20site&up_message=online&down_message=offline)](https://collab.rajgurung.me)
 [![Last commit](https://img.shields.io/github/last-commit/rajgurung/collaboration_tool/main)](https://github.com/rajgurung/collaboration_tool/commits/main)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Code review](https://img.shields.io/badge/code%20review-Michael%20Scott%20%F0%9F%8F%86-f2a93b)](.github/workflows/claude-code-review.yml)
 
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
@@ -101,3 +102,7 @@ cargo test
 `SPEC.md` and `TASKS.md` record the plan this was built from. Deployment is covered in [`docs/deploy.md`](docs/deploy.md).
 
 </details>
+
+## License
+
+MIT. See [LICENSE](LICENSE).
