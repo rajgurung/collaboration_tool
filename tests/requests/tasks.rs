@@ -92,14 +92,14 @@ async fn creating_a_task_puts_it_in_to_do() {
                 .unwrap(),
             vec![alice.id]
         );
-        assert_eq!(task.project_id, project.id);
+        assert_eq!(task.project_id, Some(project.id));
     })
     .await;
 }
 
 #[tokio::test]
 #[serial]
-async fn tasks_need_a_title_and_a_project_from_this_org() {
+async fn tasks_need_a_title_and_any_project_must_be_from_this_org() {
     request::<App, _, _>(|request, ctx| async move {
         let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
         sign_up(&request, "Globex", "gina", "gina@example.com").await;
@@ -519,7 +519,7 @@ async fn editing_saves_every_field_and_several_assignees() {
             .unwrap()
             .unwrap();
         assert_eq!(task.title, "Draft the launch email");
-        assert_eq!(task.project_id, other.id);
+        assert_eq!(task.project_id, Some(other.id));
         assert_eq!(task.priority, "low");
         assert_eq!(task.status, "progress");
         assert_eq!(task.due_on, None);
@@ -797,6 +797,83 @@ async fn adding_from_a_column_starts_in_that_column() {
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         assert_eq!(task.status, "blocked");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn chores_need_no_project() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let (_, bob_id) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
+        let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap();
+        let launch = project_in(&ctx, "acme", "Launch").await;
+        let today = chrono::Utc::now().date_naive().to_string();
+
+        let res = request
+            .post("/tasks")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(form_body(&[
+                ("title", "Order printer ink".into()),
+                ("project_id", String::new()),
+                ("priority", "low".into()),
+                ("due_on", today),
+                ("assignee_ids", alice.id.to_string()),
+                ("assignee_ids", bob_id.to_string()),
+            ]))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let chore = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(chore.project_id, None);
+
+        // Assignees still hear about it; there is no project owner to tell.
+        let bobs = collab::models::notifications::Entity::find()
+            .filter(collab::models::notifications::Column::UserId.eq(bob_id))
+            .all(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(bobs.len(), 1);
+        assert_eq!(bobs[0].kind, "assigned");
+
+        let board = request
+            .get("/tasks/board?group=project")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
+        assert!(board.contains(r#"data-lane="no-project""#) && board.contains("Order printer ink"));
+        let sheet = request
+            .get(&format!("/tasks/{}", chore.id))
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
+        assert!(sheet.contains("No project"));
+
+        // Home counts chores; the roadmap's progress does not.
+        let home: String = request
+            .get("/dashboard")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(home.contains(r#"stat-value">1</span><span class="meta">Your open tasks"#));
+        assert!(home.contains(r#"stat-value">1</span><span class="meta">Due this week"#));
+        request
+            .post("/tasks")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .form(&task_form("Launch work", launch.id, ""))
+            .await;
+        let roadmap = request
+            .get("/roadmap")
+            .add_header(owner.0, owner.1)
+            .await
+            .text();
+        assert!(roadmap.contains("0 of 1 tasks done"));
     })
     .await;
 }

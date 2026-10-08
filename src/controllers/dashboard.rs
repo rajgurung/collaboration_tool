@@ -50,9 +50,9 @@ async fn index(
         .iter()
         .take(MY_TASKS)
         .map(|t| {
-            let project = project_names
-                .get(&t.project_id)
-                .copied()
+            let project = t
+                .project_id
+                .and_then(|id| project_names.get(&id).copied())
                 .unwrap_or_default();
             let lead = match (t.status.as_str(), t.due_on) {
                 ("blocked", _) => "Blocked".to_string(),
@@ -67,7 +67,7 @@ async fn index(
                 .join(" · ");
             let accent = all_projects
                 .iter()
-                .find(|p| p.id == t.project_id)
+                .find(|p| Some(p.id) == t.project_id)
                 .map_or("#9a968d", |p| p.accent.as_str());
             serde_json::json!({ "id": t.id, "title": t.title, "status": t.status, "meta": meta, "accent": accent })
         })
@@ -85,8 +85,10 @@ async fn index(
         .iter()
         .filter(|p| p.lane == "now")
         .map(|p| {
-            let theirs: Vec<&tasks::Model> =
-                all_tasks.iter().filter(|t| t.project_id == p.id).collect();
+            let theirs: Vec<&tasks::Model> = all_tasks
+                .iter()
+                .filter(|t| t.project_id == Some(p.id))
+                .collect();
             let stuck = theirs.iter().filter(|t| t.status == "blocked").count();
             let mut people: Vec<i64> = Vec::new();
             for id in theirs.iter().filter_map(|t| assignees.get(&t.id)).flatten() {

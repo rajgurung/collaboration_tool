@@ -16,7 +16,7 @@ pub struct Model {
     pub priority: String,
     pub sort_order: i64,
     pub organisation_id: i64,
-    pub project_id: i64,
+    pub project_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
