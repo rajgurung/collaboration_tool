@@ -16,6 +16,7 @@ use crate::{
 /// Cookie a super admin sets to work inside another organisation.
 pub const ACTING_ORG_COOKIE: &str = "acting_org";
 
+#[derive(Clone)]
 pub struct CurrentMember {
     pub user: users::Model,
     pub org: organisations::Model,
@@ -27,6 +28,23 @@ pub struct CurrentMember {
 }
 
 impl CurrentMember {
+    /// A member through their own approved membership. Used by the session
+    /// cookie and by Claude's bearer tokens alike.
+    #[must_use]
+    pub fn from_membership(
+        user: users::Model,
+        org: organisations::Model,
+        membership: memberships::Model,
+    ) -> Self {
+        Self {
+            user,
+            org,
+            role: membership.role,
+            username: membership.username,
+            acting: false,
+        }
+    }
+
     /// Owners and admins approve members and manage settings.
     #[must_use]
     pub fn can_manage(&self) -> bool {
@@ -127,13 +145,7 @@ impl FromRequestParts<AppContext> for CurrentMember {
             .map_err(|e| Error::from(e).into_response())?;
 
         if membership.is_active() {
-            return Ok(Self {
-                user,
-                org,
-                role: membership.role,
-                username: membership.username,
-                acting: false,
-            });
+            return Ok(Self::from_membership(user, org, membership));
         }
         let template = if membership.is_pending() {
             "tenancy/waiting.html"
