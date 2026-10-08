@@ -625,3 +625,55 @@ async fn login_next_survives_a_failed_login_and_refuses_other_places() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn revoking_a_connector_ends_every_token_in_it() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let client_id = register(&request, CLAUDE).await;
+        let code = code_for(&request, &alice, &client_id).await;
+        let (_, first) = exchange(&request, &client_id, &code).await;
+        let (_, second) = refresh(
+            &request,
+            &client_id,
+            first["refresh_token"].as_str().unwrap(),
+        )
+        .await;
+        let access = second["access_token"].as_str().unwrap();
+        assert!(works(&request, access).await);
+
+        let page = request
+            .get("/settings/claude")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert_eq!(
+            page.matches("Revoke</button>").count(),
+            1,
+            "one row per grant"
+        );
+        assert!(page.contains("Connector"));
+
+        let grant = access_tokens::Entity::find()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .grant_id;
+        let res = request
+            .post(&format!("/settings/claude/grants/{grant}/revoke"))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(!works(&request, access).await);
+        let (status, _) = refresh(
+            &request,
+            &client_id,
+            second["refresh_token"].as_str().unwrap(),
+        )
+        .await;
+        assert_eq!(status, 400);
+    })
+    .await;
+}

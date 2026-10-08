@@ -124,14 +124,15 @@ document.addEventListener("click", (event) => {
   if (!target.classList.contains("hidden")) target.querySelector<HTMLInputElement>("input:not([type=hidden])")?.focus();
 });
 
-// <button data-copy="#input"> copies that input's value.
+// <button data-copy="#input"> copies that input's value. `data-copy-message`
+// changes the toast (default "Link copied").
 document.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLElement>("[data-copy]");
   if (!button) return;
   const input = document.querySelector<HTMLInputElement>(button.dataset.copy ?? "");
   if (!input) return;
   void navigator.clipboard.writeText(input.value).then(
-    () => showToast({ kind: "success", message: "Link copied" }),
+    () => showToast({ kind: "success", message: button.dataset.copyMessage ?? "Link copied" }),
     () => input.select(),
   );
 });
