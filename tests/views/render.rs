@@ -59,3 +59,37 @@ fn renders_app_layout_with_nav() {
     assert!(rendered.contains(r#"href="/tasks" class="tab" aria-current="page""#));
     assert!(rendered.contains("<svg"), "icons should render");
 }
+
+#[test]
+fn renders_read_receipts_as_live_swaps() {
+    let engine = view_engine();
+    let read = engine
+        .render(
+            "chat/_receipt.html",
+            serde_json::json!({
+                "message": { "id": 42, "receipt": { "text": "Read by 2", "readers": ["bob", "carol"], "all": false } },
+                "oob": true,
+            }),
+        )
+        .expect("receipt should render");
+    assert!(
+        read.contains(r#"id="receipt-42" hx-swap-oob="true""#),
+        "{read}"
+    );
+    assert!(read.contains(r#"title="Read by bob, carol""#), "{read}");
+    assert!(
+        read.contains(r##"data-toggle="#receipt-names-42""##),
+        "{read}"
+    );
+
+    let unread = engine
+        .render(
+            "chat/_receipt.html",
+            serde_json::json!({ "message": { "id": 42, "receipt": null } }),
+        )
+        .expect("an empty slot should render");
+    assert!(
+        unread.contains(r#"<span class="msg-receipt" id="receipt-42"></span>"#),
+        "{unread}"
+    );
+}

@@ -1,12 +1,18 @@
 use collab::{
     app::App,
-    models::{conversations, memberships, messages, organisations, users},
+    data::chat_hub::{ChatEvent, ChatHub},
+    models::{
+        conversations::{self, GroupParams},
+        memberships, messages, organisations, users,
+    },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serial_test::serial;
 
 use super::prepare_data::{join, sign_up};
+
+type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
 
 /// Signs up Acme (alice) and gets bob approved; returns both cookies.
 async fn acme_with_bob(
@@ -299,10 +305,7 @@ async fn http_sends_are_published_and_the_feed_reloads() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
-        let hub = ctx
-            .shared_store
-            .get::<collab::data::chat_hub::ChatHub>()
-            .unwrap();
+        let hub = ctx.shared_store.get::<ChatHub>().unwrap();
         let mut events = hub.subscribe();
 
         request
@@ -310,10 +313,17 @@ async fn http_sends_are_published_and_the_feed_reloads() {
             .add_header(alice.0, alice.1)
             .form(&serde_json::json!({ "body": "Standup in 5" }))
             .await;
-        let event = events.try_recv().expect("the message is broadcast");
-        assert_eq!(event.conversation_id, general.id);
-        assert_eq!(event.message.body, "Standup in 5");
-        assert_eq!(event.message.author, "alice");
+        let ChatEvent::Message {
+            conversation_id,
+            message,
+            ..
+        } = events.try_recv().expect("the message is broadcast")
+        else {
+            panic!("expected a message event");
+        };
+        assert_eq!(conversation_id, general.id);
+        assert_eq!(message.body, "Standup in 5");
+        assert_eq!(message.author, "alice");
 
         let feed = request
             .get(&format!("/chat/{}/feed", general.id))
@@ -401,6 +411,221 @@ async fn legacy_chat_links_redirect() {
             res.headers().get("location").unwrap().to_str().unwrap(),
             format!("/chat/{}", general.id)
         );
+    })
+    .await;
+}
+
+async fn approve(ctx: &AppContext, email: &str) -> users::Model {
+    let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
+    let membership = memberships::Model::find_for_user(&ctx.db, user.id)
+        .await
+        .unwrap()
+        .unwrap();
+    membership.approve(&ctx.db, user.id).await.unwrap();
+    user
+}
+
+async fn user_id(ctx: &AppContext, email: &str) -> i64 {
+    users::Model::find_by_email(&ctx.db, email)
+        .await
+        .unwrap()
+        .id
+}
+
+async fn acme_id(ctx: &AppContext) -> i64 {
+    organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap()
+        .id
+}
+
+/// Alice's group with bob and carol; returns the group and carol's cookie.
+async fn group_of_three(request: &TestServer, ctx: &AppContext) -> (conversations::Model, Cookie) {
+    let carol = join(request, "acme", "carol", "carol@example.com").await;
+    let carol_id = approve(ctx, "carol@example.com").await.id;
+    let group = conversations::Model::create_group(
+        &ctx.db,
+        acme_id(ctx).await,
+        user_id(ctx, "alice@example.com").await,
+        &GroupParams {
+            name: "launch".to_string(),
+            member_ids: vec![user_id(ctx, "bob@example.com").await, carol_id],
+        },
+    )
+    .await
+    .unwrap();
+    (group, carol)
+}
+
+async fn post(
+    request: &TestServer,
+    ctx: &AppContext,
+    who: &Cookie,
+    conversation_id: i64,
+    body: &str,
+) -> messages::Model {
+    request
+        .post(&format!("/chat/{conversation_id}/messages"))
+        .add_header(who.0.clone(), who.1.clone())
+        .form(&serde_json::json!({ "body": body }))
+        .await;
+    messages::Entity::find()
+        .filter(messages::Column::Body.eq(body))
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+async fn open(request: &TestServer, who: &Cookie, conversation_id: i64) -> String {
+    request
+        .get(&format!("/chat/{conversation_id}"))
+        .add_header(who.0.clone(), who.1.clone())
+        .await
+        .text()
+}
+
+/// The receipt slot for one message as rendered: it ends its meta row.
+fn receipt_slot(html: &str, message_id: i64) -> &str {
+    let start = html
+        .find(&format!(r#"id="receipt-{message_id}""#))
+        .expect("the message has a receipt slot");
+    let end = start + html[start..].find("</div>").unwrap();
+    &html[start..end]
+}
+
+#[tokio::test]
+#[serial]
+async fn dms_show_read_once_the_other_person_opens_them() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let dm = conversations::Model::start_dm(
+            &ctx.db,
+            acme_id(&ctx).await,
+            user_id(&ctx, "alice@example.com").await,
+            user_id(&ctx, "bob@example.com").await,
+        )
+        .await
+        .unwrap();
+        let hello = post(&request, &ctx, &alice, dm.id, "Got a minute?").await;
+
+        let page = open(&request, &alice, dm.id).await;
+        assert!(
+            !receipt_slot(&page, hello.id).contains("Read"),
+            "bob has not opened it"
+        );
+
+        let bobs = open(&request, &bob, dm.id).await;
+        assert!(
+            !bobs.contains("msg-receipt"),
+            "only the sender sees receipts"
+        );
+
+        let page = open(&request, &alice, dm.id).await;
+        let slot = receipt_slot(&page, hello.id);
+        assert!(slot.contains("</svg>Read</button>"), "{slot}");
+        assert!(slot.contains(r#"title="Read by bob""#), "{slot}");
+
+        // A message sent after bob last read is not read yet.
+        let later = post(&request, &ctx, &alice, dm.id, "Never mind").await;
+        let page = open(&request, &alice, dm.id).await;
+        assert!(!receipt_slot(&page, later.id).contains("Read"));
+        assert!(receipt_slot(&page, hello.id).contains("Read"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn groups_count_who_has_read() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let (group, carol) = group_of_three(&request, &ctx).await;
+        let message = post(&request, &ctx, &alice, group.id, "Launch is Friday").await;
+
+        open(&request, &bob, group.id).await;
+        let page = open(&request, &alice, group.id).await;
+        let slot = receipt_slot(&page, message.id);
+        assert!(slot.contains("Read by 1</button>"), "{slot}");
+        assert!(slot.contains(r#"title="Read by bob""#), "{slot}");
+        assert!(!slot.contains("msg-receipt-all"));
+
+        let carols = open(&request, &carol, group.id).await;
+        assert!(
+            !carols.contains("msg-receipt"),
+            "only the sender sees receipts"
+        );
+        let page = open(&request, &alice, group.id).await;
+        let slot = receipt_slot(&page, message.id);
+        assert!(slot.contains("Read by everyone</button>"), "{slot}");
+        assert!(slot.contains(r#"title="Read by bob, carol""#), "{slot}");
+        assert!(
+            slot.contains(r#"id="receipt-names-"#),
+            "names to tap open on a phone"
+        );
+        assert!(page.contains("msg-receipt msg-receipt-all"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn general_has_no_receipts() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let general = general(&ctx).await;
+        post(&request, &ctx, &alice, general.id, "Morning all").await;
+        open(&request, &bob, general.id).await;
+        let page = open(&request, &alice, general.id).await;
+        assert!(page.contains("Morning all"));
+        assert!(!page.contains("msg-receipt"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn reading_publishes_receipts_for_the_authors() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let (group, _carol) = group_of_three(&request, &ctx).await;
+        let general = general(&ctx).await;
+        let alice_id = user_id(&ctx, "alice@example.com").await;
+        let hub = ctx.shared_store.get::<ChatHub>().unwrap();
+        let mut events = hub.subscribe();
+
+        let message = post(&request, &ctx, &alice, group.id, "Launch is Friday").await;
+        post(&request, &ctx, &alice, general.id, "Morning all").await;
+        while events.try_recv().is_ok() {}
+
+        // Alice opening her own conversation reads nothing new from others.
+        open(&request, &alice, group.id).await;
+        assert!(events.try_recv().is_err());
+
+        open(&request, &bob, group.id).await;
+        let ChatEvent::Read {
+            conversation_id,
+            receipts,
+        } = events.try_recv().expect("bob's read is published")
+        else {
+            panic!("expected a read event");
+        };
+        assert_eq!(conversation_id, group.id);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].message_id, message.id);
+        assert_eq!(receipts[0].author_id, alice_id);
+        assert_eq!(receipts[0].receipt.as_ref().unwrap().text, "Read by 1");
+
+        // Nothing new since: nothing published.
+        request
+            .get(&format!("/chat/{}/feed", group.id))
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await;
+        assert!(events.try_recv().is_err());
+
+        // Reading General never publishes receipts.
+        open(&request, &bob, general.id).await;
+        assert!(events.try_recv().is_err());
     })
     .await;
 }

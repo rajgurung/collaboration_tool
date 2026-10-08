@@ -5,6 +5,16 @@ use super::{conversations, messages};
 
 pub type ConversationMembers = Entity;
 
+/// A member and when they last read the conversation.
+pub type ReadMark = (i64, Option<DateTimeWithTimeZone>);
+
+/// What one read covered: messages after `from` (from the start when `None`) up to `to`.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadSpan {
+    pub from: Option<DateTimeWithTimeZone>,
+    pub to: DateTimeWithTimeZone,
+}
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
@@ -43,24 +53,62 @@ impl Model {
 }
 
 impl Model {
-    /// Records that `user_id` has seen everything in the conversation up to now.
+    /// Records that `user_id` has seen everything in the conversation up to now,
+    /// by the database clock so it compares cleanly with `messages.created_at`.
+    /// Returns the span the read covered, or `None` when they are not a member.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn mark_read<C: ConnectionTrait>(
-        db: &C,
+    pub async fn mark_read(
+        db: &DatabaseConnection,
         org_id: i64,
         conversation_id: i64,
         user_id: i64,
-    ) -> ModelResult<()> {
-        Entity::update_many()
-            .col_expr(Column::LastReadAt, Expr::value(chrono::Utc::now()))
+    ) -> ModelResult<Option<ReadSpan>> {
+        let txn = db.begin().await?;
+        let Some(before) = Entity::find()
+            .in_tenant(org_id)
             .filter(Column::ConversationId.eq(conversation_id))
             .filter(Column::UserId.eq(user_id))
-            .in_tenant(org_id)
-            .exec(db)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let after = Entity::update_many()
+            .col_expr(Column::LastReadAt, Expr::current_timestamp())
+            .filter(Column::Id.eq(before.id))
+            .exec_with_returning(&txn)
             .await?;
-        Ok(())
+        txn.commit().await?;
+        Ok(after
+            .into_iter()
+            .next()
+            .and_then(|m| m.last_read_at)
+            .map(|to| ReadSpan {
+                from: before.last_read_at,
+                to,
+            }))
+    }
+
+    /// When each member of a conversation last read it.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn read_marks<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        conversation_id: i64,
+    ) -> ModelResult<Vec<ReadMark>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::ConversationId.eq(conversation_id))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|m| (m.user_id, m.last_read_at))
+            .collect())
     }
 
     /// Unread message count per conversation for `user_id`. Messages they sent

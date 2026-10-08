@@ -394,7 +394,15 @@
   .bubble { padding: 8px 12px; border-radius: 18px 18px 18px 6px; background: var(--surface); border: 1px solid var(--line); font-size: 15px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg-own .bubble { border-radius: 18px 18px 6px 18px; background: var(--own-bubble); color: var(--own-text); border-color: transparent; }
   .msg-name { margin-left: 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
-  .msg-time { margin: 1px 12px 0; font-size: 11px; color: var(--muted); }
+  .msg-meta { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 8px; margin: 1px 12px 0; }
+  .msg-time { font-size: 11px; color: var(--muted); }
+  .msg-receipt { display: flex; flex-direction: column; align-items: flex-end; font-size: 11px; color: var(--muted); }
+  .msg-receipt:empty { display: none; }
+  .msg-receipt-btn { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+  .msg-receipt-all svg { color: var(--accent); }
+  .msg-receipt-names { max-width: 240px; text-align: right; }
+  /* Only the last message in a run of your own shows its receipt. */
+  .msg-own:has(+ .msg-own) .msg-receipt, .msg-own:has(+ .msg-own) .msg-meta:not(:has(.msg-time)) { display: none; }
   .composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
   .composer textarea { flex: 1; min-height: 44px; max-height: 140px; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 22px; padding: 11px 16px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
   .composer textarea:focus { border-color: var(--accent); }

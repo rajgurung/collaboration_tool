@@ -2,19 +2,35 @@
 //! app must run as a single instance (see docs/deploy.md).
 use tokio::sync::broadcast;
 
-use crate::controllers::chat::MessageView;
+use crate::controllers::chat::{MessageView, Receipt};
 
 /// Enough buffered events for a burst; slower sockets skip ahead and the
 /// browser reloads the feed after reconnecting.
 const CAPACITY: usize = 512;
 
-/// A new message in a conversation. `message.own` is false; each socket sets it
-/// for its own viewer.
+/// Something that happened in a conversation.
 #[derive(Debug, Clone)]
-pub struct ChatEvent {
-    pub conversation_id: i64,
+pub enum ChatEvent {
+    /// A new message. `message.own` is false; each socket sets it for its own viewer.
+    Message {
+        conversation_id: i64,
+        author_id: i64,
+        message: MessageView,
+    },
+    /// Someone read up to now. Carries the new receipts for the messages that
+    /// read covered; each socket forwards only those its viewer wrote.
+    Read {
+        conversation_id: i64,
+        receipts: Vec<ReceiptUpdate>,
+    },
+}
+
+/// The current receipt for one message, for its author's screen.
+#[derive(Debug, Clone)]
+pub struct ReceiptUpdate {
+    pub message_id: i64,
     pub author_id: i64,
-    pub message: MessageView,
+    pub receipt: Option<Receipt>,
 }
 
 #[derive(Clone)]
