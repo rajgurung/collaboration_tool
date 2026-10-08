@@ -5,7 +5,7 @@ use loco_rs::prelude::*;
 use crate::{
     controllers::chat,
     extractors::current_member::CurrentMember,
-    models::{meetings, memberships, projects, tasks},
+    models::{meetings, memberships, projects, task_assignees, tasks},
 };
 
 /// How many of your open tasks Home lists.
@@ -26,6 +26,7 @@ async fn index(
         .into_iter()
         .collect();
     let all_tasks = tasks::Model::list_for_org(&ctx.db, org_id).await?;
+    let assignees = task_assignees::Model::by_task(&ctx.db, org_id).await?;
     let all_projects = projects::Model::list_for_org(&ctx.db, org_id).await?;
     let project_names: HashMap<i64, &str> = all_projects
         .iter()
@@ -40,7 +41,7 @@ async fn index(
     };
     let mut mine: Vec<&tasks::Model> = all_tasks
         .iter()
-        .filter(|t| t.owner_id == Some(me) && t.status != "done")
+        .filter(|t| t.status != "done" && assignees.get(&t.id).is_some_and(|ids| ids.contains(&me)))
         .collect();
     mine.sort_by_key(|t| rank(&t.status));
     let my_open = mine.len();

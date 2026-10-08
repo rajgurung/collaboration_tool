@@ -21,9 +21,10 @@ async fn add_task(
         &tasks::TaskParams {
             title: title.to_string(),
             project_id: project_id.to_string(),
-            owner_id: owner.map(|id| id.to_string()).unwrap_or_default(),
+            assignee_ids: owner.into_iter().collect(),
             priority: "medium".to_string(),
             due_on: String::new(),
+            status: String::new(),
         },
     )
     .await

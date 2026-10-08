@@ -1,14 +1,47 @@
-<form id="task-form" method="post" action="/tasks" hx-post="/tasks" data-close-on-success class="grid gap-4">
-  <div>
-    <h2 class="m-0 text-xl font-semibold">New task</h2>
-    <p class="meta mt-1 mb-0 text-sm">Give it one owner and the project it moves forward.</p>
+{% set action = "/tasks/" ~ task_id if task_id else "/tasks" %}
+<form id="task-form" method="post" action="{{ action }}" hx-post="{{ action }}" {% if task_id %}hx-target="#task-sheet-body"{% else %}data-close-on-success{% endif %} class="grid gap-5">
+  <div class="flex items-start gap-2">
+    <div class="flex-1">
+      <h2 class="m-0 text-xl font-bold tracking-tight">{% if task_id %}Edit task{% else %}New task{% endif %}</h2>
+      {% if not task_id %}<p class="meta mt-1 mb-0 text-sm">Say what needs doing, who's on it, and which project it moves forward.</p>{% endif %}
+    </div>
+    <button type="button" class="icon-btn -mt-1.5 -mr-2.5 text-muted" data-dialog-close aria-label="Close">{{<icon name="x" class="h-[22px] w-[22px]"/>}}</button>
   </div>
+
   {{<text_field name="title" label="Task" value={form.title} error={errors.title | default(value="")}/>}}
+
   {% if projects | length == 0 %}
   <p class="alert m-0">Tasks belong to a project. <a href="/roadmap" class="text-link">Create a project on the roadmap</a> first.</p>
   {% endif %}
-  <div class="grid gap-4 sm:grid-cols-2">
-    <label class="field">
+
+  <fieldset class="field m-0 border-0 p-0">
+    <legend class="field-label mb-1.5">Status</legend>
+    <div class="option-row">
+      {% for s in statuses %}
+      <label class="option">
+        <input type="radio" name="status" value="{{ s.key }}" {% if form.status == s.key or (not form.status and s.key == "todo") %}checked{% endif %}>
+        <span><span class="dot" style="--dot: {{ s.color }}"></span>{{ s.label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if errors.status %}<span class="field-error">{{ errors.status }}</span>{% endif %}
+  </fieldset>
+
+  <fieldset class="field m-0 border-0 p-0">
+    <legend class="field-label mb-1.5">Assignees <span class="font-normal">· tap to add or remove</span></legend>
+    <div class="flex flex-wrap gap-2">
+      {% for person in team %}
+      <label class="person-toggle">
+        <input type="checkbox" name="assignee_ids" value="{{ person.id }}" {% if person.id in form.assignee_ids %}checked{% endif %}>
+        <span>{{<avatar name={person.username} color={person.color} size="xs"/>}}{{ person.username }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if errors.assignee_ids %}<span class="field-error">{{ errors.assignee_ids }}</span>{% endif %}
+  </fieldset>
+
+  <div class="grid gap-4 sm:grid-cols-3">
+    <label class="field sm:col-span-3">
       <span class="field-label">Project</span>
       <select name="project_id" class="input" required>
         <option value="">Choose a project</option>
@@ -17,28 +50,26 @@
       {% if errors.project_id %}<span class="field-error">{{ errors.project_id }}</span>{% endif %}
     </label>
     <label class="field">
-      <span class="field-label">Owner</span>
-      <select name="owner_id" class="input">
-        <option value="">Unassigned</option>
-        {% for person in team %}<option value="{{ person.id }}" {% if form.owner_id == person.id | str %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
-      </select>
-      {% if errors.owner_id %}<span class="field-error">{{ errors.owner_id }}</span>{% endif %}
-    </label>
-    <label class="field">
       <span class="field-label">Priority</span>
       <select name="priority" class="input">
         {% for p in priorities %}<option value="{{ p }}" {% if form.priority == p %}selected{% endif %}>{{ p | capitalize }}</option>{% endfor %}
       </select>
       {% if errors.priority %}<span class="field-error">{{ errors.priority }}</span>{% endif %}
     </label>
-    <label class="field">
+    <label class="field sm:col-span-2">
       <span class="field-label">Due date</span>
       <input class="input" type="date" name="due_on" value="{{ form.due_on }}">
       {% if errors.due_on %}<span class="field-error">{{ errors.due_on }}</span>{% endif %}
     </label>
   </div>
+
   <div class="flex justify-end gap-2">
+    {% if task_id %}
+    <button type="button" class="btn btn-secondary" hx-get="/tasks/{{ task_id }}" hx-target="#task-sheet-body">Cancel</button>
+    <button type="submit" class="btn btn-primary">Save changes</button>
+    {% else %}
     <button type="button" class="btn btn-secondary" data-dialog-close>Cancel</button>
     <button type="submit" class="btn btn-primary">Add task</button>
+    {% endif %}
   </div>
 </form>

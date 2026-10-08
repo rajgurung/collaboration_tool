@@ -3,7 +3,7 @@
   {% if q %}<p class="meta m-0">Showing tasks matching “{{ q }}”. <a href="/tasks?filter={{ filter }}" class="text-link">Clear</a></p>{% endif %}
   {% for group in groups %}
   <section class="flex flex-col gap-2" aria-label="{{ group.label }}">
-    <h2 class="section-label">{{ group.label }} · {{ group.rows | length }}</h2>
+    <h2 class="section-label flex items-center gap-2">{{ group.label }} · {{ group.rows | length }}</h2>
     <div class="list">
       {% for row in group.rows %}
       <a href="/tasks/{{ row.id }}" class="list-row" id="task-{{ row.id }}"
@@ -12,10 +12,10 @@
         {{<status_icon status={row.status}/>}}
         <span class="flex min-w-0 flex-1 flex-col">
           <span class="truncate-1 text-[15px] font-medium {% if row.status == "done" %}text-muted{% endif %}">{{ row.title }}</span>
-          <span class="meta truncate-1">{{ row.meta }}</span>
+          <span class="meta truncate-1 flex items-center gap-1.5"><span class="dot" style="--dot: {{ row.accent }}"></span>{{ row.meta }}</span>
         </span>
         {% if row.notes > 0 %}<span class="meta flex items-center gap-1">{{<icon name="message-circle" class="h-3.5 w-3.5"/>}}{{ row.notes }}</span>{% endif %}
-        {% if row.owner %}{{<avatar name={row.owner} color={row.owner_color} size="sm"/>}}{% endif %}
+        {% if row.people %}<span class="avatar-stack">{% for p in row.people %}{{<avatar name={p.name} color={p.color} size="sm"/>}}{% endfor %}</span>{% endif %}
       </a>
       {% endfor %}
     </div>

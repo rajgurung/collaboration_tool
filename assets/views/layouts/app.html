@@ -29,7 +29,7 @@
     <header class="topbar">
       {% block topbar %}<h1>{% block heading %}{% endblock heading %}</h1>{% block actions %}{% endblock actions %}{% endblock topbar %}
     </header>
-    <main class="page">{% block content %}{% endblock content %}</main>
+    <main class="page {% block page_class %}{% endblock page_class %}">{% block content %}{% endblock content %}</main>
     {% endblock main %}
   </div>
 </div>

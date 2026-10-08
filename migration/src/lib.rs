@@ -15,6 +15,8 @@ mod m20261007_144139_conversation_members;
 mod m20261007_144248_messages;
 mod m20261007_144359_add_super_admin_to_users;
 mod m20261008_094956_add_last_read_at_to_conversation_members;
+mod m20261008_134056_task_assignees;
+mod m20261008_134252_remove_owner_id_from_tasks;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -34,6 +36,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261007_144248_messages::Migration),
             Box::new(m20261007_144359_add_super_admin_to_users::Migration),
             Box::new(m20261008_094956_add_last_read_at_to_conversation_members::Migration),
+            Box::new(m20261008_134056_task_assignees::Migration),
+            Box::new(m20261008_134252_remove_owner_id_from_tasks::Migration),
             // inject-above (do not remove this comment)
         ]
     }
