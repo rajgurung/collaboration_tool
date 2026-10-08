@@ -20,7 +20,9 @@ pub struct Progress {
 impl Progress {
     #[must_use]
     pub fn of(project_id: i64, all_tasks: &[tasks::Model]) -> Self {
-        let theirs = all_tasks.iter().filter(|t| t.project_id == project_id);
+        let theirs = all_tasks
+            .iter()
+            .filter(|t| t.project_id == Some(project_id));
         let total = theirs.clone().count();
         let done = theirs.filter(|t| t.status == "done").count();
         Self {

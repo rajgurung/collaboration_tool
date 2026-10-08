@@ -19,6 +19,7 @@ mod m20261008_134056_task_assignees;
 mod m20261008_134252_remove_owner_id_from_tasks;
 mod m20261008_155033_notifications;
 mod m20261008_162805_remove_progress_from_projects;
+mod m20261008_165224_allow_tasks_without_project;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -42,6 +43,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_134252_remove_owner_id_from_tasks::Migration),
             Box::new(m20261008_155033_notifications::Migration),
             Box::new(m20261008_162805_remove_progress_from_projects::Migration),
+            Box::new(m20261008_165224_allow_tasks_without_project::Migration),
             // inject-above (do not remove this comment)
         ]
     }

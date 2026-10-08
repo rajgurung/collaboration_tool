@@ -81,7 +81,7 @@ struct Row {
     id: i64,
     title: String,
     status: String,
-    project_id: i64,
+    project_id: Option<i64>,
     project: String,
     accent: String,
     meta: String,
@@ -161,7 +161,7 @@ impl Workspace {
     }
 
     fn row(&self, t: &tasks::Model) -> Row {
-        let project = self.projects.iter().find(|p| p.id == t.project_id);
+        let project = self.projects.iter().find(|p| Some(p.id) == t.project_id);
         let project_name = project.map(|p| p.name.clone()).unwrap_or_default();
         let today = chrono::Utc::now().date_naive();
         let due = due_label(t.due_on);
@@ -336,23 +336,38 @@ fn board_data(ws: &Workspace, me: i64, scope: &str, group: &str, q: &str) -> ser
             None,
             rows.iter().collect(),
         )],
-        _ => ws
-            .projects
-            .iter()
-            .filter_map(|p| {
-                let theirs: Vec<&Row> = rows.iter().filter(|r| r.project_id == p.id).collect();
-                (!theirs.is_empty()).then(|| {
-                    lane(
-                        format!("project-{}", p.id),
-                        p.name.clone(),
-                        p.accent.clone(),
-                        false,
-                        Some(p.id),
-                        theirs,
-                    )
+        _ => {
+            let mut lanes: Vec<Lane> = ws
+                .projects
+                .iter()
+                .filter_map(|p| {
+                    let theirs: Vec<&Row> =
+                        rows.iter().filter(|r| r.project_id == Some(p.id)).collect();
+                    (!theirs.is_empty()).then(|| {
+                        lane(
+                            format!("project-{}", p.id),
+                            p.name.clone(),
+                            p.accent.clone(),
+                            false,
+                            Some(p.id),
+                            theirs,
+                        )
+                    })
                 })
-            })
-            .collect(),
+                .collect();
+            let chores: Vec<&Row> = rows.iter().filter(|r| r.project_id.is_none()).collect();
+            if !chores.is_empty() {
+                lanes.push(lane(
+                    "no-project".into(),
+                    "No project".into(),
+                    "#d6d3cb".into(),
+                    false,
+                    None,
+                    chores,
+                ));
+            }
+            lanes
+        }
     };
     let columns: Vec<serde_json::Value> = STATUSES
         .iter()
@@ -545,7 +560,7 @@ async fn edit(
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let params = TaskParams {
         title: task.title.clone(),
-        project_id: task.project_id.to_string(),
+        project_id: task.project_id.map(|id| id.to_string()).unwrap_or_default(),
         assignee_ids: task_assignees::Model::for_task(&ctx.db, member.org.id, task.id).await?,
         priority: task.priority.clone(),
         due_on: task.due_on.map(|d| d.to_string()).unwrap_or_default(),
@@ -631,9 +646,12 @@ async fn sheet_data(
 ) -> Result<serde_json::Value> {
     let team_list = memberships::Model::team(&ctx.db, member.org.id).await?;
     let team: HashMap<i64, String> = team_list.iter().cloned().collect();
-    let project = projects::Model::find_in_org(&ctx.db, member.org.id, task.project_id)
-        .await
-        .ok();
+    let project = match task.project_id {
+        Some(id) => projects::Model::find_in_org(&ctx.db, member.org.id, id)
+            .await
+            .ok(),
+        None => None,
+    };
     let notes: Vec<serde_json::Value> = task_notes::Model::list_for_task(&ctx.db, task)
         .await?
         .into_iter()

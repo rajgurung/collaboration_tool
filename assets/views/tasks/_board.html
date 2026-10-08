@@ -48,7 +48,7 @@
             <a href="/tasks/{{ card.id }}" class="task-card" draggable="true" data-task-id="{{ card.id }}" data-status="{{ card.status }}"
                hx-get="/tasks/{{ card.id }}" hx-target="#task-sheet-body"
                hx-on::after-request="document.getElementById('task-sheet').showModal()">
-              {% if board.group != "project" %}<span class="task-card-project"><span class="dot" style="--dot: {{ card.accent }}"></span>{{ card.project }}</span>{% endif %}
+              {% if board.group != "project" and card.project %}<span class="task-card-project"><span class="dot" style="--dot: {{ card.accent }}"></span>{{ card.project }}</span>{% endif %}
               <span class="task-card-title">{{ card.title }}</span>
               <span class="task-card-meta">
                 <span class="prio prio-{{ card.priority }}" title="{{ card.priority | capitalize }} priority" aria-label="{{ card.priority | capitalize }} priority"><i></i><i></i><i></i></span>

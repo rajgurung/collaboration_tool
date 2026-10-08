@@ -125,7 +125,11 @@ pub async fn task_saved(
     )
     .await?;
 
-    let project = projects::Model::find_in_org(&ctx.db, org_id, task.project_id).await?;
+    // Chores have no project, so no owner to tell.
+    let Some(project_id) = task.project_id else {
+        return Ok(());
+    };
+    let project = projects::Model::find_in_org(&ctx.db, org_id, project_id).await?;
     let event = match &before {
         None => Some(format!("added “{}” to {}", task.title, project.name)),
         Some(b) if b.status != "blocked" && task.status == "blocked" => Some(format!(

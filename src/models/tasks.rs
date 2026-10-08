@@ -21,7 +21,7 @@ static PRIORITY_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^(high|medium|low)$").expect("priority regex is valid"));
 
 /// The new and edit task form. The project and date arrive as text so empty
-/// choices are allowed; `assignee_ids` comes from repeated checkbox fields.
+/// choices are allowed (a task without a project is a chore); `assignee_ids` comes from repeated checkbox fields.
 #[derive(Debug, Deserialize, Validate)]
 pub struct TaskParams {
     #[validate(length(
@@ -45,7 +45,7 @@ pub struct TaskParams {
 
 /// The checked, parsed values of a [`TaskParams`].
 struct Checked {
-    project_id: i64,
+    project_id: Option<i64>,
     assignee_ids: Vec<i64>,
     due_on: Option<chrono::NaiveDate>,
 }
@@ -53,14 +53,18 @@ struct Checked {
 impl TaskParams {
     async fn check<C: ConnectionTrait>(&self, db: &C, org_id: i64) -> ModelResult<Checked> {
         ValidatorTrait::validate(self)?;
-        let project_id: i64 = self
-            .project_id
-            .trim()
-            .parse()
-            .map_err(|_| field_error("project_id", "Choose a project."))?;
-        projects::Model::find_in_org(db, org_id, project_id)
-            .await
-            .map_err(|_| field_error("project_id", "Choose a project."))?;
+        let project_id = match self.project_id.trim() {
+            "" => None,
+            raw => {
+                let id: i64 = raw
+                    .parse()
+                    .map_err(|_| field_error("project_id", "Choose a project."))?;
+                projects::Model::find_in_org(db, org_id, id)
+                    .await
+                    .map_err(|_| field_error("project_id", "Choose a project."))?;
+                Some(id)
+            }
+        };
         let mut assignee_ids = Vec::new();
         for id in &self.assignee_ids {
             if !assignee_ids.contains(id) {
