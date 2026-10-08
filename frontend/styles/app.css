@@ -231,9 +231,9 @@
     .shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100dvh; }
     .sidebar { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100dvh; box-sizing: border-box; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); }
     .tabbar { display: none; }
-    .topbar { padding: 12px 24px 0 32px; }
-    .page { padding: 8px 32px 48px; max-width: 1100px; }
-    .page-wide { max-width: none; }
+    .topbar { padding: 16px 32px 4px; max-width: 1440px; }
+    .page { padding: 8px 32px 48px; max-width: 1440px; }
+    .page-wide, .shell:has(.page-wide) .topbar { max-width: none; }
     .mobile-only { display: none !important; }
   }
   @media (max-width: 899px) {
@@ -241,15 +241,32 @@
   }
 
   /* Home */
-  .stat { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+  .stat { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
   .stat > span:last-child { display: flex; flex-direction: column; min-width: 0; }
-  .stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
-  .stat-value { font-size: 24px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
+  .stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
   .project-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); transition: box-shadow 0.15s, transform 0.15s; }
   .project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
   .project-card:hover, a.stat:hover { box-shadow: var(--shadow-lift); transform: translateY(-1px); }
   .decision { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
-  .home-grid { display: grid; gap: 24px; }
+  .home-grid { display: grid; gap: 28px; }
+
+  /* Roadmap: one lane with a switcher on phones, three columns on desktop */
+  .roadmap-col:not([data-current]) { display: none; }
+  .roadmap-col { display: flex; flex-direction: column; gap: 12px; }
+  .roadmap-cards { display: grid; gap: 12px; }
+  .roadmap-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); transition: box-shadow 0.15s; }
+  .roadmap-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+  .roadmap-card:hover { box-shadow: var(--shadow-lift); }
+  .roadmap-empty { padding: 28px 16px; border: 1.5px dashed var(--line); border-radius: 14px; text-align: center; color: var(--muted); font-size: 14px; }
+  @media (min-width: 640px) and (max-width: 899px) {
+    .roadmap-cards { grid-template-columns: 1fr 1fr; }
+  }
+  @media (min-width: 900px) {
+    .roadmap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    .roadmap-col, .roadmap-col:not([data-current]) { display: flex; padding: 14px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--lane); }
+    .roadmap-col-head { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 4px; }
+  }
   @media (max-width: 899px) {
     .stat { gap: 10px; padding: 12px; }
     .stat-icon { width: 30px; height: 30px; border-radius: 9px; }

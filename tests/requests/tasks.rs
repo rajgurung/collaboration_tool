@@ -643,6 +643,22 @@ async fn mine_means_any_task_i_am_assigned_to() {
             .await
             .text();
         assert!(bobs_board.contains("Shared work") && !bobs_board.contains("Alice alone"));
+        let bobs_lanes = request
+            .get("/tasks/board?scope=mine&group=person")
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await
+            .text();
+        assert!(
+            bobs_lanes.contains(&format!(r#"data-lane="person-{bob_id}""#))
+                && !bobs_lanes.contains(&format!(r#"data-lane="person-{}""#, alice.id)),
+            "a shared task shows only in my own lane"
+        );
+        let everyone_by_person = request
+            .get("/tasks/board?scope=all&group=person")
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await
+            .text();
+        assert!(everyone_by_person.contains(&format!(r#"data-lane="person-{}""#, alice.id)));
         let everyone = request
             .get("/tasks/board?scope=all")
             .add_header(bob.0, bob.1)

@@ -58,13 +58,20 @@ async fn creating_a_project_shows_it_in_its_lane() {
         assert_eq!(saved.owner_id, Some(alice.id));
         assert_eq!(saved.progress, 40);
 
-        // The default "Now" lane does not list it, but the switcher counts it under "Next".
+        // Every lane is on the page (side by side on desktop). Phones see the
+        // current lane, "Now" by default, and the switcher counts it under "Next".
         let page = request
             .get("/roadmap")
             .add_header(owner.0, owner.1)
             .await
             .text();
-        assert!(!page.contains("Design system"));
+        let next = page.split(r#"data-lane="next""#).nth(1).unwrap();
+        assert!(next
+            .split("data-lane=")
+            .next()
+            .unwrap()
+            .contains("Design system"));
+        assert!(page.contains(r#"data-lane="now" data-current"#));
         assert!(page.contains("Next 1"));
     })
     .await;
