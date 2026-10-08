@@ -693,11 +693,13 @@ async fn sheet_data(
     ))
 }
 
-/// Teammates the @ picker offers, everyone but the viewer.
+/// Names the @ picker offers: teammates first, then the viewer, who can tag
+/// themselves (it highlights, but never notifies them).
 pub fn mention_names(people: &[(i64, String)], me: i64) -> String {
-    people
+    let (mine, others): (Vec<_>, Vec<_>) = people.iter().partition(|(id, _)| *id == me);
+    others
         .iter()
-        .filter(|(id, _)| *id != me)
+        .chain(mine.iter())
         .map(|(_, name)| name.as_str())
         .collect::<Vec<_>>()
         .join(",")
