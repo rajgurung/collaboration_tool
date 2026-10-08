@@ -1,6 +1,7 @@
 use collab::{
     app::App,
     models::{meeting_attendees, meetings, users},
+    views::time,
 };
 use loco_rs::testing::prelude::*;
 use sea_orm::{EntityTrait, PaginatorTrait};
@@ -22,8 +23,9 @@ async fn new_meeting_form_defaults_to_today_and_ticks_me() {
             .await;
         assert_eq!(res.status_code(), 200);
         let body = res.text();
-        let today = chrono::Local::now()
-            .date_naive()
+        // The form uses the organisation's zone (London by default), not the
+        // machine's, so CI near midnight UTC still agrees on the date.
+        let today = time::today(time::zone("Europe/London"))
             .format("%Y-%m-%d")
             .to_string();
         assert!(body.contains(&format!(r#"value="{today}""#)), "{body}");
