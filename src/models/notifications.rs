@@ -197,6 +197,39 @@ impl Model {
         Ok(active.update(db).await?)
     }
 
+    /// Mentions still unread `wait` after they were made and not yet emailed,
+    /// in every organisation, oldest first. The email sender uses these.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn due_mention_emails<C: ConnectionTrait>(
+        db: &C,
+        wait: chrono::Duration,
+    ) -> ModelResult<Vec<Self>> {
+        Ok(Entity::find()
+            .filter(Column::Kind.eq(kind::MENTION))
+            .filter(Column::ReadAt.is_null())
+            .filter(Column::EmailedAt.is_null())
+            .filter(Column::CreatedAt.lte(chrono::Utc::now() - wait))
+            .order_by_asc(Column::Id)
+            .all(db)
+            .await?)
+    }
+
+    /// # Errors
+    /// On database errors.
+    pub async fn mark_emailed<C: ConnectionTrait>(db: &C, ids: &[i64]) -> ModelResult<()> {
+        Entity::update_many()
+            .col_expr(
+                Column::EmailedAt,
+                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+            )
+            .filter(Column::Id.is_in(ids.to_vec()))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn mark_all_read<C: ConnectionTrait>(

@@ -4,11 +4,8 @@
 use loco_rs::prelude::*;
 use serde_json::json;
 
-use crate::{
-    data::settings::Settings,
-    models::users,
-    workers::resend_email::{Worker as ResendEmail, WorkerArgs as ResendEmailArgs},
-};
+use super::deliver;
+use crate::{data::settings::Settings, models::users};
 
 static forgot: Dir<'_> = include_dir!("src/mailers/auth/forgot");
 
@@ -40,45 +37,9 @@ impl AuthMailer {
     }
 }
 
-/// Sends through Resend's HTTPS API when a key is configured, otherwise
-/// through Loco's SMTP mailer (development uses Mailpit, tests use the stub).
-async fn deliver(
-    ctx: &AppContext,
-    settings: &Settings,
-    dir: &Dir<'_>,
-    args: mailer::Args,
-) -> Result<()> {
-    if settings.resend_api_key.is_empty() {
-        return AuthMailer::mail_template(ctx, dir, args).await;
-    }
-    let email = render(dir, &args)?;
-    ResendEmail::perform_later(ctx, email).await?;
-    Ok(())
-}
-
-/// Renders `subject.t`, `text.t` and `html.t` from a mailer template folder.
-fn render(dir: &Dir<'_>, args: &mailer::Args) -> Result<ResendEmailArgs> {
-    let context =
-        tera::Context::from_serialize(&args.locals).map_err(|e| Error::string(&e.to_string()))?;
-    let part = |name: &str, autoescape: bool| -> Result<String> {
-        let source = dir
-            .get_file(name)
-            .and_then(|f| f.contents_utf8())
-            .ok_or_else(|| Error::string(&format!("missing mailer template {name}")))?;
-        tera::Tera::one_off(source, &context, autoescape).map_err(|e| Error::string(&e.to_string()))
-    };
-    Ok(ResendEmailArgs {
-        from: args.from.clone().unwrap_or_default(),
-        to: args.to.clone(),
-        subject: part("subject.t", false)?.trim().to_string(),
-        text: part("text.t", false)?,
-        html: part("html.t", true)?,
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{super::render, *};
 
     #[test]
     fn renders_the_forgot_email_for_resend() {

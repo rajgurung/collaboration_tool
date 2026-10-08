@@ -18,6 +18,7 @@ pub struct Model {
     pub organisation_id: i64,
     pub user_id: i64,
     pub actor_id: Option<i64>,
+    pub emailed_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
