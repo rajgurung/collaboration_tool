@@ -218,3 +218,111 @@ applyCollapsedLanes(document);
 document.body.addEventListener("htmx:afterSwap", (event) => {
   applyCollapsedLanes((event as CustomEvent<{ target: Element }>).detail.target.parentElement ?? document);
 });
+
+// Notifications: the server pushes a `notify` event when this person gets a new
+// one, and everything listening for "notifications-changed" reloads. The
+// browser reconnects on its own; badges also poll every 60s as a fallback.
+if (document.querySelector('[hx-get^="/notifications/unread"]')) {
+  const events = new EventSource("/notifications/stream");
+  events.addEventListener("notify", () => htmx.trigger(document.body, "notifications-changed"));
+  window.addEventListener("pagehide", () => events.close());
+}
+
+// @ mentions: a textarea with data-mentions="raj,maya" offers matching
+// teammates after "@". Arrow keys move, Enter or Tab picks, Escape closes.
+// The server finds mentions on its own, so typing a name in full also works.
+const mentionMenu = document.createElement("ul");
+mentionMenu.className = "mention-menu";
+mentionMenu.setAttribute("role", "listbox");
+mentionMenu.setAttribute("aria-label", "Teammates");
+mentionMenu.hidden = true;
+let mentionField: HTMLTextAreaElement | null = null;
+let mentionActive = 0;
+
+function mentionQuery(field: HTMLTextAreaElement) {
+  const before = field.value.slice(0, field.selectionStart);
+  const match = /(^|[^A-Za-z0-9_.@])@([A-Za-z0-9]{0,30})$/.exec(before);
+  return match ? { start: before.length - match[2].length - 1, query: match[2].toLowerCase() } : null;
+}
+
+function closeMentions() {
+  mentionMenu.hidden = true;
+  mentionField?.removeAttribute("aria-activedescendant");
+  mentionField = null;
+}
+
+function markActiveMention() {
+  Array.from(mentionMenu.children).forEach((li, i) => li.setAttribute("aria-selected", String(i === mentionActive)));
+  mentionField?.setAttribute("aria-activedescendant", `mention-option-${mentionActive}`);
+}
+
+function showMentions(field: HTMLTextAreaElement) {
+  const found = mentionQuery(field);
+  const names = (field.dataset.mentions ?? "").split(",").filter(Boolean);
+  const matches = found ? names.filter((n) => n.toLowerCase().startsWith(found.query)).slice(0, 6) : [];
+  if (matches.length === 0) return closeMentions();
+  mentionField = field;
+  mentionActive = 0;
+  mentionMenu.replaceChildren(
+    ...matches.map((name, i) => {
+      const li = document.createElement("li");
+      li.id = `mention-option-${i}`;
+      li.setAttribute("role", "option");
+      li.dataset.name = name;
+      li.textContent = `@${name}`;
+      return li;
+    }),
+  );
+  field.parentElement?.append(mentionMenu);
+  markActiveMention();
+  mentionMenu.hidden = false;
+}
+
+function pickMention(name: string) {
+  const field = mentionField;
+  const found = field && mentionQuery(field);
+  if (!field || !found) return closeMentions();
+  const end = field.selectionStart;
+  field.value = `${field.value.slice(0, found.start)}@${name} ${field.value.slice(end)}`;
+  const caret = found.start + name.length + 2;
+  field.setSelectionRange(caret, caret);
+  closeMentions();
+  field.focus();
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLTextAreaElement && target.dataset.mentions !== undefined) showMentions(target);
+});
+
+// Capture phase, so Enter picks a name instead of sending the chat message.
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (mentionMenu.hidden || event.target !== mentionField || event.isComposing) return;
+    const count = mentionMenu.children.length;
+    if (event.key === "ArrowDown") mentionActive = (mentionActive + 1) % count;
+    else if (event.key === "ArrowUp") mentionActive = (mentionActive + count - 1) % count;
+    else if (event.key === "Enter" || event.key === "Tab") {
+      const li = mentionMenu.children[mentionActive] as HTMLElement | undefined;
+      if (li?.dataset.name) pickMention(li.dataset.name);
+    } else if (event.key === "Escape") closeMentions();
+    else return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    markActiveMention();
+  },
+  true,
+);
+
+// mousedown, not click: picking must happen before the textarea loses focus.
+mentionMenu.addEventListener("mousedown", (event) => {
+  const li = (event.target as Element).closest<HTMLElement>("[data-name]");
+  if (!li?.dataset.name) return;
+  event.preventDefault();
+  pickMention(li.dataset.name);
+});
+document.addEventListener("focusout", (event) => {
+  if (event.target === mentionField) closeMentions();
+});

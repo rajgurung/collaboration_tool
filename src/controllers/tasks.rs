@@ -5,9 +5,12 @@ use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    controllers::notifications::{self, TaskBefore},
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
-        memberships, projects, task_assignees,
+        memberships,
+        notifications::mention_parts,
+        projects, task_assignees,
         task_notes::{self, NoteParams},
         tasks::{self, TaskParams, PRIORITIES, STATUSES},
     },
@@ -42,6 +45,9 @@ struct ListQuery {
     filter: Option<String>,
     #[serde(default)]
     new: Option<String>,
+    /// A task to open in the side panel, e.g. from a notification.
+    #[serde(default)]
+    open: Option<i64>,
     #[serde(default)]
     view: Option<String>,
     #[serde(default)]
@@ -392,6 +398,7 @@ async fn index(
         "board"
     });
     data["open_new"] = serde_json::json!(query.new.is_some());
+    data["open_task"] = serde_json::json!(query.open);
     format::render().view(&v, "tasks/index.html", member.page("tasks", data))
 }
 
@@ -504,7 +511,11 @@ async fn create(
     headers: HeaderMap,
     axum_extra::extract::Form(params): axum_extra::extract::Form<TaskParams>,
 ) -> Result<Response> {
-    match tasks::Model::create(&ctx.db, member.org.id, &params).await {
+    let result = tasks::Model::create(&ctx.db, member.org.id, &params).await;
+    if let Ok(task) = &result {
+        notifications::task_saved(&ctx, &member, None, task).await?;
+    }
+    match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
         Ok(_) => {
             let trigger = serde_json::json!({
@@ -561,7 +572,15 @@ async fn update(
     axum_extra::extract::Form(params): axum_extra::extract::Form<TaskParams>,
 ) -> Result<Response> {
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    match task.update_from(&ctx.db, &params).await {
+    let before = TaskBefore {
+        assignees: task_assignees::Model::for_task(&ctx.db, member.org.id, task.id).await?,
+        status: task.status.clone(),
+    };
+    let result = task.update_from(&ctx.db, &params).await;
+    if let Ok(task) = &result {
+        notifications::task_saved(&ctx, &member, Some(before), task).await?;
+    }
+    match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
         Ok(task) => {
             let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
@@ -610,10 +629,8 @@ async fn sheet_data(
     note_body: &str,
     errors: &FieldErrors,
 ) -> Result<serde_json::Value> {
-    let team: HashMap<i64, String> = memberships::Model::team(&ctx.db, member.org.id)
-        .await?
-        .into_iter()
-        .collect();
+    let team_list = memberships::Model::team(&ctx.db, member.org.id).await?;
+    let team: HashMap<i64, String> = team_list.iter().cloned().collect();
     let project = projects::Model::find_in_org(&ctx.db, member.org.id, task.project_id)
         .await
         .ok();
@@ -628,7 +645,7 @@ async fn sheet_data(
             serde_json::json!({
                 "color": avatar_color(&author),
                 "author": author,
-                "body": n.body,
+                "parts": mention_parts(&n.body, &team_list),
                 "at": n.created_at.format("%a %-d %b, %H:%M").to_string(),
             })
         })
@@ -670,9 +687,20 @@ async fn sheet_data(
             "statuses": statuses,
             "notes": notes,
             "note_body": note_body,
+            "mention_names": mention_names(&team_list, member.user.id),
             "errors": errors,
         }),
     ))
+}
+
+/// Teammates the @ picker offers, everyone but the viewer.
+pub fn mention_names(people: &[(i64, String)], me: i64) -> String {
+    people
+        .iter()
+        .filter(|(id, _)| *id != me)
+        .map(|(_, name)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn capitalise(s: &str) -> String {
@@ -707,7 +735,12 @@ async fn set_status(
     if !tasks::is_status(&form.status) {
         return Err(Error::BadRequest("Unknown status.".to_string()));
     }
+    let before = TaskBefore {
+        assignees: task_assignees::Model::for_task(&ctx.db, member.org.id, task.id).await?,
+        status: task.status.clone(),
+    };
     let task = task.set_status(&ctx.db, &form.status).await?;
+    notifications::task_saved(&ctx, &member, Some(before), &task).await?;
     if !headers.contains_key("hx-request") {
         return Ok(redirect_response(&headers, "/tasks"));
     }
@@ -728,7 +761,11 @@ async fn add_note(
     Form(params): Form<NoteParams>,
 ) -> Result<Response> {
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    match task_notes::Model::create(&ctx.db, &task, member.user.id, &params).await {
+    let result = task_notes::Model::create(&ctx.db, &task, member.user.id, &params).await;
+    if let Ok(note) = &result {
+        notifications::note_added(&ctx, &member, &task, note).await?;
+    }
+    match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
         Ok(_) => {
             let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;

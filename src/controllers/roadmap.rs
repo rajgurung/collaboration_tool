@@ -209,6 +209,9 @@ async fn create(
     Form(params): Form<ProjectParams>,
 ) -> Result<Response> {
     let result = projects::Model::create(&ctx.db, member.org.id, &params).await;
+    if let Ok(project) = &result {
+        super::notifications::project_saved(&ctx, &member, None, project).await?;
+    }
     saved(
         &ctx,
         &v,
@@ -232,7 +235,11 @@ async fn update(
     Form(params): Form<ProjectParams>,
 ) -> Result<Response> {
     let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    let owner_before = project.owner_id;
     let result = project.update_from(&ctx.db, &params).await;
+    if let Ok(project) = &result {
+        super::notifications::project_saved(&ctx, &member, owner_before, project).await?;
+    }
     saved(
         &ctx,
         &v,

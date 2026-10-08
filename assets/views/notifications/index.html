@@ -1,0 +1,37 @@
+{% extends "layouts/app.html" %}
+{% block title %}Notifications · {{ org.name }}{% endblock title %}
+{% block heading %}Notifications{% endblock heading %}
+{% block actions %}
+{% if unread %}<form method="post" action="/notifications/read"><button type="submit" class="btn btn-secondary">{{<icon name="check" class="h-4 w-4"/>}}Mark all read</button></form>{% endif %}
+{% endblock actions %}
+{% block content %}
+<div id="notification-list" class="flex max-w-[760px] flex-col gap-3"
+     hx-get="/notifications" hx-select="#notification-list" hx-swap="outerHTML" hx-trigger="notifications-changed from:body">
+  {% if items | length > 0 %}
+  <div class="list">
+    {% for n in items %}
+    <form method="post" action="/notifications/{{ n.id }}/open">
+      <button type="submit" class="list-row notice {% if n.unread %}notice-unread{% endif %}">
+        <span class="relative shrink-0">
+          {{<avatar name={n.actor} color={n.color} size="md"/>}}
+          <span class="notice-kind notice-{{ n.kind }}">{% if n.kind == "mention" %}{{<icon name="at-sign" class="h-3 w-3"/>}}{% elif n.kind == "assigned" %}{{<icon name="user-round" class="h-3 w-3"/>}}{% elif n.kind == "note" %}{{<icon name="message-circle" class="h-3 w-3"/>}}{% else %}{{<icon name="map" class="h-3 w-3"/>}}{% endif %}</span>
+        </span>
+        <span class="flex min-w-0 flex-1 flex-col text-left">
+          <span class="text-[15px] {% if n.unread %}font-semibold{% endif %}"><strong>{{ n.actor }}</strong> {{ n.headline }}</span>
+          {% if n.excerpt %}<span class="truncate-1 text-sm text-muted">{{ n.excerpt }}</span>{% endif %}
+        </span>
+        <span class="meta shrink-0 self-start pt-0.5 text-[13px]">{{ n.at }}</span>
+        {% if n.unread %}<span class="notice-dot" aria-label="Unread"></span>{% endif %}
+      </button>
+    </form>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card empty">
+    {{<icon name="bell" class="mx-auto mb-2 h-8 w-8"/>}}
+    <p class="m-0">You're all caught up.</p>
+    <p class="meta m-0 mt-1 text-sm">Mentions, new assignments and activity on your projects show up here.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock content %}

@@ -22,3 +22,5 @@ pub mod admin;
 pub mod chat_ws;
 
 pub mod more;
+
+pub mod notifications;

@@ -4,7 +4,7 @@
   {% endif %}
   <div class="msg-body">
     {% if message.start and not message.own %}<span class="msg-name">{{ message.author }}</span>{% endif %}
-    <div class="bubble">{{ message.body }}</div>
+    <div class="bubble">{% for p in message.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</div>
     {% if message.show_time %}<span class="msg-time">{{ message.at }}</span>{% endif %}
   </div>
 </div>

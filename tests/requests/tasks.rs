@@ -8,7 +8,7 @@ use serial_test::serial;
 
 use super::prepare_data::sign_up;
 
-async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> projects::Model {
+pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> projects::Model {
     let org = organisations::Model::find_by_slug(&ctx.db, slug)
         .await
         .unwrap();
@@ -30,7 +30,7 @@ async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> projects::Model
 }
 
 /// A task form; an empty `assignee` leaves the field out, as an unticked form does.
-fn task_form(title: &str, project_id: i64, assignee: &str) -> serde_json::Value {
+pub(super) fn task_form(title: &str, project_id: i64, assignee: &str) -> serde_json::Value {
     let mut form = serde_json::json!({
         "title": title, "project_id": project_id.to_string(),
         "priority": "high", "due_on": "2026-11-03",
@@ -426,7 +426,7 @@ async fn changing_status_from_the_sheet_refreshes_it() {
 }
 
 /// Joins `email` to Acme and has the owner approve them. Returns their cookie and user id.
-async fn approved_member(
+pub(super) async fn approved_member(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
     owner: &(axum::http::HeaderName, axum::http::HeaderValue),
@@ -448,7 +448,7 @@ async fn approved_member(
     (cookie, user.id)
 }
 
-fn form_body(fields: &[(&str, String)]) -> axum::body::Bytes {
+pub(super) fn form_body(fields: &[(&str, String)]) -> axum::body::Bytes {
     fields
         .iter()
         .map(|(k, v)| format!("{k}={}", v.replace(' ', "+")))

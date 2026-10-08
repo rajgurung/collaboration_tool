@@ -37,7 +37,7 @@
       {{<avatar name={note.author} color={note.color} size="md"/>}}
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2"><strong class="text-sm">{{ note.author }}</strong><span class="meta text-xs">{{ note.at }}</span></div>
-        <p class="m-0 mt-0.5 whitespace-pre-wrap text-[15px] leading-relaxed">{{ note.body }}</p>
+        <p class="m-0 mt-0.5 whitespace-pre-wrap text-[15px] leading-relaxed">{% for p in note.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</p>
       </div>
     </article>
     {% else %}
