@@ -290,6 +290,7 @@ fn board_data(ws: &Workspace, me: i64, scope: &str, group: &str, q: &str) -> ser
             let mut lanes: Vec<Lane> = ws
                 .team_order
                 .iter()
+                .filter(|id| scope != "mine" || **id == me)
                 .filter_map(|id| {
                     let mine: Vec<&Row> = rows
                         .iter()

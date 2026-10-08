@@ -52,7 +52,8 @@ async fn team(ctx: &AppContext, org_id: i64) -> Result<Vec<Person>> {
     ))
 }
 
-/// The lane switcher counts and the cards for one lane.
+/// Every lane with its cards. Desktop shows them side by side; phones show
+/// the chosen `lane` with a switcher.
 async fn lane_data(ctx: &AppContext, org_id: i64, lane: &str) -> Result<serde_json::Value> {
     let names: HashMap<i64, String> = team(ctx, org_id)
         .await?
@@ -64,40 +65,42 @@ async fn lane_data(ctx: &AppContext, org_id: i64, lane: &str) -> Result<serde_js
     let lanes: Vec<serde_json::Value> = LANES
         .iter()
         .map(|key| {
+            let cards: Vec<Card> = projects
+                .iter()
+                .filter(|p| p.lane == *key)
+                .map(|p| {
+                    let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
+                    let own_tasks = all_tasks.iter().filter(|t| t.project_id == p.id);
+                    Card {
+                        id: p.id,
+                        name: p.name.clone(),
+                        status: p.status.clone(),
+                        progress: p.progress,
+                        accent: p.accent.clone(),
+                        summary: p.summary.clone(),
+                        owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
+                        owner,
+                        open: own_tasks.clone().filter(|t| t.status != "done").count(),
+                        blocked: own_tasks.filter(|t| t.status == "blocked").count(),
+                    }
+                })
+                .collect();
+            let (label, hint) = match *key {
+                "now" => ("Now", "What the team is building right now"),
+                "next" => ("Next", "Starting once the current work lands"),
+                _ => ("Later", "Ideas we are keeping for later"),
+            };
             serde_json::json!({
                 "key": key,
-                "label": match *key { "now" => "Now", "next" => "Next", _ => "Later" },
-                "count": projects.iter().filter(|p| p.lane == *key).count(),
+                "label": label,
+                "hint": hint,
+                "count": cards.len(),
                 "current": *key == lane,
+                "cards": cards,
             })
         })
         .collect();
-    let cards: Vec<Card> = projects
-        .iter()
-        .filter(|p| p.lane == lane)
-        .map(|p| {
-            let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
-            let own_tasks = all_tasks.iter().filter(|t| t.project_id == p.id);
-            Card {
-                id: p.id,
-                name: p.name.clone(),
-                status: p.status.clone(),
-                progress: p.progress,
-                accent: p.accent.clone(),
-                summary: p.summary.clone(),
-                owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
-                owner,
-                open: own_tasks.clone().filter(|t| t.status != "done").count(),
-                blocked: own_tasks.filter(|t| t.status == "blocked").count(),
-            }
-        })
-        .collect();
-    let hint = match lane {
-        "now" => "What the team is building right now",
-        "next" => "Starting once the current work lands",
-        _ => "Ideas we are keeping for later",
-    };
-    Ok(serde_json::json!({ "lane": lane, "lanes": lanes, "cards": cards, "hint": hint }))
+    Ok(serde_json::json!({ "lane": lane, "lanes": lanes }))
 }
 
 #[debug_handler]
