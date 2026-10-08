@@ -21,3 +21,5 @@ mod conversation_members;
 mod messages;
 
 mod task_assignees;
+
+mod notifications;
