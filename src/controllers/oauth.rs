@@ -403,7 +403,6 @@ async fn token(
         return bad_request("invalid_request", "Send a form-encoded token request.");
     };
     let settings = Settings::from_context(&ctx)?;
-    access_tokens::Model::prune(&ctx.db).await?;
     let client = match form.client_id.as_deref() {
         Some(id) => oauth_clients::Model::find_by_client_id(&ctx.db, id)
             .await
@@ -417,6 +416,7 @@ async fn token(
             "Unknown client_id.",
         ));
     };
+    access_tokens::Model::prune(&ctx.db).await?;
     let resource = form.resource.clone().unwrap_or_else(|| settings.mcp_url());
     let issued = match form.grant_type.as_deref() {
         Some("authorization_code") => {
