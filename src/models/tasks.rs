@@ -4,23 +4,24 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 
 pub use super::_entities::tasks::{ActiveModel, Column, Entity, Model};
-use super::{field_error, memberships, projects};
+use super::{field_error, memberships, projects, task_assignees};
 
 pub type Tasks = Entity;
 
-/// Board columns, in order, with their labels and colours from the original design.
+/// Board columns, in order, with their labels and colours.
 pub const STATUSES: [(&str, &str, &str); 4] = [
-    ("todo", "To do", "#9ca3af"),
-    ("progress", "In progress", "#ffb454"),
-    ("blocked", "Blocked", "#ff758f"),
-    ("done", "Done", "#72e5b4"),
+    ("todo", "To do", "#9a968d"),
+    ("progress", "In progress", "#3b6fe0"),
+    ("blocked", "Blocked", "#e0603a"),
+    ("done", "Done", "#2f9e6b"),
 ];
 pub const PRIORITIES: [&str; 3] = ["high", "medium", "low"];
 
 static PRIORITY_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^(high|medium|low)$").expect("priority regex is valid"));
 
-/// The new-task form. Ids and the date arrive as text so empty choices are allowed.
+/// The new and edit task form. The project and date arrive as text so empty
+/// choices are allowed; `assignee_ids` comes from repeated checkbox fields.
 #[derive(Debug, Deserialize, Validate)]
 pub struct TaskParams {
     #[validate(length(
@@ -32,11 +33,59 @@ pub struct TaskParams {
     #[serde(default)]
     pub project_id: String,
     #[serde(default)]
-    pub owner_id: String,
+    pub assignee_ids: Vec<i64>,
     #[validate(regex(path = *PRIORITY_RE, message = "Choose high, medium or low."))]
     pub priority: String,
     #[serde(default)]
     pub due_on: String,
+    /// Empty keeps the current status (or "todo" for a new task).
+    #[serde(default)]
+    pub status: String,
+}
+
+/// The checked, parsed values of a [`TaskParams`].
+struct Checked {
+    project_id: i64,
+    assignee_ids: Vec<i64>,
+    due_on: Option<chrono::NaiveDate>,
+}
+
+impl TaskParams {
+    async fn check<C: ConnectionTrait>(&self, db: &C, org_id: i64) -> ModelResult<Checked> {
+        ValidatorTrait::validate(self)?;
+        let project_id: i64 = self
+            .project_id
+            .trim()
+            .parse()
+            .map_err(|_| field_error("project_id", "Choose a project."))?;
+        projects::Model::find_in_org(db, org_id, project_id)
+            .await
+            .map_err(|_| field_error("project_id", "Choose a project."))?;
+        let mut assignee_ids = Vec::new();
+        for id in &self.assignee_ids {
+            if !assignee_ids.contains(id) {
+                if !memberships::Model::is_active_member(db, org_id, *id).await? {
+                    return Err(field_error("assignee_ids", "Choose people from the team."));
+                }
+                assignee_ids.push(*id);
+            }
+        }
+        let due_on = match self.due_on.trim() {
+            "" => None,
+            raw => Some(
+                chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+                    .map_err(|_| field_error("due_on", "Use a valid date."))?,
+            ),
+        };
+        if !self.status.is_empty() && !is_status(&self.status) {
+            return Err(field_error("status", "Choose a status."));
+        }
+        Ok(Checked {
+            project_id,
+            assignee_ids,
+            due_on,
+        })
+    }
 }
 
 #[must_use]
@@ -86,60 +135,78 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
+    /// Adds a task and its assignees together.
+    ///
     /// # Errors
     /// Validation errors, or database errors.
-    pub async fn create<C: ConnectionTrait>(
-        db: &C,
+    pub async fn create(
+        db: &DatabaseConnection,
         org_id: i64,
         params: &TaskParams,
     ) -> ModelResult<Self> {
-        ValidatorTrait::validate(params)?;
-        let project_id: i64 = params
-            .project_id
-            .trim()
-            .parse()
-            .map_err(|_| field_error("project_id", "Choose a project."))?;
-        projects::Model::find_in_org(db, org_id, project_id)
-            .await
-            .map_err(|_| field_error("project_id", "Choose a project."))?;
-        let owner_id = match params.owner_id.trim() {
-            "" => None,
-            raw => {
-                let id: i64 = raw
-                    .parse()
-                    .map_err(|_| field_error("owner_id", "Choose someone from the team."))?;
-                if !memberships::Model::is_active_member(db, org_id, id).await? {
-                    return Err(field_error("owner_id", "Choose someone from the team."));
-                }
-                Some(id)
-            }
-        };
-        let due_on = match params.due_on.trim() {
-            "" => None,
-            raw => Some(
-                chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-                    .map_err(|_| field_error("due_on", "Use a valid date."))?,
-            ),
-        };
+        let checked = params.check(db, org_id).await?;
+        let txn = db.begin().await?;
         let last = Entity::find()
             .in_tenant(org_id)
             .order_by_desc(Column::SortOrder)
-            .one(db)
+            .one(&txn)
             .await?
             .map_or(0, |t| t.sort_order);
-        Ok(ActiveModel {
+        let status = if params.status.is_empty() {
+            "todo"
+        } else {
+            &params.status
+        };
+        let task = ActiveModel {
             title: ActiveValue::Set(params.title.trim().to_string()),
-            status: ActiveValue::Set("todo".to_string()),
+            status: ActiveValue::Set(status.to_string()),
             priority: ActiveValue::Set(params.priority.clone()),
-            due_on: ActiveValue::Set(due_on),
+            due_on: ActiveValue::Set(checked.due_on),
             sort_order: ActiveValue::Set(last + 1),
-            project_id: ActiveValue::Set(project_id),
-            owner_id: ActiveValue::Set(owner_id),
+            project_id: ActiveValue::Set(checked.project_id),
             ..Default::default()
         }
         .set_tenant(org_id)?
-        .insert(db)
-        .await?)
+        .insert(&txn)
+        .await?;
+        task_assignees::Model::replace(&txn, org_id, task.id, &checked.assignee_ids).await?;
+        txn.commit().await?;
+        Ok(task)
+    }
+
+    /// Saves an edited task and its assignees together.
+    ///
+    /// # Errors
+    /// Validation errors, or database errors.
+    pub async fn update_from(
+        self,
+        db: &DatabaseConnection,
+        params: &TaskParams,
+    ) -> ModelResult<Self> {
+        let org_id = self.organisation_id;
+        let checked = params.check(db, org_id).await?;
+        let txn = db.begin().await?;
+        let mut task = self.into_active_model();
+        task.title = ActiveValue::Set(params.title.trim().to_string());
+        task.project_id = ActiveValue::Set(checked.project_id);
+        task.priority = ActiveValue::Set(params.priority.clone());
+        task.due_on = ActiveValue::Set(checked.due_on);
+        if !params.status.is_empty() {
+            task.status = ActiveValue::Set(params.status.clone());
+        }
+        let task = task.update(&txn).await?;
+        task_assignees::Model::replace(&txn, org_id, task.id, &checked.assignee_ids).await?;
+        txn.commit().await?;
+        Ok(task)
+    }
+
+    /// Removes the task. Its notes and assignees go with it (cascading keys).
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn remove<C: ConnectionTrait>(self, db: &C) -> ModelResult<()> {
+        self.into_active_model().delete(db).await?;
+        Ok(())
     }
 
     /// Moves the task to another board column.

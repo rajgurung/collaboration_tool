@@ -1,32 +1,37 @@
 <div class="flex flex-col gap-5">
   <div class="flex items-start gap-2">
     <div class="min-w-0 flex-1">
-      <h2 class="m-0 text-[22px] font-semibold leading-tight">{{ task.title }}</h2>
+      <p class="meta m-0 mb-1.5 flex items-center gap-1.5"><span class="dot" style="--dot: {{ task.accent }}"></span>{{ task.project }}</p>
+      <h2 class="m-0 text-[22px] font-bold leading-tight tracking-tight">{{ task.title }}</h2>
       <p class="meta mt-1.5 mb-0 text-sm">{{ task.meta }}</p>
     </div>
+    <button type="button" class="btn btn-secondary -mt-0.5" hx-get="/tasks/{{ task.id }}/edit" hx-target="#task-sheet-body">{{<icon name="pencil" class="h-4 w-4"/>}}Edit</button>
     <button type="button" class="icon-btn -mt-1.5 -mr-2.5 text-muted" data-dialog-close aria-label="Close">{{<icon name="x" class="h-[22px] w-[22px]"/>}}</button>
   </div>
 
   <div class="flex flex-col gap-2">
-    <span class="field-label">Status</span>
-    <div class="segmented" role="radiogroup" aria-label="Status">
+    <span class="field-label" id="status-label">Status</span>
+    <div class="segmented" role="radiogroup" aria-labelledby="status-label">
       {% for s in statuses %}
-      <button type="button" role="radio" aria-checked="{% if s.current %}true{% else %}false{% endif %}" class="{% if s.current %}status-{{ s.key }}{% endif %}"
-              hx-post="/tasks/{{ task.id }}/status" hx-vals='{"status": "{{ s.key }}"}' hx-target="#task-sheet-body">{{ s.label }}</button>
+      <button type="button" role="radio" aria-checked="{% if s.current %}true{% else %}false{% endif %}"
+              hx-post="/tasks/{{ task.id }}/status" hx-vals='{"status": "{{ s.key }}"}' hx-target="#task-sheet-body"><span class="flex items-center gap-1.5"><span class="dot" style="--dot: {{ s.color }}"></span>{{ s.label }}</span></button>
       {% endfor %}
     </div>
   </div>
 
-  <div class="card flex items-center gap-3 px-3.5 py-3">
-    {% if task.owner %}{{<avatar name={task.owner} color={task.owner_color} size="md"/>}}{% endif %}
-    <span class="flex flex-1 flex-col">
-      <span class="meta">Owner</span>
-      <span class="text-[15px] font-medium">{{ task.owner | default(value="Unassigned") }}</span>
-    </span>
+  <div class="flex flex-col gap-2">
+    <span class="field-label">Assignees</span>
+    {% if task.people %}
+    <div class="flex flex-wrap gap-2">
+      {% for p in task.people %}<span class="person-pill">{{<avatar name={p.name} color={p.color} size="xs"/>}}{{ p.name }}</span>{% endfor %}
+    </div>
+    {% else %}
+    <p class="meta m-0">Nobody yet. <button type="button" class="text-link" hx-get="/tasks/{{ task.id }}/edit" hx-target="#task-sheet-body">Assign someone</button></p>
+    {% endif %}
   </div>
 
-  <div class="flex flex-col gap-3">
-    <h3 class="m-0 text-[17px] font-semibold">Notes</h3>
+  <div class="flex flex-col gap-3 border-t border-line pt-4">
+    <h3 class="m-0 text-[16px] font-bold">Notes {% if notes %}<span class="meta font-medium">{{ notes | length }}</span>{% endif %}</h3>
     {% for note in notes %}
     <article class="flex gap-2.5">
       {{<avatar name={note.author} color={note.color} size="md"/>}}
@@ -41,4 +46,8 @@
   </div>
 
   {% include "tasks/_note_form.html" %}
+
+  <div class="border-t border-line pt-3">
+    <button type="button" class="btn-text-danger" hx-post="/tasks/{{ task.id }}/delete" hx-confirm="Delete “{{ task.title }}”? Its notes go with it.">Delete task</button>
+  </div>
 </div>

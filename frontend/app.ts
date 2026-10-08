@@ -142,3 +142,79 @@ document.addEventListener("click", (event) => {
     () => input.select(),
   );
 });
+
+// Responses that delete something send "close-dialogs" to close any open panel.
+document.body.addEventListener("close-dialogs", () => {
+  document.querySelectorAll("dialog[open]").forEach((dialog) => (dialog as HTMLDialogElement).close());
+});
+
+// Task board: drag a card to another column to change its status. Cards stay
+// links, so keyboards and phones open the task and change the status there.
+let dragged: HTMLElement | null = null;
+document.addEventListener("dragstart", (event) => {
+  const card = (event.target as Element | null)?.closest<HTMLElement>(".task-card");
+  if (!card || !event.dataTransfer) return;
+  dragged = card;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", card.dataset.taskId ?? "");
+  card.classList.add("is-dragging");
+});
+document.addEventListener("dragend", () => {
+  dragged?.classList.remove("is-dragging");
+  dragged = null;
+  document.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+});
+document.addEventListener("dragover", (event) => {
+  const cell = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-status]");
+  if (!cell || !dragged) return;
+  event.preventDefault();
+  document.querySelectorAll(".is-drop-target").forEach((el) => el !== cell && el.classList.remove("is-drop-target"));
+  cell.classList.add("is-drop-target");
+});
+document.addEventListener("drop", (event) => {
+  const cell = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-status]");
+  const card = dragged;
+  if (!cell || !card) return;
+  event.preventDefault();
+  cell.classList.remove("is-drop-target");
+  const status = cell.dataset.dropStatus ?? "";
+  if (status === card.dataset.status) return;
+  // Move the card straight away; the board refreshes from the server after the save.
+  cell.insertBefore(card, cell.querySelector(".cell-add"));
+  card.dataset.status = status;
+  void htmx.ajax("POST", `/tasks/${card.dataset.taskId}/status`, { values: { status }, swap: "none" });
+});
+
+// Collapsed swimlanes stay collapsed, across board refreshes and visits.
+const LANES_KEY = "collab:collapsed-lanes";
+function collapsedLanes(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(LANES_KEY) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+function applyCollapsedLanes(root: ParentNode) {
+  const collapsed = collapsedLanes();
+  root.querySelectorAll<HTMLElement>("[data-lane]").forEach((lane) => {
+    lane.querySelector("[data-lane-toggle]")?.setAttribute("aria-expanded", String(!collapsed.includes(lane.dataset.lane ?? "")));
+  });
+}
+document.addEventListener("click", (event) => {
+  const toggle = (event.target as Element | null)?.closest<HTMLElement>("[data-lane-toggle]");
+  const key = toggle?.closest<HTMLElement>("[data-lane]")?.dataset.lane;
+  if (!toggle || !key) return;
+  const open = toggle.getAttribute("aria-expanded") !== "false";
+  toggle.setAttribute("aria-expanded", String(!open));
+  const collapsed = collapsedLanes().filter((k) => k !== key);
+  if (open) collapsed.push(key);
+  try {
+    localStorage.setItem(LANES_KEY, JSON.stringify(collapsed));
+  } catch {
+    // Private browsing can refuse storage; collapsing still works for this view.
+  }
+});
+applyCollapsedLanes(document);
+document.body.addEventListener("htmx:afterSwap", (event) => {
+  applyCollapsedLanes((event as CustomEvent<{ target: Element }>).detail.target.parentElement ?? document);
+});

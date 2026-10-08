@@ -19,3 +19,5 @@ mod conversations;
 mod conversation_members;
 
 mod messages;
+
+mod task_assignees;

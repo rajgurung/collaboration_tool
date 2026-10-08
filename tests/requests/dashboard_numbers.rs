@@ -21,9 +21,10 @@ async fn add_task(
         &tasks::TaskParams {
             title: title.to_string(),
             project_id: project_id.to_string(),
-            owner_id: owner.map(|id| id.to_string()).unwrap_or_default(),
+            assignee_ids: owner.into_iter().collect(),
             priority: "medium".to_string(),
             due_on: String::new(),
+            status: String::new(),
         },
     )
     .await
@@ -85,11 +86,11 @@ async fn dashboard_numbers_follow_the_tasks() {
             .text();
         let compact: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            compact.contains(r#"font-semibold">1</span><span class="meta">Your open tasks"#),
+            compact.contains(r#"stat-value">1</span><span class="meta">Your open tasks"#),
             "alice has one open task"
         );
         assert!(
-            compact.contains(r#"text-blocked">1</span><span class="meta">Blocked"#),
+            compact.contains(r#"stat-value">1</span><span class="meta">Blocked"#),
             "one blocked task in the org"
         );
         assert!(

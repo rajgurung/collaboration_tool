@@ -64,9 +64,10 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
         &tasks::TaskParams {
             title: format!("{SECRET} task"),
             project_id: project.id.to_string(),
-            owner_id: owner.id.to_string(),
+            assignee_ids: vec![owner.id],
             priority: "high".to_string(),
             due_on: String::new(),
+            status: String::new(),
         },
     )
     .await
@@ -155,7 +156,7 @@ async fn org_a_cannot_reach_org_b() {
 
         // 1. Every page Alice can open shows nothing of Globex.
         for page in [
-            "/dashboard", "/roadmap", "/tasks", "/tasks/list", "/more", "/meetings", "/chat", "/members",
+            "/dashboard", "/roadmap", "/tasks", "/tasks/list", "/tasks/board", "/tasks?view=list", "/tasks?group=person", "/more", "/meetings", "/chat", "/members",
             "/tasks/new", "/meetings/new", "/roadmap/projects/new", "/chat/groups/new", "/chat/dms/new",
         ] {
             let res = request.get(page).add_header(a.0.clone(), a.1.clone()).await;
@@ -174,6 +175,7 @@ async fn org_a_cannot_reach_org_b() {
         let gets = [
             format!("/roadmap/projects/{}/edit", globex.project.id),
             format!("/tasks/{}", globex.task.id),
+            format!("/tasks/{}/edit", globex.task.id),
             format!("/chat/{}/feed", globex.general.id),
             format!("/chat/{}/feed", globex.group.id),
             format!("/chat/{}/ws", globex.general.id),
@@ -187,6 +189,8 @@ async fn org_a_cannot_reach_org_b() {
                 "name": "hijacked", "lane": "now", "status": "x", "progress": "1", "accent": "#ffb454", "owner_id": "", "summary": ""
             })),
             (format!("/tasks/{}/status", globex.task.id), serde_json::json!({ "status": "done" })),
+            (format!("/tasks/{}", globex.task.id), serde_json::json!({ "title": "hijacked", "project_id": "1", "priority": "high" })),
+            (format!("/tasks/{}/delete", globex.task.id), serde_json::json!({})),
             (format!("/tasks/{}/notes", globex.task.id), serde_json::json!({ "body": "hijacked" })),
             (format!("/members/{}/approve", globex.pending.id), serde_json::json!({})),
             (format!("/members/{}/reject", globex.pending.id), serde_json::json!({})),
@@ -202,7 +206,7 @@ async fn org_a_cannot_reach_org_b() {
         // 3. Globex records cannot be referenced from Acme forms.
         let refs = [
             ("/tasks", format!("title=t&priority=high&project_id={}", globex.project.id)),
-            ("/tasks", format!("title=t&priority=high&project_id={}&owner_id={b_user}", acme_project.id)),
+            ("/tasks", format!("title=t&priority=high&project_id={}&assignee_ids={b_user}", acme_project.id)),
             ("/roadmap/projects", format!("name=p&lane=now&status=s&progress=1&accent=%23ffb454&owner_id={b_user}")),
             ("/meetings", format!("title=m&held_on=2026-10-01&summary=s&attendee_ids={b_user}")),
             ("/chat/groups", format!("name=g&member_ids={b_user}")),

@@ -1,85 +1,94 @@
 {% extends "layouts/app.html" %}
 {% block title %}Home · {{ org.name }}{% endblock title %}
 {% block topbar %}
-<h1 class="text-[17px]!">{{ org.name }}</h1>
+<h1 class="text-[17px]! min-[900px]:hidden">{{ org.name }}</h1>
 <a href="/more" class="icon-btn min-[900px]:hidden" aria-label="Account and settings">{{<avatar name={me.username} color={me.color} size="sm"/>}}</a>
 {% endblock topbar %}
 {% block content %}
 <div class="flex flex-col gap-6">
-  <div>
-    <p class="m-0 text-[26px] font-semibold tracking-tight" data-greeting="{{ me.username }}">Hello, {{ me.username }}</p>
-    <p class="meta m-0 mt-1 text-[15px]" data-local-date>{{ today }}</p>
+  <div class="flex flex-wrap items-end gap-3">
+    <div class="flex-1">
+      <p class="meta m-0 mb-1 text-[14px]" data-local-date>{{ today }}</p>
+      <p class="m-0 text-[28px] font-bold tracking-tight min-[900px]:text-[32px]" data-greeting="{{ me.username }}">Hello, {{ me.username }}</p>
+    </div>
+    <a href="/tasks?new=1" class="btn btn-primary desktop-only">{{<icon name="plus" class="h-4 w-4"/>}}New task</a>
   </div>
 
-  <div class="grid grid-cols-3 gap-2">
-    <a href="/tasks" class="card flex flex-col gap-0.5 p-3"><span class="text-[22px] font-semibold">{{ my_open }}</span><span class="meta">Your open tasks</span></a>
-    <a href="/tasks?filter=blocked" class="card flex flex-col gap-0.5 p-3"><span class="text-[22px] font-semibold {% if blocked > 0 %}text-blocked{% endif %}">{{ blocked }}</span><span class="meta">Blocked</span></a>
-    <a href="/chat" class="card flex flex-col gap-0.5 p-3"><span class="text-[22px] font-semibold">{{ unread }}</span><span class="meta">Unread messages</span></a>
+  <div class="grid grid-cols-2 gap-3 min-[900px]:grid-cols-4">
+    <a href="/tasks?view=list&filter=mine" class="stat" style="--dot: var(--progress)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ my_open }}</span><span class="meta">Your open tasks</span></span></a>
+    <a href="/tasks?view=list&filter=blocked" class="stat" style="--dot: var(--blocked)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ blocked }}</span><span class="meta">Blocked</span></span></a>
+    <a href="/tasks" class="stat" style="--dot: var(--accent)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ due_this_week }}</span><span class="meta">Due this week</span></span></a>
+    <a href="/chat" class="stat" style="--dot: var(--done)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ unread }}</span><span class="meta">Unread messages</span></span></a>
   </div>
 
-  <section class="flex flex-col gap-2">
-    <div class="section-head"><h2>Roadmap: now</h2><a href="/roadmap">Full roadmap</a></div>
-    {% if roadmap_now | length > 0 %}
-    <a href="/roadmap" class="list">
-      {% for p in roadmap_now %}
-      <span class="flex flex-col gap-1.5 px-3.5 py-3">
-        <span class="flex items-center gap-2">
-          <span class="h-2 w-2 shrink-0 rounded-full" style="background: {{ p.accent }}"></span>
-          <span class="truncate-1 flex-1 text-[15px] font-medium">{{ p.name }}</span>
-          {% if p.blocked > 0 %}<span class="text-[13px] font-semibold text-blocked">{{ p.blocked }} blocked</span>{% endif %}
-          <span class="w-9 text-right text-[13px] font-semibold">{{ p.progress }}%</span>
-        </span>
-        <span class="bar" style="--bar: {{ p.accent }}"><span style="width: {{ p.progress }}%"></span></span>
-      </span>
-      {% endfor %}
-    </a>
-    {% else %}
-    <div class="card empty">Nothing in the "now" lane. <a href="/roadmap" class="text-link">Add a project</a></div>
-    {% endif %}
-  </section>
+  <div class="home-grid">
+    <div class="flex flex-col gap-6">
+      <section class="flex flex-col gap-2">
+        <div class="section-head"><h2>Roadmap: now</h2><a href="/roadmap">Full roadmap</a></div>
+        {% if roadmap_now | length > 0 %}
+        <div class="grid gap-3 sm:grid-cols-2 min-[1200px]:grid-cols-3">
+          {% for p in roadmap_now %}
+          <a href="/roadmap" class="project-card" style="--accent-bar: {{ p.accent }}">
+            <span class="flex items-center gap-2"><span class="truncate-1 flex-1 font-bold">{{ p.name }}</span>{% if p.status %}<span class="pill {% if p.blocked > 0 %}pill-blocked{% endif %}">{{ p.status }}</span>{% endif %}</span>
+            <span class="flex items-center gap-2.5"><span class="bar flex-1" style="--bar: {{ p.accent }}"><span style="width: {{ p.progress }}%"></span></span><span class="meta tabular-nums">{{ p.progress }}%</span></span>
+            <span class="flex items-center gap-2">
+              <span class="meta flex-1">{{ p.open }} open{% if p.blocked > 0 %} · <span class="font-semibold text-blocked">{{ p.blocked }} blocked</span>{% endif %}</span>
+              <span class="avatar-stack">{% for person in p.people %}{{<avatar name={person.name} color={person.color} size="xs"/>}}{% endfor %}</span>
+            </span>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="card empty">Nothing in the "now" lane. <a href="/roadmap" class="text-link">Add a project</a></div>
+        {% endif %}
+      </section>
 
-  <section class="flex flex-col gap-2">
-    <div class="section-head"><h2>My tasks</h2><a href="/tasks">See all</a></div>
-    {% if my_tasks | length > 0 %}
-    <div class="list">
-      {% for t in my_tasks %}
-      <a href="/tasks" class="list-row">
-        {{<status_icon status={t.status}/>}}
-        <span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-[15px] font-medium">{{ t.title }}</span><span class="meta truncate-1">{{ t.meta }}</span></span>
-      </a>
-      {% endfor %}
+      <section class="flex flex-col gap-2">
+        <div class="section-head"><h2>My tasks</h2><a href="/tasks">All tasks</a></div>
+        {% if my_tasks | length > 0 %}
+        <div class="list">
+          {% for t in my_tasks %}
+          <a href="/tasks?view=list&filter=mine" class="list-row">
+            {{<status_icon status={t.status}/>}}
+            <span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-[15px] font-semibold">{{ t.title }}</span><span class="meta truncate-1 flex items-center gap-1.5"><span class="dot" style="--dot: {{ t.accent }}"></span>{{ t.meta }}</span></span>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="card empty">Nothing on your plate. <a href="/tasks?new=1" class="text-link">Add a task</a></div>
+        {% endif %}
+      </section>
     </div>
-    {% else %}
-    <div class="card empty">Nothing on your plate. <a href="/tasks?new=1" class="text-link">Add a task</a></div>
-    {% endif %}
-  </section>
 
-  {% if recent_chats | length > 0 %}
-  <section class="flex flex-col gap-2">
-    <div class="section-head"><h2>Recent chat</h2><a href="/chat">All chats</a></div>
-    <div class="list">
-      {% for c in recent_chats %}
-      <a href="/chat/{{ c.id }}" class="list-row">
-        {% if c.kind == "dm" %}{{<avatar name={c.label} color={c.color} size="md"/>}}{% else %}<span class="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-chip text-muted">{{<icon name="hash" class="h-[18px] w-[18px]"/>}}</span>{% endif %}
-        <span class="flex min-w-0 flex-1 flex-col">
-          <span class="flex justify-between gap-2"><span class="truncate-1 text-[15px] {% if c.unread > 0 %}font-bold{% else %}font-medium{% endif %}">{{ c.label }}</span><span class="meta shrink-0">{{ c.time }}</span></span>
-          <span class="truncate-1 text-sm text-muted">{{ c.last }}</span>
-        </span>
-        {% if c.unread > 0 %}<span class="badge">{{ c.unread }}</span>{% endif %}
-      </a>
-      {% endfor %}
-    </div>
-  </section>
-  {% endif %}
+    <div class="flex flex-col gap-6">
+      {% if recent_chats | length > 0 %}
+      <section class="flex flex-col gap-2">
+        <div class="section-head"><h2>Recent chat</h2><a href="/chat">All chats</a></div>
+        <div class="list">
+          {% for c in recent_chats %}
+          <a href="/chat/{{ c.id }}" class="list-row">
+            {% if c.kind == "dm" %}{{<avatar name={c.label} color={c.color} size="md"/>}}{% else %}<span class="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-chip text-muted">{{<icon name="hash" class="h-[18px] w-[18px]"/>}}</span>{% endif %}
+            <span class="flex min-w-0 flex-1 flex-col">
+              <span class="flex justify-between gap-2"><span class="truncate-1 text-[15px] {% if c.unread > 0 %}font-bold{% else %}font-semibold{% endif %}">{{ c.label }}</span><span class="meta shrink-0">{{ c.time }}</span></span>
+              <span class="truncate-1 text-sm text-muted">{{ c.last }}</span>
+            </span>
+            {% if c.unread > 0 %}<span class="badge">{{ c.unread }}</span>{% endif %}
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
 
-  {% if decision %}
-  <section class="flex flex-col gap-2">
-    <div class="section-head"><h2>Latest decision</h2><a href="/meetings">Meetings</a></div>
-    <div class="card flex flex-col gap-1 p-3.5">
-      <span class="meta">{{ decision.title }} · {{ decision.held_on }}</span>
-      <span class="whitespace-pre-wrap text-[15px] leading-relaxed">{{ decision.decisions }}</span>
+      {% if decision %}
+      <section class="flex flex-col gap-2">
+        <div class="section-head"><h2>Latest decision</h2><a href="/meetings">Meetings</a></div>
+        <figure class="decision">
+          <blockquote class="m-0 whitespace-pre-wrap text-[15px] font-medium leading-relaxed">{{ decision.decisions }}</blockquote>
+          <figcaption class="meta">{{ decision.title }} · {{ decision.held_on }}</figcaption>
+        </figure>
+      </section>
+      {% endif %}
     </div>
-  </section>
-  {% endif %}
+  </div>
 </div>
 {% endblock content %}

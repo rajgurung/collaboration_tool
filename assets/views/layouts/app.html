@@ -4,7 +4,7 @@
 {% set tab = "home" if active == "dashboard" else ("tasks" if active == "tasks" else ("chat" if active == "chat" else "more")) %}
 <div class="shell">
   <aside class="sidebar" aria-label="Main">
-    <a href="/dashboard" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
+    <a href="/dashboard" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo letter={org.name | default(value="C") | truncate(length=1, end="")}/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
     <a href="/dashboard" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
     <a href="/tasks" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
     <a href="/chat" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="/chat/unread" hx-trigger="load, every 60s"></span></a>
@@ -29,7 +29,7 @@
     <header class="topbar">
       {% block topbar %}<h1>{% block heading %}{% endblock heading %}</h1>{% block actions %}{% endblock actions %}{% endblock topbar %}
     </header>
-    <main class="page">{% block content %}{% endblock content %}</main>
+    <main class="page {% block page_class %}{% endblock page_class %}">{% block content %}{% endblock content %}</main>
     {% endblock main %}
   </div>
 </div>

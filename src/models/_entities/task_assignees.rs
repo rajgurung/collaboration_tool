@@ -4,19 +4,17 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
-#[sea_orm(table_name = "tasks")]
+#[sea_orm(table_name = "task_assignees")]
 pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub title: String,
-    pub status: String,
-    pub due_on: Option<Date>,
-    pub priority: String,
-    pub sort_order: i64,
     pub organisation_id: i64,
-    pub project_id: i64,
+    #[sea_orm(unique_key = "user")]
+    pub task_id: i64,
+    #[sea_orm(unique_key = "user")]
+    pub user_id: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -30,17 +28,21 @@ pub enum Relation {
     )]
     Organisations,
     #[sea_orm(
-        belongs_to = "super::projects::Entity",
-        from = "Column::ProjectId",
-        to = "super::projects::Column::Id",
+        belongs_to = "super::tasks::Entity",
+        from = "Column::TaskId",
+        to = "super::tasks::Column::Id",
         on_update = "Cascade",
         on_delete = "Cascade"
     )]
-    Projects,
-    #[sea_orm(has_many = "super::task_assignees::Entity")]
-    TaskAssignees,
-    #[sea_orm(has_many = "super::task_notes::Entity")]
-    TaskNotes,
+    Tasks,
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::UserId",
+        to = "super::users::Column::Id",
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    Users,
 }
 
 impl Related<super::organisations::Entity> for Entity {
@@ -49,20 +51,14 @@ impl Related<super::organisations::Entity> for Entity {
     }
 }
 
-impl Related<super::projects::Entity> for Entity {
+impl Related<super::tasks::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Projects.def()
+        Relation::Tasks.def()
     }
 }
 
-impl Related<super::task_assignees::Entity> for Entity {
+impl Related<super::users::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::TaskAssignees.def()
-    }
-}
-
-impl Related<super::task_notes::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::TaskNotes.def()
+        Relation::Users.def()
     }
 }

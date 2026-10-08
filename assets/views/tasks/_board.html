@@ -1,0 +1,77 @@
+<div id="task-board" class="board"
+     hx-get="/tasks/board?scope={{ board.scope }}&group={{ board.group }}&q={{ board.q }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
+  <div class="board-toolbar">
+    <nav class="chips" aria-label="Whose tasks">
+      {% for s in board.scopes %}
+      <a href="/tasks?scope={{ s.key }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" class="chip" {% if s.current %}aria-current="true"{% endif %}>{{ s.label }}</a>
+      {% endfor %}
+    </nav>
+    <form action="/tasks" method="get" class="board-search" role="search">
+      <input type="hidden" name="scope" value="{{ board.scope }}">
+      <input type="hidden" name="group" value="{{ board.group }}">
+      {{<icon name="search" class="h-4 w-4"/>}}
+      <input type="search" name="q" value="{{ board.q }}" aria-label="Search tasks" placeholder="Search tasks">
+    </form>
+    <div class="ml-auto flex items-center gap-2">
+      <span class="meta" id="swimlanes-label">Swimlanes</span>
+      <nav class="segmented segmented-sm" aria-labelledby="swimlanes-label">
+        {% for g in board.groups %}
+        <a href="/tasks?scope={{ board.scope }}&group={{ g.key }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if g.current %}aria-current="true"{% endif %}>{{ g.label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </div>
+
+  <div class="board-scroll">
+    <div class="board-grid">
+      <div class="board-head">
+        {% for c in board.columns %}
+        <div class="board-col-head"><span class="dot dot-ring" style="--dot: {{ c.color }}"></span>{{ c.label }}<span class="meta">{{ c.count }}</span></div>
+        {% endfor %}
+      </div>
+
+      {% for lane in board.lanes %}
+      <section class="lane" data-lane="{{ lane.key }}" aria-label="{{ lane.name }}">
+        <button type="button" class="lane-head" aria-expanded="true" data-lane-toggle>
+          {{<icon name="chevron-right" class="lane-chevron h-4 w-4"/>}}
+          {% if lane.person %}{{<avatar name={lane.name} color={lane.color} size="xs"/>}}{% else %}<span class="lane-mark" style="--dot: {{ lane.color }}"></span>{% endif %}
+          <span class="lane-name">{{ lane.name }}</span>
+          <span class="meta">{{ lane.total }} {% if lane.total == 1 %}task{% else %}tasks{% endif %} · {{ lane.done }} done</span>
+          <span class="lane-progress" aria-hidden="true"><span style="width: {{ lane.pct }}%; background: {{ lane.color }}"></span></span>
+          <span class="meta tabular-nums w-9 text-right">{{ lane.pct }}%</span>
+        </button>
+        <div class="lane-cells">
+          {% for cell in lane.cells %}
+          {% set column = board.columns[loop.index0] %}
+          <div class="cell" data-drop-status="{{ column.key }}" aria-label="{{ column.label }}">
+            {% for card in cell %}
+            <a href="/tasks/{{ card.id }}" class="task-card" draggable="true" data-task-id="{{ card.id }}" data-status="{{ card.status }}"
+               hx-get="/tasks/{{ card.id }}" hx-target="#task-sheet-body"
+               hx-on::after-request="document.getElementById('task-sheet').showModal()">
+              {% if board.group != "project" %}<span class="task-card-project"><span class="dot" style="--dot: {{ card.accent }}"></span>{{ card.project }}</span>{% endif %}
+              <span class="task-card-title">{{ card.title }}</span>
+              <span class="task-card-meta">
+                <span class="prio prio-{{ card.priority }}" title="{{ card.priority | capitalize }} priority" aria-label="{{ card.priority | capitalize }} priority"><i></i><i></i><i></i></span>
+                {% if card.due %}<span class="due {% if card.overdue %}due-overdue{% endif %}">{% if card.overdue %}Overdue · {% endif %}{{ card.due }}</span>{% endif %}
+                {% if card.notes > 0 %}<span class="flex items-center gap-1">{{<icon name="message-circle" class="h-3.5 w-3.5"/>}}{{ card.notes }}</span>{% endif %}
+                <span class="avatar-stack ml-auto">{% for p in card.people %}{{<avatar name={p.name} color={p.color} size="xs"/>}}{% endfor %}</span>
+              </span>
+            </a>
+            {% endfor %}
+            <button type="button" class="cell-add" aria-label="Add a task to {{ column.label }}{% if lane.project_id %} in {{ lane.name }}{% endif %}"
+                    hx-get="/tasks/new?status={{ column.key }}{% if lane.project_id %}&project_id={{ lane.project_id }}{% endif %}" hx-target="#task-dialog-body"
+                    hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}</button>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% else %}
+      <div class="card empty mt-3">
+        {% if board.q %}No tasks match “{{ board.q }}”. <a href="/tasks?scope={{ board.scope }}&group={{ board.group }}" class="text-link">Clear the search</a>
+        {% elif board.scope == "mine" %}Nothing assigned to you. <a href="/tasks?scope=all&group={{ board.group }}" class="text-link">See everyone's tasks</a>
+        {% else %}No tasks yet. Add the first one with New task.{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>

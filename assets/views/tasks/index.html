@@ -1,27 +1,38 @@
 {% extends "layouts/app.html" %}
 {% block title %}Tasks · {{ org.name }}{% endblock title %}
+{% block page_class %}{% if view == "board" %}page-wide{% endif %}{% endblock page_class %}
 {% block heading %}Tasks{% endblock heading %}
 {% block actions %}
-<button type="button" class="icon-btn" aria-label="Search tasks" data-toggle="#task-search">{{<icon name="search" class="h-5 w-5"/>}}</button>
+<nav class="segmented segmented-sm desktop-only mr-2" aria-label="View">
+  <a href="/tasks?view=board" {% if view == "board" %}aria-current="true"{% endif %}>Board</a>
+  <a href="/tasks?view=list" {% if view == "list" %}aria-current="true"{% endif %}>List</a>
+</nav>
+<button type="button" class="icon-btn {% if view == "board" %}mobile-only{% endif %}" aria-label="Search tasks" data-toggle="#task-search">{{<icon name="search" class="h-5 w-5"/>}}</button>
 <button type="button" class="btn btn-primary" id="new-task-button"
         hx-get="/tasks/new" hx-target="#task-dialog-body"
         hx-trigger="click{% if open_new %}, load{% endif %}"
-        hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}Task</button>
+        hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}<span class="mobile-only">Task</span><span class="desktop-only">New task</span></button>
 {% endblock actions %}
 {% block content %}
-<form id="task-search" action="/tasks" method="get" class="mb-3 {% if not q %}hidden{% endif %}">
-  <input type="hidden" name="filter" value="{{ filter }}">
-  <label class="flex h-11 items-center gap-2 rounded-xl bg-chip px-3 text-muted">
-    {{<icon name="search" class="h-[18px] w-[18px]"/>}}
-    <input type="search" name="q" value="{{ q }}" aria-label="Search tasks" placeholder="Search by task, project or person" class="min-w-0 flex-1 border-0 bg-transparent text-base text-text outline-none">
-  </label>
-</form>
-<nav class="chips mb-4" aria-label="Filter tasks">
-  {% for f in filters %}
-  <a href="/tasks?filter={{ f.key }}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{{ f.label }} {{ f.count }}</a>
-  {% endfor %}
-</nav>
-{% include "tasks/_list.html" %}
+{% if view == "board" %}
+<div class="board-view">{% include "tasks/_board.html" %}</div>
+{% endif %}
+<div class="{% if view == "board" %}list-view{% endif %}">
+  <form id="task-search" action="/tasks" method="get" class="mb-3 {% if not q %}hidden{% endif %}">
+    <input type="hidden" name="filter" value="{{ filter }}">
+    {% if view == "list" %}<input type="hidden" name="view" value="list">{% endif %}
+    <label class="flex h-11 items-center gap-2 rounded-xl bg-chip px-3 text-muted">
+      {{<icon name="search" class="h-[18px] w-[18px]"/>}}
+      <input type="search" name="q" value="{{ q }}" aria-label="Search tasks" placeholder="Search by task, project or person" class="min-w-0 flex-1 border-0 bg-transparent text-base text-text outline-none">
+    </label>
+  </form>
+  <nav class="chips mb-4" aria-label="Filter tasks">
+    {% for f in filters %}
+    <a href="/tasks?filter={{ f.key }}{% if view == "list" %}&view=list{% endif %}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{% if f.key == "blocked" %}<span class="dot" style="--dot: var(--blocked)"></span>{% endif %}{{ f.label }} {{ f.count }}</a>
+    {% endfor %}
+  </nav>
+  {% include "tasks/_list.html" %}
+</div>
 <dialog id="task-dialog" class="sheet" aria-label="New task"><div class="sheet-handle"></div><div id="task-dialog-body" class="sheet-body"></div></dialog>
-<dialog id="task-sheet" class="sheet" aria-label="Task details"><div class="sheet-handle"></div><div id="task-sheet-body" class="sheet-body"></div></dialog>
+<dialog id="task-sheet" class="sheet sheet-side" aria-label="Task details"><div class="sheet-handle"></div><div id="task-sheet-body" class="sheet-body"></div></dialog>
 {% endblock content %}
