@@ -31,6 +31,9 @@ use crate::{
     },
 };
 
+const LOGINS_ONLY: &str =
+    "The Logins folder holds logins only. Add photos and files to another folder.";
+
 /// The upload route's body limit: the 25 MB file plus room for the form.
 const UPLOAD_BODY_LIMIT: usize = 26 * 1024 * 1024;
 
@@ -207,7 +210,7 @@ async fn files_data(
             "id": folder.id,
             "name": folder.name,
             "note": folder.note,
-            "is_logins": folder.name.eq_ignore_ascii_case(folders::LOGINS),
+            "is_logins": folder.is_logins(),
         },
         "count": count,
         "empty": items.is_empty(),
@@ -407,6 +410,9 @@ async fn upload(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if folder.is_logins() {
+        return refuse(LOGINS_ONLY);
+    }
     let (name, refusal) = match read_file(&mut multipart).await {
         Ok((name, bytes)) => {
             match documents::Model::upload(&ctx, &folder, member.user.id, &name, bytes).await {

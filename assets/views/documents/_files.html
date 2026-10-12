@@ -1,6 +1,6 @@
 {% if not empty %}
 <p class="count">{{ count }}</p>
-<p class="meta drop-hint mx-1 -mt-2.5 mb-0">Drag files here to add them.</p>
+{% if not folder.is_logins %}<p class="meta drop-hint mx-1 -mt-2.5 mb-0">Drag files here to add them.</p>{% endif %}
 <div>
   <div class="file-head desktop-only" aria-hidden="true"><span>Name</span><span>Added by</span><span>Added</span><span>Size</span><span></span></div>
   <div class="list">
@@ -11,7 +11,7 @@
         <span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span>
         <span class="min-w-0 flex-1">
           <span class="name truncate-1 block">{{ f.title }}</span>
-          <span class="meta truncate-1 block">Login{% if f.username %} · {{ f.username }}{% endif %}<span class="mobile-only"> · {{ f.added_by }}, {{ f.added }}</span></span>
+          <span class="meta truncate-1 block">Login{% if f.username %} · {{ f.username }}{% endif %}</span>
         </span>
       </a>
       <span class="who desktop-only text-sm">{{<avatar name={f.added_by} color={f.color} size="xs" label={false}/>}}<span class="truncate-1">{{ f.added_by }}</span></span>
@@ -79,7 +79,7 @@
   <p>Keep shared accounts here, like Companies House or the office mailbox. Passwords stay locked until someone enters their app password.</p>
   <button type="button" class="btn btn-primary btn-lg" data-dialog-open="new-login-title">{{<icon name="key" class="h-4 w-4"/>}}Add a login</button>
   {% else %}
-  <p>Owners and admins add shared logins here. You can still add photos and files with Add.</p>
+  <p>Owners and admins add shared logins here. Photos and files go in the other folders.</p>
   {% endif %}
 </div>
 {% else %}

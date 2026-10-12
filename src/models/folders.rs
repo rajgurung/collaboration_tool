@@ -96,6 +96,13 @@ fn unique_name(err: DbErr) -> ModelError {
 }
 
 impl Model {
+    /// The "Logins" folder holds logins only, never files, so photos of
+    /// passwords have no obvious home.
+    #[must_use]
+    pub fn is_logins(&self) -> bool {
+        self.name.eq_ignore_ascii_case(LOGINS)
+    }
+
     /// Adds the starter folders to a new organisation.
     ///
     /// # Errors
