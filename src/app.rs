@@ -12,6 +12,7 @@ use loco_rs::{
     Error, Result,
 };
 use migration::Migrator;
+use sea_orm::ConnectionTrait;
 use std::{path::Path, sync::Arc};
 
 #[allow(unused_imports)]
@@ -21,8 +22,8 @@ use crate::{
     initializers,
     models::_entities::{
         access_tokens, auth_attempts, conversation_members, conversations, documents, folders,
-        meeting_attendees, meetings, memberships, messages, oauth_clients, oauth_codes,
-        organisations, projects, task_notes, tasks as task_items, users,
+        login_accesses, logins, meeting_attendees, meetings, memberships, messages, oauth_clients,
+        oauth_codes, org_keys, organisations, projects, task_notes, tasks as task_items, users,
     },
     tasks,
     workers::downloader::DownloadWorker,
@@ -105,6 +106,8 @@ impl Hooks for App {
             .insert(crate::data::chat_hub::ChatHub::new());
         ctx.shared_store
             .insert(crate::data::notify_hub::NotifyHub::new());
+        let kek = crate::models::secrets::crypto::Kek::from_context(&ctx)?;
+        ctx.shared_store.insert(Arc::new(kek));
         let storage = document_storage(&ctx)?;
         Ok(ctx.into_builder().storage(Arc::new(storage)).build())
     }
@@ -119,6 +122,7 @@ impl Hooks for App {
 
     fn routes(ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::logins::routes())
             .add_route(controllers::documents::routes())
             .add_route(controllers::claude::routes())
             .add_route(controllers::oauth::routes())
@@ -157,6 +161,11 @@ impl Hooks for App {
     }
     async fn truncate(ctx: &AppContext) -> Result<()> {
         // Children before parents so foreign keys never block the delete.
+        // The login log refuses DELETE by design; TRUNCATE skips row triggers.
+        ctx.db.execute_unprepared("TRUNCATE login_events").await?;
+        truncate_table(&ctx.db, login_accesses::Entity).await?;
+        truncate_table(&ctx.db, logins::Entity).await?;
+        truncate_table(&ctx.db, org_keys::Entity).await?;
         truncate_table(&ctx.db, documents::Entity).await?;
         truncate_table(&ctx.db, folders::Entity).await?;
         truncate_table(&ctx.db, auth_attempts::Entity).await?;

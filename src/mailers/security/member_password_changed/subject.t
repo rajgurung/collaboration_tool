@@ -1,0 +1,1 @@
+{{ who }}'s password was changed

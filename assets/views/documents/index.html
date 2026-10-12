@@ -13,6 +13,14 @@
   <div class="flex flex-col gap-4">
     {% include "documents/_folders.html" %}
     {% if not me.can_manage %}<p class="meta mx-1 my-0">Owners and admins look after folders. You can add photos and files to any of them.</p>{% endif %}
+    {% if me.role == "owner" and not me.acting %}
+    <section class="flex flex-col gap-2">
+      <h2 class="section-label">Owners only</h2>
+      <div class="list">
+        <a class="list-row" href="/documents/activity">{{<icon name="history" class="h-5 w-5"/>}}<span class="min-w-0 flex-1"><span class="block">Login activity</span><span class="meta block">Who saw or copied a password, and when</span></span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      </div>
+    </section>
+    {% endif %}
   </div>
   <div class="card empty-state desktop-only">
     <span class="tile">{{<icon name="folder" class="h-[22px] w-[22px]"/>}}</span>

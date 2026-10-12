@@ -29,6 +29,10 @@ pub enum Relation {
     Documents,
     #[sea_orm(has_one = "super::folders::Entity")]
     Folders,
+    #[sea_orm(has_many = "super::login_events::Entity")]
+    LoginEvents,
+    #[sea_orm(has_many = "super::logins::Entity")]
+    Logins,
     #[sea_orm(has_many = "super::meeting_attendees::Entity")]
     MeetingAttendees,
     #[sea_orm(has_many = "super::meetings::Entity")]
@@ -41,6 +45,8 @@ pub enum Relation {
     Notifications,
     #[sea_orm(has_many = "super::oauth_codes::Entity")]
     OauthCodes,
+    #[sea_orm(has_one = "super::org_keys::Entity")]
+    OrgKeys,
     #[sea_orm(has_many = "super::projects::Entity")]
     Projects,
     #[sea_orm(has_many = "super::saved_views::Entity")]
@@ -91,6 +97,18 @@ impl Related<super::folders::Entity> for Entity {
     }
 }
 
+impl Related<super::login_events::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::LoginEvents.def()
+    }
+}
+
+impl Related<super::logins::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Logins.def()
+    }
+}
+
 impl Related<super::meeting_attendees::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::MeetingAttendees.def()
@@ -124,6 +142,12 @@ impl Related<super::notifications::Entity> for Entity {
 impl Related<super::oauth_codes::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::OauthCodes.def()
+    }
+}
+
+impl Related<super::org_keys::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::OrgKeys.def()
     }
 }
 

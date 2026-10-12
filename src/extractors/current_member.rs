@@ -4,7 +4,10 @@
 use axum::{extract::FromRequestParts, http::request::Parts, http::StatusCode};
 use loco_rs::prelude::*;
 
-use super::{current_user::CurrentUser, session::redirect_response};
+use super::{
+    current_user::{CurrentUser, SessionId},
+    session::redirect_response,
+};
 use crate::{
     models::{
         memberships::{self, role},
@@ -25,6 +28,12 @@ pub struct CurrentMember {
     pub username: String,
     /// True when a super admin is inside an organisation they do not belong to.
     pub acting: bool,
+    /// True for the browser's session cookie, false for Claude's bearer
+    /// tokens. Only sessions can see login passwords.
+    pub via_session: bool,
+    /// The session's sign-in id. `None` for bearer tokens, and for cookies
+    /// issued before sign-ins had ids.
+    pub session_id: Option<String>,
 }
 
 impl CurrentMember {
@@ -42,6 +51,8 @@ impl CurrentMember {
             role: membership.role,
             username: membership.username,
             acting: false,
+            via_session: false,
+            session_id: None,
         }
     }
 
@@ -126,6 +137,7 @@ impl FromRequestParts<AppContext> for CurrentMember {
         ctx: &AppContext,
     ) -> std::result::Result<Self, Self::Rejection> {
         let CurrentUser(user) = CurrentUser::from_request_parts(parts, ctx).await?;
+        let session_id = parts.extensions.get::<SessionId>().map(|sid| sid.0.clone());
 
         if user.is_super_admin {
             if let Some(org) = acting_org(parts, ctx).await {
@@ -135,6 +147,8 @@ impl FromRequestParts<AppContext> for CurrentMember {
                     org,
                     role: role::OWNER.to_string(),
                     acting: true,
+                    via_session: true,
+                    session_id,
                 });
             }
         }
@@ -158,7 +172,11 @@ impl FromRequestParts<AppContext> for CurrentMember {
             .map_err(|e| Error::from(e).into_response())?;
 
         if membership.is_active() {
-            return Ok(Self::from_membership(user, org, membership));
+            return Ok(Self {
+                via_session: true,
+                session_id,
+                ..Self::from_membership(user, org, membership)
+            });
         }
         let template = if membership.is_pending() {
             "tenancy/waiting.html"

@@ -10,14 +10,21 @@ use sea_orm::{
 use serde::Deserialize;
 
 pub use super::_entities::folders::{ActiveModel, Column, Entity, Model};
-use super::{documents, field_error, visible_text};
+use super::{documents, field_error, logins, visible_text};
 
 pub type Folders = Entity;
 
-/// The folders every organisation starts with, and their notes. A "Logins"
-/// folder comes with logins themselves, so its empty state never invites
-/// photos of passwords.
-pub const STARTERS: [(&str, Option<&str>); 1] = [("Company", None)];
+/// The name of the starter folder for logins.
+pub const LOGINS: &str = "Logins";
+
+/// The folders every organisation starts with, and their notes.
+pub const STARTERS: [(&str, Option<&str>); 2] = [
+    ("Company", None),
+    (
+        LOGINS,
+        Some("Shared logins for the team. Never put passwords in notes."),
+    ),
+];
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct FolderParams {
@@ -41,11 +48,11 @@ impl FolderParams {
     }
 }
 
-/// File count and newest upload per folder, from one grouped query.
+/// Item count and newest item per folder, from one grouped query per table.
 #[derive(Debug, FromQueryResult)]
 struct Stats {
     folder_id: i64,
-    files: i64,
+    items: i64,
     latest: Option<DateTimeWithTimeZone>,
 }
 
@@ -54,6 +61,7 @@ struct Stats {
 pub struct Summary {
     pub folder: Model,
     pub files: u64,
+    pub logins: u64,
     pub updated_at: Option<DateTimeWithTimeZone>,
 }
 
@@ -88,6 +96,13 @@ fn unique_name(err: DbErr) -> ModelError {
 }
 
 impl Model {
+    /// The "Logins" folder holds logins only, never files, so photos of
+    /// passwords have no obvious home.
+    #[must_use]
+    pub fn is_logins(&self) -> bool {
+        self.name.eq_ignore_ascii_case(LOGINS)
+    }
+
     /// Adds the starter folders to a new organisation.
     ///
     /// # Errors
@@ -126,13 +141,13 @@ impl Model {
             .order_by_asc(Column::Id)
             .all(db)
             .await?;
-        let stats: HashMap<i64, Stats> = documents::Entity::find()
+        let files: HashMap<i64, Stats> = documents::Entity::find()
             .in_tenant(org_id)
             .select_only()
             .column(documents::Column::FolderId)
             .column_as(
                 Expr::expr(Func::count(Expr::col(documents::Column::Id))),
-                "files",
+                "items",
             )
             .column_as(
                 Expr::expr(Func::max(Expr::col(documents::Column::CreatedAt))),
@@ -145,16 +160,36 @@ impl Model {
             .into_iter()
             .map(|s| (s.folder_id, s))
             .collect();
+        let logins: HashMap<i64, Stats> = logins::Entity::find()
+            .in_tenant(org_id)
+            .select_only()
+            .column(logins::Column::FolderId)
+            .column_as(
+                Expr::expr(Func::count(Expr::col(logins::Column::Id))),
+                "items",
+            )
+            .column_as(
+                Expr::expr(Func::max(Expr::col(logins::Column::UpdatedAt))),
+                "latest",
+            )
+            .group_by(logins::Column::FolderId)
+            .into_model::<Stats>()
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|s| (s.folder_id, s))
+            .collect();
+        let count =
+            |stats: Option<&Stats>| stats.map_or(0, |s| u64::try_from(s.items).unwrap_or(0));
         Ok(folders
             .into_iter()
             .map(|folder| {
-                let (files, updated_at) = stats.get(&folder.id).map_or((0, None), |s| {
-                    (u64::try_from(s.files).unwrap_or(0), s.latest)
-                });
+                let (f, l) = (files.get(&folder.id), logins.get(&folder.id));
                 Summary {
+                    files: count(f),
+                    logins: count(l),
+                    updated_at: std::cmp::max(f.and_then(|s| s.latest), l.and_then(|s| s.latest)),
                     folder,
-                    files,
-                    updated_at,
                 }
             })
             .collect())
@@ -234,15 +269,17 @@ impl Model {
         folder.update(db).await.map_err(unique_name)
     }
 
-    /// Deletes an empty folder. The database refuses a folder with files
-    /// even if one arrives after this check.
+    /// Deletes an empty folder. The database refuses a folder with files or
+    /// logins even if one arrives after this check.
     ///
     /// # Errors
-    /// `Message` when the folder still has files, or database errors.
+    /// `Message` when the folder still has files or logins, or database errors.
     pub async fn delete_if_empty<C: ConnectionTrait>(self, db: &C) -> ModelResult<()> {
-        if documents::Model::count_in_folder(db, self.organisation_id, self.id).await? > 0 {
+        if documents::Model::count_in_folder(db, self.organisation_id, self.id).await? > 0
+            || logins::Model::count_in_folder(db, self.organisation_id, self.id).await? > 0
+        {
             return Err(ModelError::msg(
-                "Only empty folders can be deleted. Delete its files first.",
+                "Only empty folders can be deleted. Move or delete what is in it first.",
             ));
         }
         self.into_active_model().delete(db).await?;

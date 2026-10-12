@@ -108,6 +108,8 @@ auth:
 
 # App settings, read through `crate::data::settings::Settings`.
 settings:
+  # Encrypts login passwords. The same fixed key as development.
+  secrets_kek: "EUqaJ5SN03zOzpn2Ec9MZ7fVH4UrZP4wo4/lTTAVwlE="
   # Public URL of the app, used in email links and the Origin check on form posts.
   app_url: http://localhost:5150
   # Sender for outgoing email. Must be an address your mail provider allows.

@@ -8,7 +8,8 @@
 #
 # The variables this file requires:
 #   DATABASE_URL, JWT_SECRET, APP_URL, MAIL_FROM, the MAILER_* set below, and
-#   R2_BUCKET, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY.
+#   R2_BUCKET, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and
+#   SECRETS_KEK.
 
 # Application logging configuration
 logger:
@@ -131,6 +132,10 @@ auth:
 
 # App settings, read through `crate::data::settings::Settings`.
 settings:
+  # Key-encryption key for login passwords: base64 of 32 random bytes
+  # (openssl rand -base64 32). Required. The app will not start without it,
+  # or with the development key. Losing it loses every stored password.
+  secrets_kek: "<%= get_env(name="SECRETS_KEK") %>"
   # Public URL of the app, used in email links and the Origin check on form posts.
   app_url: <%= get_env(name="APP_URL") %>
   # Sender for outgoing email. Must be an address your mail provider allows.

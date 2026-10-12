@@ -15,6 +15,11 @@ use crate::data::{
 
 /// The JWT claim holding the session version.
 const SESSION_VERSION_CLAIM: &str = "sv";
+/// The JWT claim naming one sign-in, random each time. Unlocking logins is
+/// tied to it, so an unlock on one device does not unlock another.
+const SESSION_ID_CLAIM: &str = "sid";
+/// How long re-entering the app password unlocks logins for.
+pub const UNLOCK_MINUTES: i64 = 5;
 
 pub const MAGIC_LINK_LENGTH: i8 = 32;
 pub const MAGIC_LINK_EXPIRATION_MIN: i8 = 5;
@@ -345,18 +350,34 @@ impl Model {
         Ok(user)
     }
 
-    /// Creates a session token. It carries the session version, so bumping
-    /// the version ends every session issued before.
+    /// Creates a session token for a new sign-in. It carries the session
+    /// version, so bumping the version ends every session issued before,
+    /// and a random sign-in id.
     ///
     /// # Errors
     ///
     /// when could not convert user claims to jwt token
     pub fn generate_jwt(&self, secret: &str, expiration: u64) -> ModelResult<String> {
+        self.generate_jwt_for_session(secret, expiration, &Uuid::new_v4().to_string())
+    }
+
+    /// Like [`Self::generate_jwt`], with a given sign-in id.
+    ///
+    /// # Errors
+    ///
+    /// when could not convert user claims to jwt token
+    pub fn generate_jwt_for_session(
+        &self,
+        secret: &str,
+        expiration: u64,
+        session_id: &str,
+    ) -> ModelResult<String> {
         let mut claims = Map::new();
         claims.insert(
             SESSION_VERSION_CLAIM.to_string(),
             self.session_version.into(),
         );
+        claims.insert(SESSION_ID_CLAIM.to_string(), session_id.into());
         jwt::JWT::new(secret)
             .generate_token(expiration, self.pid.to_string(), claims)
             .map_err(ModelError::from)
@@ -372,6 +393,98 @@ impl Model {
             == Some(i64::from(self.session_version))
     }
 
+    /// The sign-in a token belongs to. Tokens issued before sign-ins had ids
+    /// have none.
+    #[must_use]
+    pub fn session_id(claims: &Map<String, serde_json::Value>) -> Option<String> {
+        claims
+            .get(SESSION_ID_CLAIM)
+            .and_then(serde_json::Value::as_str)
+            .filter(|sid| !sid.is_empty())
+            .map(str::to_string)
+    }
+
+    /// Whether this sign-in re-entered the app password in the last
+    /// [`UNLOCK_MINUTES`]. Both the time and the sign-in must match.
+    #[must_use]
+    pub fn secrets_unlocked(&self, session_id: Option<&str>) -> bool {
+        let fresh = self
+            .secrets_unlocked_until
+            .is_some_and(|until| until > chrono::Utc::now());
+        fresh && session_id.is_some() && self.secrets_unlocked_sid.as_deref() == session_id
+    }
+
+    /// Seconds left on the unlock, for the "Unlocked for 4 more minutes"
+    /// line that counts down in the page.
+    #[must_use]
+    pub fn unlocked_seconds_left(&self) -> i64 {
+        self.secrets_unlocked_until.map_or(0, |until| {
+            std::cmp::max(
+                (until.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds(),
+                0,
+            )
+        })
+    }
+
+    /// Unlocks logins for [`UNLOCK_MINUTES`], for one sign-in only.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn unlock_secrets<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        session_id: &str,
+    ) -> ModelResult<()> {
+        let until = chrono::Utc::now() + Duration::minutes(UNLOCK_MINUTES);
+        users::Entity::update_many()
+            .col_expr(
+                users::Column::SecretsUnlockedUntil,
+                Expr::value(Some(until.fixed_offset())),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedSid,
+                Expr::value(Some(session_id.to_string())),
+            )
+            .filter(users::Column::Id.eq(user_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// Whether the account is locked until its password is reset.
+    #[must_use]
+    pub fn is_locked(&self) -> bool {
+        self.locked_at.is_some()
+    }
+
+    /// Locks the account after too many wrong app passwords inside a
+    /// session, and signs the person out everywhere. Only a password reset
+    /// unlocks it. Their Claude tokens in the organisation are revoked too.
+    /// Returns false if it was already locked, so the owners are told once
+    /// per lock.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn lock_account(ctx: &AppContext, org_id: i64, user_id: i64) -> ModelResult<bool> {
+        let txn = ctx.db.begin().await?;
+        let locked = users::Entity::update_many()
+            .col_expr(
+                users::Column::LockedAt,
+                Expr::value(Some(chrono::Utc::now().fixed_offset())),
+            )
+            .filter(users::Column::Id.eq(user_id))
+            .filter(users::Column::LockedAt.is_null())
+            .exec(&txn)
+            .await?
+            .rows_affected
+            == 1;
+        Self::increment_session_version(&txn, user_id).await?;
+        super::access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
+        txn.commit().await?;
+        Self::close_live_connections(ctx, user_id);
+        Ok(locked)
+    }
+
     /// Signs the user out everywhere: every session token stops working, and
     /// their open chat sockets and notification streams close.
     ///
@@ -385,7 +498,8 @@ impl Model {
 
     /// The database half of [`Self::bump_session_version`], for callers inside
     /// a transaction. Call [`Self::close_live_connections`] after committing.
-    /// One `UPDATE`, so two bumps at once never lose one.
+    /// One `UPDATE`, so two bumps at once never lose one. It also ends any
+    /// unlock of logins.
     ///
     /// # Errors
     /// On database errors.
@@ -397,6 +511,14 @@ impl Model {
             .col_expr(
                 users::Column::SessionVersion,
                 Expr::col(users::Column::SessionVersion).add(1),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedUntil,
+                Expr::value(None::<chrono::DateTime<chrono::FixedOffset>>),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedSid,
+                Expr::value(None::<String>),
             )
             .col_expr(users::Column::UpdatedAt, Expr::value(chrono::Utc::now()))
             .filter(users::Column::Id.eq(user_id))
@@ -520,6 +642,8 @@ impl ActiveModel {
             ActiveValue::set(hash::hash_password(password).map_err(|e| ModelError::Any(e.into()))?);
         self.reset_token = ActiveValue::Set(None);
         self.reset_sent_at = ActiveValue::Set(None);
+        // A reset is the only way out of a lock.
+        self.locked_at = ActiveValue::Set(None);
         self.update(db).await.map_err(ModelError::from)
     }
 

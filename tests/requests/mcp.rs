@@ -297,6 +297,11 @@ async fn initialize_and_list_the_eight_tools() {
                 "update_task"
             ]
         );
+        // Claude never gets documents, files or logins.
+        let all = body["result"]["tools"].to_string().to_lowercase();
+        for word in ["login", "password", "secret", "document", "folder", "file"] {
+            assert!(!all.contains(word), "{word} in the MCP tools");
+        }
         let list = body["result"]["tools"]
             .as_array()
             .unwrap()

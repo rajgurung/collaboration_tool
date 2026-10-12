@@ -12,9 +12,21 @@ pub const SESSION_COOKIE: &str = "auth_token";
 /// # Errors
 /// When the JWT config is missing or the token cannot be signed.
 pub fn session_cookie(ctx: &AppContext, user: &users::Model) -> Result<Cookie<'static>> {
+    session_cookie_for(ctx, user, &uuid::Uuid::new_v4().to_string())
+}
+
+/// A session cookie with a given sign-in id.
+///
+/// # Errors
+/// When the JWT config is missing or the token cannot be signed.
+pub fn session_cookie_for(
+    ctx: &AppContext,
+    user: &users::Model,
+    session_id: &str,
+) -> Result<Cookie<'static>> {
     let jwt = ctx.config.get_jwt_config()?;
     let token = user
-        .generate_jwt(&jwt.secret, jwt.expiration)
+        .generate_jwt_for_session(&jwt.secret, jwt.expiration, session_id)
         .map_err(|err| {
             // Most often a JWT_SECRET that is not valid base64.
             tracing::error!(error = %err, "could not sign the session token");

@@ -6,23 +6,26 @@
 <h1 class="desktop-only">Documents</h1>
 <span class="flex-1 mobile-only"></span>
 {% if me.can_manage %}<button type="button" class="btn btn-secondary desktop-only" data-dialog-open="new-folder-title">{{<icon name="plus" class="h-4 w-4"/>}}New folder</button>{% endif %}
-<button type="button" class="btn btn-primary mobile-only" data-dialog-open="add-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>
+{% if not folder.is_logins %}<button type="button" class="btn btn-primary mobile-only" data-dialog-open="add-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>
+{% elif me.can_manage %}<button type="button" class="btn btn-primary mobile-only" data-dialog-open="new-login-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>{% endif %}
 {% if me.can_manage %}<button type="button" class="icon-btn mobile-only" data-dialog-open="folder-settings-title" aria-label="Folder options">{{<icon name="ellipsis" class="h-5 w-5"/>}}</button>{% endif %}
 {% endblock topbar %}
 {% block content %}
 <div class="docs-layout">
   <div class="desktop-only">{% include "documents/_folders.html" %}</div>
-  <section class="drop-pane flex min-w-0 flex-col gap-3.5" aria-labelledby="folder-title">
+  <section class="{% if not folder.is_logins %}drop-pane {% endif %}flex min-w-0 flex-col gap-3.5" aria-labelledby="folder-title">
     <div class="flex flex-col gap-2.5">
       <div class="flex items-start gap-2">
         <h1 id="folder-title" class="page-title flex-1">{{ folder.name }}</h1>
         {% if me.can_manage %}<button type="button" class="icon-btn desktop-only" data-dialog-open="folder-settings-title" aria-label="Folder options">{{<icon name="ellipsis" class="h-5 w-5"/>}}</button>{% endif %}
-        <button type="button" class="btn btn-primary desktop-only" data-dialog-open="add-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>
+        {% if not folder.is_logins %}<button type="button" class="btn btn-primary desktop-only" data-dialog-open="add-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>
+        {% elif me.can_manage %}<button type="button" class="btn btn-primary desktop-only" data-dialog-open="new-login-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>{% endif %}
       </div>
       {% if folder.note %}<div class="note-card">{{<icon name="sticky-note" class="h-4 w-4"/>}}<p class="m-0">{{ folder.note }}</p></div>{% endif %}
     </div>
     <div id="uploads" class="list upload-list" aria-live="polite"></div>
     <div id="files" class="flex flex-col gap-3.5">{% include "documents/_files.html" %}</div>
+    {% if not folder.is_logins %}
     <div class="drop-overlay" data-drop-overlay hidden>
       <div class="drop-overlay-body">
         {{<icon name="upload" class="h-7 w-7"/>}}
@@ -30,9 +33,11 @@
         <p class="meta m-0">Photos, PDF and Office files, up to 25 MB each</p>
       </div>
     </div>
+    {% endif %}
   </section>
 </div>
 
+{% if not folder.is_logins %}
 <form method="post" action="/documents/folders/{{ folder.id }}/files" enctype="multipart/form-data"
       hx-post="/documents/folders/{{ folder.id }}/files" hx-encoding="multipart/form-data"
       hx-target="#files" hx-swap="innerHTML" data-upload>
@@ -48,10 +53,13 @@
     <div class="list">
       <button type="button" class="add-row" data-pick="photo"><span class="tile">{{<icon name="camera" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Photo</span><span class="meta block">Take one, or pick from your photos</span></span></button>
       <button type="button" class="add-row" data-pick="file"><span class="tile">{{<icon name="paperclip" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">File</span><span class="meta block">PDF, Word, Excel or PowerPoint</span></span></button>
+      {% if me.can_manage %}<button type="button" class="add-row" data-dialog-open="new-login-title"><span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Login</span><span class="meta block">Username, password and notes. The password is kept locked.</span></span></button>{% endif %}
     </div>
     <p class="meta m-0">Up to 25 MB each. Everyone in {{ org.name }} can open what you add.</p>
   </div>
 </dialog>
+
+{% endif %}
 
 {% if me.can_manage %}
 <dialog class="sheet" aria-labelledby="folder-settings-title">
@@ -60,7 +68,7 @@
     <div class="flex items-center gap-2"><h2 id="folder-settings-title" class="m-0 flex-1 text-[19px] font-bold">Folder settings</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
     {% set form_id = "folder-" ~ folder.id ~ "-form" %}{% set action = "/documents/folders/" ~ folder.id %}{% set values = {"name": folder.name, "note": folder.note | default(value="")} %}{% set errors = {} %}{% set submit = "Save" %}
     {% include "documents/_folder_form.html" %}
-    {% if files %}
+    {% if not empty %}
     <p class="meta m-0">Only empty folders can be deleted.</p>
     {% else %}
     <form method="post" action="/documents/folders/{{ folder.id }}/delete" hx-post="/documents/folders/{{ folder.id }}/delete"
@@ -71,5 +79,16 @@
   </div>
 </dialog>
 {% endif %}
+{% if me.can_manage and login_form %}
+<dialog class="sheet" aria-labelledby="new-login-title">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex items-center gap-2"><h2 id="new-login-title" class="m-0 flex-1 text-[19px] font-bold">New login in {{ folder.name }}</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+    {% set form = login_form %}{% include "documents/_login_form.html" %}
+  </div>
+</dialog>
+{% endif %}
+<dialog id="login-sheet" class="sheet sheet-side" aria-label="Login"><div id="login-sheet-body" class="sheet-body"></div></dialog>
+{% include "documents/_unlock_dialog.html" %}
 {% include "documents/_new_folder_dialog.html" %}
 {% endblock content %}

@@ -22,7 +22,7 @@ use crate::{
     models::{
         documents::{self, MAX_BYTES},
         folders::{self, FolderParams},
-        memberships,
+        logins, memberships,
     },
     views::{
         forms::{field_errors, invalid_form, toast},
@@ -31,15 +31,37 @@ use crate::{
     },
 };
 
+const LOGINS_ONLY: &str =
+    "The Logins folder holds logins only. Add photos and files to another folder.";
+
 /// The upload route's body limit: the 25 MB file plus room for the form.
 const UPLOAD_BODY_LIMIT: usize = 26 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
-struct FolderRow {
+pub struct FolderRow {
     id: i64,
     name: String,
     summary: String,
     selected: bool,
+}
+
+/// A login in a folder's list. Only plain fields: never a secret.
+#[derive(Debug, Serialize)]
+struct LoginRow {
+    id: i64,
+    title: String,
+    username: String,
+    added_by: String,
+    color: &'static str,
+    added: String,
+}
+
+/// One row of a folder: a file or a login, newest first.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum Item {
+    File(FileRow),
+    Login(LoginRow),
 }
 
 #[derive(Debug, Serialize)]
@@ -74,15 +96,29 @@ fn added(at: DateTime<FixedOffset>, tz: chrono_tz::Tz) -> String {
     }
 }
 
-fn file_count(n: usize) -> String {
-    match n {
-        0 => "Empty".to_string(),
-        1 => "1 file".to_string(),
-        n => format!("{n} files"),
+/// "Empty", "1 file", "4 files, 1 login", "2 logins".
+fn item_count(files: u64, logins: u64) -> String {
+    let plural = |n: u64, one: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {one}s")),
+    };
+    let parts: Vec<String> = [plural(files, "file"), plural(logins, "login")]
+        .into_iter()
+        .flatten()
+        .collect();
+    if parts.is_empty() {
+        "Empty".to_string()
+    } else {
+        parts.join(", ")
     }
 }
 
-async fn folder_rows(
+/// The folder list, with counts and when each last changed.
+///
+/// # Errors
+/// On database errors.
+pub async fn folder_rows(
     ctx: &AppContext,
     member: &CurrentMember,
     selected: Option<i64>,
@@ -101,7 +137,7 @@ async fn folder_rows(
                 id: s.folder.id,
                 summary: format!(
                     "{}{}",
-                    file_count(usize::try_from(s.files).unwrap_or(usize::MAX)),
+                    item_count(s.files, s.logins),
                     updated.unwrap_or_default()
                 ),
                 name: s.folder.name,
@@ -123,34 +159,62 @@ async fn files_data(
         .into_iter()
         .map(|(m, _)| (m.user_id, m.username))
         .collect();
-    let files: Vec<FileRow> = documents::Model::for_folder(&ctx.db, member.org.id, folder.id)
-        .await?
+    let name_of = |id: Option<i64>| {
+        id.and_then(|id| names.get(&id).cloned())
+            .unwrap_or_else(|| "Former member".to_string())
+    };
+    let files = documents::Model::for_folder(&ctx.db, member.org.id, folder.id).await?;
+    let logins = logins::Model::for_folder(&ctx.db, member.org.id, folder.id).await?;
+    let count = item_count(files.len() as u64, logins.len() as u64);
+    let mut items: Vec<(DateTime<FixedOffset>, Item)> = files
         .into_iter()
         .map(|f| {
-            let uploader = f
-                .uploaded_by_id
-                .and_then(|id| names.get(&id).cloned())
-                .unwrap_or_else(|| "Former member".to_string());
-            FileRow {
-                id: f.id,
-                stem: f.stem().to_string(),
-                ext: f.ext(),
-                label: f.label(),
-                is_image: f.is_image(),
-                opens_inline: f.opens_inline(),
-                color: avatar_color(&uploader),
-                uploader,
-                added: added(f.created_at, member.tz()),
-                size: documents::human_size(f.size_bytes),
-                can_delete: f.can_delete(member.user.id, member.can_manage()),
-                name: f.name,
-            }
+            let uploader = name_of(f.uploaded_by_id);
+            (
+                f.created_at,
+                Item::File(FileRow {
+                    id: f.id,
+                    stem: f.stem().to_string(),
+                    ext: f.ext(),
+                    label: f.label(),
+                    is_image: f.is_image(),
+                    opens_inline: f.opens_inline(),
+                    color: avatar_color(&uploader),
+                    uploader,
+                    added: added(f.created_at, member.tz()),
+                    size: documents::human_size(f.size_bytes),
+                    can_delete: f.can_delete(member.user.id, member.can_manage()),
+                    name: f.name,
+                }),
+            )
         })
         .collect();
+    items.extend(logins.into_iter().map(|l| {
+        let added_by = name_of(l.created_by_id);
+        (
+            l.created_at,
+            Item::Login(LoginRow {
+                id: l.id,
+                title: l.title,
+                username: l.username,
+                color: avatar_color(&added_by),
+                added_by,
+                added: added(l.created_at, member.tz()),
+            }),
+        )
+    }));
+    items.sort_by_key(|item| std::cmp::Reverse(item.0));
+    let items: Vec<Item> = items.into_iter().map(|(_, item)| item).collect();
     Ok(data!({
-        "folder": { "id": folder.id, "name": folder.name, "note": folder.note },
-        "count": file_count(files.len()),
-        "files": files,
+        "folder": {
+            "id": folder.id,
+            "name": folder.name,
+            "note": folder.note,
+            "is_logins": folder.is_logins(),
+        },
+        "count": count,
+        "empty": items.is_empty(),
+        "items": items,
     }))
 }
 
@@ -208,6 +272,9 @@ async fn show_folder(
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let mut page = files_data(&ctx, &member, &folder).await?;
     page["folders"] = serde_json::to_value(folder_rows(&ctx, &member, Some(folder.id)).await?)?;
+    if member.can_manage() {
+        page["login_form"] = super::logins::new_login_form(&ctx, &member, &folder).await?;
+    }
     format::render().view(&v, "documents/folder.html", member.page("documents", page))
 }
 
@@ -343,6 +410,9 @@ async fn upload(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if folder.is_logins() {
+        return refuse(LOGINS_ONLY);
+    }
     let (name, refusal) = match read_file(&mut multipart).await {
         Ok((name, bytes)) => {
             match documents::Model::upload(&ctx, &folder, member.user.id, &name, bytes).await {
@@ -471,7 +541,7 @@ async fn delete_file(
 }
 
 /// No Documents page or file may be shown inside a frame, on any site.
-async fn no_framing(req: Request, next: Next) -> Response {
+pub async fn no_framing(req: Request, next: Next) -> Response {
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));

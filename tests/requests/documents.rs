@@ -75,7 +75,7 @@ async fn only_file(ctx: &AppContext) -> documents::Model {
 
 #[tokio::test]
 #[serial]
-async fn new_organisations_start_with_a_company_folder() {
+async fn new_organisations_start_with_company_and_logins_folders() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob, _, company) = acme(&request, &ctx).await;
         let folder = request
@@ -93,7 +93,7 @@ async fn new_organisations_start_with_a_company_folder() {
         assert_eq!(page.status_code(), 200);
         let body = page.text();
         assert!(body.contains("Company"));
-        assert!(!body.contains("Logins"), "logins come in a later change");
+        assert!(body.contains("Logins"));
         assert!(body.contains("New folder"), "owners can add folders");
         assert_eq!(page.headers()["x-frame-options"], "DENY");
         assert_eq!(

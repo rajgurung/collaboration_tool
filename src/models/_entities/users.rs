@@ -26,6 +26,9 @@ pub struct Model {
     pub magic_link_expiration: Option<DateTimeWithTimeZone>,
     pub is_super_admin: bool,
     pub session_version: i32,
+    pub secrets_unlocked_until: Option<DateTimeWithTimeZone>,
+    pub secrets_unlocked_sid: Option<String>,
+    pub locked_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -42,6 +45,12 @@ pub enum Relation {
     Documents,
     #[sea_orm(has_many = "super::folders::Entity")]
     Folders,
+    #[sea_orm(has_many = "super::login_accesses::Entity")]
+    LoginAccesses,
+    #[sea_orm(has_many = "super::login_events::Entity")]
+    LoginEvents,
+    #[sea_orm(has_many = "super::logins::Entity")]
+    Logins,
     #[sea_orm(has_many = "super::meeting_attendees::Entity")]
     MeetingAttendees,
     #[sea_orm(has_many = "super::meetings::Entity")]
@@ -98,6 +107,18 @@ impl Related<super::folders::Entity> for Entity {
     }
 }
 
+impl Related<super::login_accesses::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::LoginAccesses.def()
+    }
+}
+
+impl Related<super::login_events::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::LoginEvents.def()
+    }
+}
+
 impl Related<super::meeting_attendees::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::MeetingAttendees.def()
@@ -149,5 +170,14 @@ impl Related<super::task_assignees::Entity> for Entity {
 impl Related<super::task_notes::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::TaskNotes.def()
+    }
+}
+
+impl Related<super::logins::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::login_accesses::Relation::Logins.def()
+    }
+    fn via() -> Option<RelationDef> {
+        Some(super::login_accesses::Relation::Users.def().rev())
     }
 }

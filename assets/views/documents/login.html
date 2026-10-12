@@ -1,0 +1,48 @@
+{% extends "layouts/app.html" %}
+{% block title %}{{ login.title }} · Documents · {{ org.name }}{% endblock title %}
+{% block body_attrs %}hx-history="false"{% endblock body_attrs %}
+{% block topbar %}
+<a href="/documents/folders/{{ folder.id }}" class="back mobile-only">{{<icon name="chevron-left" class="h-5 w-5"/>}}{{ folder.name }}</a>
+<h1 class="desktop-only">Documents</h1>
+<span class="flex-1 mobile-only"></span>
+{% if me.can_manage %}
+<button type="button" class="icon-btn" data-dialog-open="edit-login-title" aria-label="Edit">{{<icon name="pencil" class="h-5 w-5"/>}}</button>
+<button type="button" class="icon-btn" data-dialog-open="login-options-title" aria-label="More options">{{<icon name="ellipsis" class="h-5 w-5"/>}}</button>
+{% endif %}
+{% endblock topbar %}
+{% block content %}
+<div class="docs-layout">
+  <div class="desktop-only">{% include "documents/_folders.html" %}</div>
+  <section class="flex min-w-0 max-w-2xl flex-col gap-4">
+    <a href="/documents/folders/{{ folder.id }}" class="back desktop-only">{{<icon name="chevron-left" class="h-5 w-5"/>}}{{ folder.name }}</a>
+    {% set sheet = false %}{% include "documents/_login.html" %}
+  </section>
+</div>
+
+{% if me.can_manage %}
+<dialog class="sheet" aria-labelledby="edit-login-title" {% if open_edit %}data-open-on-load{% endif %}>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex items-center gap-2"><h2 id="edit-login-title" class="m-0 flex-1 text-[19px] font-bold">Edit {{ login.title }}</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+    {% include "documents/_login_form.html" %}
+  </div>
+</dialog>
+<dialog class="sheet" aria-labelledby="login-options-title" data-panes>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex items-center gap-2"><h2 id="login-options-title" class="m-0 flex-1 text-[19px] font-bold break-words">{{ login.title }}</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+    <div class="list" data-pane="menu">
+      <button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit" data-dialog-open="edit-login-title">{{<icon name="folder" class="h-5 w-5"/>}}<span class="flex-1">Move to another folder</span></button>
+      <button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-danger" data-show-pane="delete">{{<icon name="trash" class="h-5 w-5"/>}}<span class="flex-1">Delete</span></button>
+    </div>
+    <form data-pane="delete" hidden method="post" action="/documents/logins/{{ login.id }}/delete" hx-post="/documents/logins/{{ login.id }}/delete" class="flex flex-col gap-3">
+      <p class="m-0 text-[19px] font-bold">Delete “{{ login.title }}”?</p>
+      <p class="m-0 text-muted">It goes for everyone in {{ org.name }}. Login activity keeps a record of it. This does not change the password on the website.</p>
+      <button type="submit" class="btn btn-lg btn-danger-solid w-full">Delete for everyone</button>
+      <button type="button" class="btn btn-lg btn-secondary w-full" data-dialog-close>Keep it</button>
+    </form>
+  </div>
+</dialog>
+{% endif %}
+{% include "documents/_unlock_dialog.html" %}
+{% endblock content %}

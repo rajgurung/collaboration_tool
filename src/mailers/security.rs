@@ -5,9 +5,17 @@ use loco_rs::prelude::*;
 use serde_json::json;
 
 use super::deliver;
-use crate::{data::settings::Settings, models::users};
+use crate::{
+    data::settings::Settings,
+    models::{memberships, organisations, users},
+    views::time,
+};
 
 static password_changed: Dir<'_> = include_dir!("src/mailers/security/password_changed");
+static login_seen: Dir<'_> = include_dir!("src/mailers/security/login_seen");
+static account_locked: Dir<'_> = include_dir!("src/mailers/security/account_locked");
+static member_password_changed: Dir<'_> =
+    include_dir!("src/mailers/security/member_password_changed");
 
 pub struct SecurityMailer {}
 
@@ -30,6 +38,93 @@ impl SecurityMailer {
             ..Default::default()
         };
         deliver(ctx, &settings, &password_changed, args).await
+    }
+
+    /// Tells every owner that someone saw or copied a login's password or
+    /// recovery codes. Never includes the secret.
+    ///
+    /// # Errors
+    /// When an email cannot be rendered or handed off.
+    pub async fn login_seen(
+        ctx: &AppContext,
+        org: &organisations::Model,
+        who: &str,
+        title: &str,
+        copied: bool,
+        recovery: bool,
+    ) -> Result<()> {
+        let locals = json!({
+            "who": who,
+            "title": title,
+            "verb": if copied { "copied" } else { "saw" },
+            "what": if recovery { "the recovery codes" } else { "the password" },
+        });
+        Self::to_owners(ctx, org, None, &login_seen, locals).await
+    }
+
+    /// Tells every owner that someone's account was locked after too many
+    /// wrong app passwords.
+    ///
+    /// # Errors
+    /// When an email cannot be rendered or handed off.
+    pub async fn account_locked(
+        ctx: &AppContext,
+        org: &organisations::Model,
+        who: &str,
+    ) -> Result<()> {
+        Self::to_owners(ctx, org, None, &account_locked, json!({ "who": who })).await
+    }
+
+    /// Tells the other owners that the password of someone who can see
+    /// login passwords was reset.
+    ///
+    /// # Errors
+    /// When an email cannot be rendered or handed off.
+    pub async fn member_password_changed(
+        ctx: &AppContext,
+        org: &organisations::Model,
+        user: &users::Model,
+        who: &str,
+    ) -> Result<()> {
+        Self::to_owners(
+            ctx,
+            org,
+            Some(user.id),
+            &member_password_changed,
+            json!({ "who": who }),
+        )
+        .await
+    }
+
+    /// One email to each active owner except `skip`, with the organisation,
+    /// the time and a link to Login activity added to `locals`.
+    async fn to_owners(
+        ctx: &AppContext,
+        org: &organisations::Model,
+        skip: Option<i64>,
+        dir: &Dir<'_>,
+        mut locals: serde_json::Value,
+    ) -> Result<()> {
+        let settings = Settings::from_context(ctx)?;
+        let now = time::local(chrono::Utc::now().fixed_offset(), time::zone(&org.timezone));
+        locals["org"] = json!(org.name);
+        locals["at"] = json!(now.format("%H:%M on %-d %b").to_string());
+        locals["activity_url"] = json!(format!("{}/documents/activity", settings.app_url));
+        for (owner, user) in memberships::Model::owners(&ctx.db, org.id).await? {
+            if Some(user.id) == skip {
+                continue;
+            }
+            let mut locals = locals.clone();
+            locals["name"] = json!(owner.username);
+            let args = mailer::Args {
+                from: Some(settings.mail_from.clone()),
+                to: user.email,
+                locals,
+                ..Default::default()
+            };
+            deliver(ctx, &settings, dir, args).await?;
+        }
+        Ok(())
     }
 }
 
@@ -57,5 +152,45 @@ mod tests {
         assert!(email
             .html
             .contains(r#"href="https://collab.rajgurung.me/forgot""#));
+    }
+
+    #[test]
+    fn owner_emails_escape_names_and_never_carry_a_secret() {
+        let locals = json!({
+            "name": "raj",
+            "who": "<b>eve</b>",
+            "title": "<script>x</script> Bank",
+            "verb": "saw",
+            "what": "the password",
+            "org": "Acme & Co",
+            "at": "14:41 on 12 Oct",
+            "activity_url": "https://collab.rajgurung.me/documents/activity",
+        });
+        for dir in [&login_seen, &account_locked, &member_password_changed] {
+            let args = mailer::Args {
+                to: "raj@example.com".to_string(),
+                locals: locals.clone(),
+                ..Default::default()
+            };
+            let email = render(dir, &args).unwrap();
+            assert!(!email.html.contains("<b>eve</b>"), "{}", email.html);
+            assert!(!email.html.contains("<script>"), "{}", email.html);
+            assert!(
+                email.html.contains("&lt;b&gt;eve&lt;/b&gt;"),
+                "{}",
+                email.html
+            );
+            assert!(email.html.contains("/documents/activity"));
+        }
+        let args = mailer::Args {
+            to: "raj@example.com".to_string(),
+            locals,
+            ..Default::default()
+        };
+        let email = render(&login_seen, &args).unwrap();
+        assert_eq!(
+            email.subject,
+            "<b>eve</b> saw the password for <script>x</script> Bank"
+        );
     }
 }

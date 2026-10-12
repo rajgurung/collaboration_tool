@@ -29,8 +29,9 @@
         <div class="flex items-center gap-3">{{<avatar name={row.username} color={row.color} size="lg"/>}}<h2 id="remove-{{ row.id }}" class="m-0 flex-1 text-[19px] font-bold">Remove {{ row.username }} from {{ org.name }}?</h2></div>
         <ul class="bullets">
           <li>They are signed out on every device straight away.</li>
-          <li>They can't open tasks, chat or documents any more.</li>
+          <li>They can't open tasks, chat, documents or logins any more.</li>
           <li>Their Claude connections stop working.</li>
+          <li>Next, you'll see the logins they could see, so you can change those passwords.</li>
         </ul>
         <form method="post" action="/members/{{ row.id }}/remove" hx-post="/members/{{ row.id }}/remove" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-2">
           <button type="submit" class="btn btn-lg btn-danger-solid w-full">Remove {{ row.username }}</button>

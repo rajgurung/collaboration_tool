@@ -327,6 +327,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
             globex.folder.organisation_id,
             globex.owner.id,
             ivy_m.id,
+            &Default::default(),
         )
         .await
         .unwrap();
@@ -428,7 +429,11 @@ async fn documents_and_removal_need_your_own_active_membership() {
         let globex_folders = folders::Model::list_for_org(&ctx.db, globex.folder.organisation_id)
             .await
             .unwrap();
-        assert_eq!(globex_folders.len(), 2, "Company and the secret one");
+        assert_eq!(
+            globex_folders.len(),
+            3,
+            "Company, Logins and the secret one"
+        );
         let pending = memberships::Entity::find_by_id(globex.pending.id)
             .one(&ctx.db)
             .await

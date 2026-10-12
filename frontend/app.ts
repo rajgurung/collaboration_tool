@@ -659,3 +659,258 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   if (dropped) failedFiles.set(failed, file);
   document.getElementById("uploads")?.prepend(failed);
 });
+
+// <button data-copy-text="..."> copies its own text, such as a login's username.
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLElement>("[data-copy-text]");
+  if (!button) return;
+  void navigator.clipboard.writeText(button.dataset.copyText ?? "").then(
+    () => showToast({ kind: "success", message: button.dataset.copyMessage ?? "Copied" }),
+    () => showToast({ kind: "error", message: "Couldn't copy. Select it and copy it instead." }),
+  );
+});
+
+// Password fields with an eye button: show or hide what you typed.
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLElement>("[data-toggle-password]");
+  const input = button?.parentElement?.querySelector<HTMLInputElement>("input");
+  if (!button || !input) return;
+  const showing = input.type === "text";
+  input.type = showing ? "password" : "text";
+  button.setAttribute("aria-pressed", String(!showing));
+});
+
+// Logins: Show and Copy need the app password once every 5 minutes. A shown
+// secret hides itself after 30 seconds, and is removed from the page when it
+// hides, when its sheet closes, and when the page is left.
+type SecretAsk = { kind: "show" | "copy"; loginId: string; field: string; box: HTMLElement };
+const HIDE_AFTER_SECONDS = 30;
+let pendingSecret: SecretAsk | null = null;
+const countdowns = new Map<HTMLElement, number>();
+
+function postForm(url: string, values: Record<string, string>): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(values),
+    credentials: "same-origin",
+  });
+}
+
+function hideSecret(box: HTMLElement) {
+  window.clearInterval(countdowns.get(box));
+  countdowns.delete(box);
+  box.querySelector("[data-secret-slot]")?.replaceChildren();
+  const hidden = box.querySelector<HTMLElement>("[data-secret-hidden]");
+  if (hidden) hidden.hidden = false;
+}
+
+function hideAllSecrets(root: ParentNode = document) {
+  root.querySelectorAll<HTMLElement>("[data-secret]").forEach(hideSecret);
+}
+
+function secretAsk(button: Element, kind: SecretAsk["kind"]): SecretAsk | null {
+  const box = button.closest<HTMLElement>("[data-secret]");
+  const loginId = button.closest<HTMLElement>("[data-login]")?.dataset.login;
+  if (!box || !loginId) return null;
+  return { kind, loginId, field: box.dataset.secret ?? "password", box };
+}
+
+// "Unlocked for 4 more minutes" counts down and hides when the unlock ends,
+// so it never claims an unlock the server has already dropped.
+function tickUnlocked(line: HTMLElement) {
+  const left = Number(line.dataset.seconds ?? "0") - (Date.now() - Number(line.dataset.since ?? Date.now())) / 1000;
+  line.hidden = left <= 0;
+  const minutes = Math.ceil(left / 60);
+  const text = line.querySelector("[data-unlocked-text]");
+  if (text) text.textContent = `Unlocked for ${minutes} more ${minutes === 1 ? "minute" : "minutes"}`;
+}
+function startUnlocked(root: ParentNode, seconds?: number) {
+  root.querySelectorAll<HTMLElement>("[data-unlocked-line]").forEach((line) => {
+    if (seconds !== undefined) line.dataset.seconds = String(seconds);
+    line.dataset.since = String(Date.now());
+    tickUnlocked(line);
+  });
+}
+window.setInterval(() => document.querySelectorAll<HTMLElement>("[data-unlocked-line]").forEach(tickUnlocked), 5000);
+startUnlocked(document);
+document.body.addEventListener("htmx:afterSwap", (event) => startUnlocked((event as CustomEvent<{ target: Element }>).detail.target));
+
+function markUnlocked() {
+  startUnlocked(document, 5 * 60);
+}
+
+// The edit sheet opens straight away when a page asks for it (?edit=1).
+document.querySelector<HTMLDialogElement>("dialog[data-open-on-load]")?.showModal();
+
+// A refused request: signed out (the session ended) or an error message.
+async function secretRefused(res: Response) {
+  if (res.redirected || res.status === 401) {
+    window.location.href = "/login";
+    return;
+  }
+  showToast({ kind: "error", message: res.status === 403 ? "You can't see this password." : "Couldn't show it. Try again." });
+}
+
+function askForPassword(ask: SecretAsk) {
+  const dialog = document.querySelector<HTMLDialogElement>("dialog[data-unlock]");
+  if (!dialog) return;
+  pendingSecret = ask;
+  dialog.querySelectorAll<HTMLElement>("[data-unlock-pane]").forEach((pane) => (pane.hidden = pane.dataset.unlockPane !== "form"));
+  const error = dialog.querySelector<HTMLElement>("[data-unlock-error]");
+  if (error) error.hidden = true;
+  dialog.querySelector("input[name=password]")?.removeAttribute("aria-invalid");
+  const what = ask.field === "recovery" ? "recovery codes" : "password";
+  dialog.querySelector("[data-unlock-submit]")!.textContent = `${ask.kind === "copy" ? "Copy" : "Show"} ${what}`;
+  dialog.showModal();
+  dialog.querySelector<HTMLInputElement>("input[name=password]")?.focus();
+}
+
+async function showSecret(ask: SecretAsk) {
+  const res = await postForm(`/documents/logins/${ask.loginId}/reveal`, { field: ask.field });
+  if (res.status === 423) return askForPassword(ask);
+  if (!res.ok || res.redirected) return secretRefused(res);
+  const slot = ask.box.querySelector<HTMLElement>("[data-secret-slot]");
+  if (!slot) return;
+  hideSecret(ask.box);
+  // The server escapes the secret; this is its own fragment.
+  slot.innerHTML = await res.text();
+  const hidden = ask.box.querySelector<HTMLElement>("[data-secret-hidden]");
+  if (hidden) hidden.hidden = true;
+  const bar = slot.querySelector<HTMLElement>("[data-countdown-bar]");
+  const text = slot.querySelector<HTMLElement>("[data-countdown-text]");
+  let left = HIDE_AFTER_SECONDS;
+  countdowns.set(
+    ask.box,
+    window.setInterval(() => {
+      left -= 1;
+      if (left <= 0) return hideSecret(ask.box);
+      if (bar) bar.style.width = `${(left / HIDE_AFTER_SECONDS) * 100}%`;
+      if (text) text.textContent = `Hides in ${left}s`;
+    }, 1000),
+  );
+}
+
+class NeedsPassword extends Error {}
+
+// Copies without showing. The clipboard write starts inside the tap, with the
+// text still on its way: iOS Safari only allows that through ClipboardItem.
+function copySecret(ask: SecretAsk, unlocking?: Promise<Response>) {
+  const what = ask.field === "recovery" ? "Recovery codes" : "Password";
+  const text = (async () => {
+    if (unlocking && !(await unlocking).ok) throw new NeedsPassword();
+    const res = await postForm(`/documents/logins/${ask.loginId}/copy`, { field: ask.field });
+    if (res.status === 423) throw new NeedsPassword();
+    if (!res.ok || res.redirected) {
+      await secretRefused(res);
+      throw new Error("refused");
+    }
+    return res.text();
+  })();
+  const written =
+    typeof ClipboardItem !== "undefined" && navigator.clipboard?.write
+      ? navigator.clipboard.write([new ClipboardItem({ "text/plain": text.then((t) => new Blob([t], { type: "text/plain" })) })])
+      : text.then((t) => navigator.clipboard.writeText(t));
+  written.then(
+    () => showToast({ kind: "success", message: `${what} copied` }),
+    (err) => {
+      if (err instanceof NeedsPassword) {
+        if (!unlocking) askForPassword(ask);
+      } else if (!(err instanceof Error && err.message === "refused")) {
+        showToast({ kind: "error", message: "Couldn't copy. Show it instead, then copy it." });
+      }
+    },
+  );
+  // Clipboard managers can keep it; at least don't keep a promise of it around.
+  void text.catch(() => undefined);
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const show = target?.closest("[data-secret-show]");
+  const copy = target?.closest("[data-secret-copy]");
+  if (show || copy) {
+    const ask = secretAsk((show ?? copy)!, show ? "show" : "copy");
+    if (!ask) return;
+    if (ask.kind === "show") void showSecret(ask);
+    else copySecret(ask);
+    return;
+  }
+  const shown = target?.closest("[data-secret-copy-shown]");
+  if (shown) {
+    const box = shown.closest<HTMLElement>("[data-secret]");
+    const value = box?.querySelector("[data-secret-value]")?.textContent ?? "";
+    const what = box?.dataset.secret === "recovery" ? "Recovery codes" : "Password";
+    void navigator.clipboard.writeText(value).then(
+      () => showToast({ kind: "success", message: `${what} copied` }),
+      () => showToast({ kind: "error", message: "Couldn't copy. Select it and copy it instead." }),
+    );
+    return;
+  }
+  const hide = target?.closest("[data-secret-hide]")?.closest<HTMLElement>("[data-secret]");
+  if (hide) hideSecret(hide);
+});
+
+document.addEventListener("submit", (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !form.hasAttribute("data-unlock-form")) return;
+  event.preventDefault();
+  const dialog = form.closest("dialog");
+  const input = form.querySelector<HTMLInputElement>("input[name=password]");
+  const error = form.querySelector<HTMLElement>("[data-unlock-error]");
+  const ask = pendingSecret;
+  if (!dialog || !input || !ask) return;
+  const unlocking = postForm("/documents/logins/unlock", { password: input.value, login_id: ask.loginId });
+  input.value = "";
+  input.removeAttribute("aria-invalid");
+  if (error) error.hidden = true;
+  // Copy has to begin inside this tap, so it waits on the unlock itself.
+  if (ask.kind === "copy") copySecret(ask, unlocking);
+  void unlocking.then(async (res) => {
+    if (res.ok && !res.redirected) {
+      pendingSecret = null;
+      dialog.close();
+      markUnlocked();
+      if (ask.kind === "show") await showSecret(ask);
+      return;
+    }
+    if (res.status === 401) {
+      dialog.querySelectorAll<HTMLElement>("[data-unlock-pane]").forEach((pane) => (pane.hidden = pane.dataset.unlockPane !== "locked"));
+      return;
+    }
+    if (res.redirected) {
+      window.location.href = "/login";
+      return;
+    }
+    if (error) {
+      error.textContent = (await res.text()) || "Couldn't check your password. Try again.";
+      error.hidden = false;
+    }
+    input.setAttribute("aria-invalid", "true");
+    input.focus();
+  });
+});
+
+// Desktop opens a login in the side sheet, so the folder stays behind it.
+document.addEventListener("click", (event) => {
+  const link = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[data-login-sheet]");
+  const sheet = document.querySelector<HTMLDialogElement>("#login-sheet");
+  if (!link || !sheet || !matchMedia("(min-width: 900px)").matches) return;
+  event.preventDefault();
+  void htmx.ajax("GET", link.href, { target: "#login-sheet-body", swap: "innerHTML" }).then(() => sheet.showModal());
+});
+document.addEventListener(
+  "close",
+  (event) => {
+    const dialog = event.target;
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    hideAllSecrets(dialog);
+    if (dialog.id === "login-sheet") dialog.querySelector("#login-sheet-body")?.replaceChildren();
+    if (dialog.hasAttribute("data-unlock")) {
+      const input = dialog.querySelector<HTMLInputElement>("input[name=password]");
+      if (input) input.value = "";
+    }
+  },
+  true,
+);
+window.addEventListener("pagehide", () => hideAllSecrets());

@@ -1,10 +1,25 @@
-{% if files %}
+{% if not empty %}
 <p class="count">{{ count }}</p>
-<p class="meta drop-hint mx-1 -mt-2.5 mb-0">Drag files here to add them.</p>
+{% if not folder.is_logins %}<p class="meta drop-hint mx-1 -mt-2.5 mb-0">Drag files here to add them.</p>{% endif %}
 <div>
   <div class="file-head desktop-only" aria-hidden="true"><span>Name</span><span>Added by</span><span>Added</span><span>Size</span><span></span></div>
   <div class="list">
-    {% for f in files %}
+    {% for f in items %}
+    {% if f.kind == "login" %}
+    <div class="file-row" id="login-{{ f.id }}">
+      <a class="file-main" href="/documents/logins/{{ f.id }}" data-login-sheet>
+        <span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span>
+        <span class="min-w-0 flex-1">
+          <span class="name truncate-1 block">{{ f.title }}</span>
+          <span class="meta truncate-1 block">Login{% if f.username %} · {{ f.username }}{% endif %}</span>
+        </span>
+      </a>
+      <span class="who desktop-only text-sm">{{<avatar name={f.added_by} color={f.color} size="xs" label={false}/>}}<span class="truncate-1">{{ f.added_by }}</span></span>
+      <span class="meta desktop-only">{{ f.added }}</span>
+      <span class="meta desktop-only"></span>
+      <a class="icon-btn text-muted" href="/documents/logins/{{ f.id }}" data-login-sheet aria-label="Open {{ f.title }}">{{<icon name="chevron-right" class="h-[18px] w-[18px]"/>}}</a>
+    </div>
+    {% else %}
     <div class="file-row" id="file-{{ f.id }}">
       <a class="file-main" href="/documents/files/{{ f.id }}" {% if f.opens_inline %}target="_blank" rel="noopener"{% endif %}>
         <span class="tile">{% if f.is_image %}{{<icon name="image" class="h-5 w-5"/>}}{% else %}<span class="tile-type">{{ f.label }}</span>{% endif %}</span>
@@ -52,8 +67,20 @@
         </div>
       </dialog>
     </div>
+    {% endif %}
     {% endfor %}
   </div>
+</div>
+{% elif folder.is_logins %}
+<div class="card empty-state">
+  <span class="tile tile-key">{{<icon name="key" class="h-[22px] w-[22px]"/>}}</span>
+  <h2>No logins yet</h2>
+  {% if me.can_manage %}
+  <p>Keep shared accounts here, like Companies House or the office mailbox. Passwords stay locked until someone enters their app password.</p>
+  <button type="button" class="btn btn-primary btn-lg" data-dialog-open="new-login-title">{{<icon name="key" class="h-4 w-4"/>}}Add a login</button>
+  {% else %}
+  <p>Owners and admins add shared logins here. Photos and files go in the other folders.</p>
+  {% endif %}
 </div>
 {% else %}
 <div class="card empty-state">
