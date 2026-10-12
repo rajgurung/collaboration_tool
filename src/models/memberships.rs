@@ -5,7 +5,9 @@ use sea_orm::sea_query::{ExprTrait, Func};
 
 pub use super::_entities::memberships::{ActiveModel, Column, Entity, Model};
 use super::{
-    access_tokens, conversation_members, conversations, field_error, notifications, organisations,
+    access_tokens, conversation_members, conversations, field_error,
+    login_events::{self, action, Client, Entry},
+    notifications, organisations,
     users::{self, RegisterParams},
 };
 
@@ -172,6 +174,21 @@ impl Model {
             .collect())
     }
 
+    /// The organisation's active owners, with their accounts.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn owners<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+    ) -> ModelResult<Vec<(Self, users::Model)>> {
+        Ok(Self::list_for_org(db, org_id)
+            .await?
+            .into_iter()
+            .filter(|(m, _)| m.is_active() && m.role == role::OWNER)
+            .collect())
+    }
+
     /// `(user_id, username)` for the approved members among `user_ids`.
     ///
     /// # Errors
@@ -243,6 +260,7 @@ impl Model {
     /// owner removes an owner, and the last owner stays. Removal ends the
     /// person's sessions and live connections, revokes their Claude tokens,
     /// takes them out of every conversation and stops mention emails to them.
+    /// Login activity records who removed whom.
     ///
     /// # Errors
     /// `EntityNotFound` when `id` is not in this organisation, `Message` when
@@ -252,6 +270,7 @@ impl Model {
         org_id: i64,
         remover_id: i64,
         id: i64,
+        client: &Client,
     ) -> ModelResult<Self> {
         let txn = ctx.db.begin().await?;
         let owners = Entity::find()
@@ -295,6 +314,18 @@ impl Model {
         access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
         conversation_members::Model::remove_everywhere(&txn, org_id, user_id).await?;
         notifications::Model::stop_emails(&txn, org_id, user_id).await?;
+        login_events::Model::record(
+            &txn,
+            client,
+            Entry {
+                org_id,
+                login: None,
+                user: (remover_id, &remover.username),
+                action: action::MEMBER_REMOVED,
+                detail: Some(membership.username.clone()),
+            },
+        )
+        .await?;
         txn.commit().await?;
         users::Model::close_live_connections(ctx, user_id);
         Ok(membership)

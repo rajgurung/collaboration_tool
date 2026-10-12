@@ -531,6 +531,29 @@
   .empty-state p { margin: 0; max-width: 280px; color: var(--muted); font-size: 14px; }
   .file-row { display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 2px 4px 2px 14px; }
   .file-main { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; padding: 6px 0; }
+  .tile-key { background: var(--active-bg); color: var(--link); }
+  .tile-sm { width: 36px; height: 36px; border-radius: 9px; }
+
+  /* Logins */
+  .kv { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; }
+  .kv .k { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .kv .v { font-size: 15px; overflow-wrap: anywhere; }
+  .secret { display: flex; align-items: center; gap: 8px; }
+  .secret .v { flex: 1; min-width: 0; }
+  .link-strong { color: var(--link); font-weight: 600; }
+  .dots { letter-spacing: 0.18em; font-size: 18px; line-height: 1; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 17px; letter-spacing: 0.02em; overflow-wrap: anywhere; }
+  .lock-line { display: flex; gap: 10px; align-items: flex-start; padding-top: 4px; font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .lock-line > svg { flex-shrink: 0; margin-top: 3px; }
+  .revealed { margin-top: 4px; padding: 10px 12px; border-radius: 10px; background: var(--lane); border: 1px solid var(--line); }
+  .countdown { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+  .countdown .bar { flex: 1; height: 4px; }
+  .countdown .bar > span { transition: width 1s linear; }
+  .person-fixed > span { border-style: dashed; color: var(--text); }
+  .person-fixed > span .avatar { opacity: 1; }
+  .ev { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; font-size: 14px; line-height: 1.4; }
+  .ev-icon { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 9px; background: var(--chip); color: var(--muted); }
+  .ev-bad .ev-icon { background: var(--blocked-bg); color: var(--blocked); }
   .docs-layout { display: grid; gap: 20px; }
   @media (min-width: 900px) {
     .docs-layout { grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: start; }

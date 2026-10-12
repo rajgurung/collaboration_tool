@@ -1,0 +1,40 @@
+{% extends "layouts/app.html" %}
+{% block title %}Change these at the source · {{ org.name }}{% endblock title %}
+{% block topbar %}
+<a href="/members" class="back">{{<icon name="chevron-left" class="h-5 w-5"/>}}Members</a>
+<span class="flex-1"></span>
+{% endblock topbar %}
+{% block content %}
+<div class="flex max-w-2xl flex-col gap-3.5">
+  {% if just_removed %}<p role="status" class="alert alert-success m-0">{{ former.username }} has been removed and signed out.</p>{% endif %}
+  {% if rows %}
+  <div class="mx-1 flex flex-col gap-1.5">
+    <h1 class="m-0 text-2xl font-extrabold tracking-tight">Change these at the source</h1>
+    <p class="m-0 text-sm text-muted">{{ former.username }} saw or could see these passwords, so they could still sign in to these accounts. Change each password on its own website, then update it here.</p>
+  </div>
+  <div class="list">
+    {% for row in rows %}
+    <div class="list-row items-start">
+      <span class="tile tile-key tile-sm">{{<icon name="key" class="h-5 w-5"/>}}</span>
+      <div class="min-w-0 flex-1">
+        <p class="name m-0 break-words">{{ row.title }}</p>
+        <p class="meta m-0">{{ row.meta }}</p>
+        <div class="mt-2 flex flex-wrap gap-2">
+          {% if row.url %}<a class="btn btn-secondary" href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{<icon name="external-link" class="h-4 w-4"/>}}Open site</a>{% endif %}
+          <a class="btn btn-secondary" href="/documents/logins/{{ row.id }}">{{<icon name="pencil" class="h-4 w-4"/>}}Update</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if mailbox_first %}<p class="meta mx-1 my-0">Start with the mailbox at the top. It can reset the others.</p>{% endif %}
+  {% else %}
+  <div class="card empty-state">
+    <span class="tile">{{<icon name="check" class="h-[22px] w-[22px]"/>}}</span>
+    <h2>No passwords to change</h2>
+    <p>{{ former.username }} never saw or copied a login password, so there is nothing to change.</p>
+    <a class="btn btn-secondary" href="/members">Back to Members</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock content %}

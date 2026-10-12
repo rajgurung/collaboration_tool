@@ -47,13 +47,14 @@
     <h2 class="section-label">Removed · {{ removed | length }}</h2>
     <div class="list">
       {% for row in removed %}
-      <div class="list-row">
+      <a class="list-row" href="/members/{{ row.id }}/rotate">
         {{<avatar name={row.username} color={row.color} size="md"/>}}
         <div class="min-w-0 flex-1">
           <p class="truncate-1 m-0 font-medium">{{ row.username }}</p>
-          <p class="meta truncate-1 m-0">Removed by {{ row.removed_by }}{% if row.removed_on %} on {{ row.removed_on }}{% endif %}</p>
+          <p class="meta truncate-1 m-0">Removed by {{ row.removed_by }}{% if row.removed_on %} on {{ row.removed_on }}{% endif %} · Passwords to change</p>
         </div>
-      </div>
+        {{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}
+      </a>
       {% endfor %}
     </div>
   </section>

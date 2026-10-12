@@ -36,3 +36,5 @@ pub mod oauth;
 pub mod claude;
 
 pub mod documents;
+
+pub mod logins;

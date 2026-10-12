@@ -109,7 +109,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .add_header(alice.0.clone(), alice.1.clone())
             .add_header("HX-Request", "true")
             .await;
-        let back = format!("/members?removed={}", carol_m.id);
+        let back = format!("/members/{}/rotate?removed=1", carol_m.id);
         assert_eq!(res.headers()["hx-redirect"], back.as_str());
         assert_eq!(status_of(&ctx, carol_m.id).await, "removed");
         let page = request
@@ -117,7 +117,10 @@ async fn removing_someone_locks_them_out_of_everything() {
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(page.contains("carol was removed and signed out."));
+        assert!(
+            page.contains("carol has been removed and signed out."),
+            "{page}"
+        );
         // The name comes from the database: a member id that was not removed shows nothing.
         let alice_m = memberships::Model::find_for_user(&ctx.db, org.created_by_id.unwrap())
             .await

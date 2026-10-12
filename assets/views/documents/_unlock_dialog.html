@@ -1,0 +1,25 @@
+<dialog class="sheet" aria-labelledby="unlock-title" data-unlock>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex flex-col gap-4" data-unlock-pane="form">
+      <div class="flex items-center gap-2"><h2 id="unlock-title" class="m-0 flex-1 text-[19px] font-bold">Enter your password</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+      <p class="m-0 text-muted">Type the password you use to sign in to this app. Then you can see logins for the next 5 minutes.</p>
+      <form class="flex flex-col gap-4" data-unlock-form>
+        <label class="field">
+          <span class="field-label">Your app password</span>
+          <input class="input" type="password" name="password" autocomplete="current-password" required>
+          <span class="field-error" data-unlock-error role="alert" hidden></span>
+        </label>
+        <p class="meta m-0">The owner gets an email each time a password is shown.</p>
+        <button type="submit" class="btn btn-primary btn-lg w-full" data-unlock-submit>Show password</button>
+      </form>
+    </div>
+    <div class="flex flex-col gap-4" data-unlock-pane="locked" hidden>
+      <span class="tile tile-error">{{<icon name="lock" class="h-5 w-5"/>}}</span>
+      <h2 class="m-0 text-[19px] font-bold">Your account is locked</h2>
+      <p class="m-0 text-muted">There were too many wrong passwords. We've emailed the owners of {{ org.name }} to let them know.</p>
+      <p class="m-0 text-muted">To unlock it, reset your password with "Forgot password" on the sign-in page.</p>
+      <a class="btn btn-primary btn-lg w-full" href="/login">Go to sign in</a>
+    </div>
+  </div>
+</dialog>

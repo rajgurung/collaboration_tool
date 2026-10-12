@@ -1,0 +1,60 @@
+<form id="{{ form.form_id }}" method="post" action="{{ form.action }}" hx-post="{{ form.action }}" class="grid gap-3.5" autocomplete="off">
+  <label class="field">
+    <span class="field-label">Name</span>
+    <input class="input" name="title" value="{{ form.values.title }}" maxlength="100" required placeholder="Companies House" {% if form.errors.title %}aria-invalid="true"{% endif %}>
+    {% if form.errors.title %}<span class="field-error">{{ form.errors.title }}</span>{% endif %}
+  </label>
+  <label class="field">
+    <span class="field-label">Username or email</span>
+    <input class="input" name="username" value="{{ form.values.username }}" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false" {% if form.errors.username %}aria-invalid="true"{% endif %}>
+    {% if form.errors.username %}<span class="field-error">{{ form.errors.username }}</span>{% endif %}
+  </label>
+  <label class="field">
+    <span class="field-label">Website</span>
+    <input class="input" name="url" value="{{ form.values.url }}" maxlength="500" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="example.com" {% if form.errors.url %}aria-invalid="true"{% endif %}>
+    {% if form.errors.url %}<span class="field-error">{{ form.errors.url }}</span>{% endif %}
+  </label>
+  <label class="field">
+    <span class="field-label">Password</span>
+    <span class="relative block">
+      <input class="input pr-12" type="password" name="password" maxlength="500" autocomplete="new-password" autocapitalize="off" spellcheck="false" {% if not form.editing %}required{% endif %} {% if form.editing %}placeholder="Leave empty to keep it"{% endif %} {% if form.errors.password %}aria-invalid="true"{% endif %}>
+      <button type="button" class="icon-btn absolute top-0 right-0 text-muted" data-toggle-password aria-label="Show what you typed" aria-pressed="false">{{<icon name="eye" class="h-5 w-5"/>}}</button>
+    </span>
+    {% if form.errors.password %}<span class="field-error">{{ form.errors.password }}</span>{% else %}<span class="field-hint">Kept locked. People must enter their app password to see it.</span>{% endif %}
+  </label>
+  <div class="field">
+    <span class="field-label" id="{{ form.form_id }}-access">Who can see the password</span>
+    <div class="flex flex-wrap gap-2" role="group" aria-labelledby="{{ form.form_id }}-access">
+      {% for p in form.people %}
+      {% if p.fixed %}
+      <span class="person-toggle person-fixed"><span>{{<avatar name={p.username} color={p.color} size="sm" label={false}/>}}{% if p.is_me %}You{% else %}{{ p.username }}{% endif %}</span></span>
+      {% else %}
+      <label class="person-toggle"><input type="checkbox" name="access" value="{{ p.id }}" {% if p.checked %}checked{% endif %}><span>{{<avatar name={p.username} color={p.color} size="sm" label={false}/>}}{% if p.is_me %}You{% else %}{{ p.username }}{% endif %}</span></label>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% if form.errors.access %}<span class="field-error">{{ form.errors.access }}</span>{% else %}<span class="field-hint">Owners and admins always can. Tap a member to let them see it too.</span>{% endif %}
+  </div>
+  <label class="field">
+    <span class="field-label">Recovery codes (optional)</span>
+    <textarea class="input" name="recovery" rows="2" maxlength="4000" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="{% if form.editing and form.has_recovery %}Leave empty to keep the saved codes{% else %}One per line{% endif %}"></textarea>
+    {% if form.errors.recovery %}<span class="field-error">{{ form.errors.recovery }}</span>{% else %}<span class="field-hint">Kept locked, like the password.</span>{% endif %}
+  </label>
+  {% if form.editing and form.has_recovery %}
+  <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="remove_recovery" value="1"> Delete the saved recovery codes</label>
+  {% endif %}
+  <label class="field">
+    <span class="field-label">Notes</span>
+    <textarea class="input" name="notes" rows="2" maxlength="2000" {% if form.errors.notes %}aria-invalid="true"{% endif %}>{{ form.values.notes }}</textarea>
+    {% if form.errors.notes %}<span class="field-error">{{ form.errors.notes }}</span>{% else %}<span class="field-hint">Visible to every member. Not encrypted, so never put passwords here.</span>{% endif %}
+  </label>
+  {% if form.editing %}
+  <label class="field">
+    <span class="field-label">Folder</span>
+    <select class="input" name="folder_id">
+      {% for f in form.folders %}<option value="{{ f.id }}" {% if f.id == form.values.folder_id %}selected{% endif %}>{{ f.name }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <button type="submit" class="btn btn-primary btn-lg w-full">{{ form.submit }}</button>
+</form>

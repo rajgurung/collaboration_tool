@@ -6,8 +6,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     data::settings::Settings,
-    extractors::{current_member::CurrentMember, session::redirect_response},
-    models::{memberships, organisations, users},
+    extractors::{
+        current_member::{forbidden, CurrentMember},
+        session::redirect_response,
+    },
+    models::{login_events::Client, logins::ToChange, memberships, organisations, users},
     views::{
         forms::{field_errors, toast},
         layout::avatar_color,
@@ -50,6 +53,7 @@ impl MemberRow {
 /// Someone who was removed, for the owners' "Removed" list.
 #[derive(Debug, Serialize)]
 struct RemovedRow {
+    id: i64,
     username: String,
     color: &'static str,
     removed_by: String,
@@ -89,6 +93,7 @@ async fn index(
         .iter()
         .filter(|(m, _)| m.is_removed())
         .map(|(m, _)| RemovedRow {
+            id: m.id,
             username: m.username.clone(),
             color: avatar_color(&m.username),
             removed_by: m
@@ -228,21 +233,21 @@ async fn respond(
 }
 
 /// Owners and admins remove someone from the organisation, then see the
-/// members page again. A refusal is an error toast.
+/// logins whose passwords to change. A refusal is an error toast.
 #[debug_handler]
 async fn remove(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    client: Client,
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_manager()?;
     member.require_own_membership()?;
-    match memberships::Model::remove(&ctx, member.org.id, member.user.id, id).await {
-        // A full reload, so the counts and the Removed list are current.
+    match memberships::Model::remove(&ctx, member.org.id, member.user.id, id, &client).await {
         Ok(removed) => Ok(redirect_response(
             &headers,
-            &format!("/members?removed={}", removed.id),
+            &format!("/members/{}/rotate?removed=1", removed.id),
         )),
         Err(ModelError::Message(message)) => format::render()
             .status(422)
@@ -251,6 +256,82 @@ async fn remove(
             .text(&message),
         Err(err) => Err(err.into()),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct RotateQuery {
+    removed: Option<String>,
+}
+
+/// One row of "Change these at the source".
+#[derive(Debug, Serialize)]
+struct ChangeRow {
+    id: i64,
+    title: String,
+    url: String,
+    meta: String,
+}
+
+fn change_row(item: ToChange, tz: chrono_tz::Tz) -> ChangeRow {
+    let when = |at| time::local(at, tz).format("%-d %b, %H:%M").to_string();
+    let times = match item.seen {
+        0 | 1 => String::new(),
+        n => format!(" · seen {n} times"),
+    };
+    let meta = match (item.last_copied, item.last_seen) {
+        (Some(copied), _) => format!("Copied {}{times}", when(copied)),
+        (None, Some(seen)) => format!("Last seen {}{times}", when(seen)),
+        (None, None) if item.wrote => "Added or changed it, so may know it".to_string(),
+        (None, None) => "Could see it, never opened it".to_string(),
+    };
+    ChangeRow {
+        id: item.login.id,
+        title: item.login.title,
+        url: item.login.url,
+        meta,
+    }
+}
+
+/// "Change these at the source": after someone is removed, the logins they
+/// saw, copied, added, changed or were allowed to see. For the person who
+/// removed them and for owners.
+#[debug_handler]
+async fn rotate(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path(id): Path<i64>,
+    Query(query): Query<RotateQuery>,
+) -> Result<Response> {
+    member.require_own_membership()?;
+    let former = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if !former.is_removed() {
+        return Err(Error::NotFound);
+    }
+    if !member.is_owner() && former.removed_by_id != Some(member.user.id) {
+        return Err(forbidden(
+            "Only owners and the person who removed them can see this.",
+        ));
+    }
+    let items = ToChange::for_former_member(&ctx.db, &former).await?;
+    let mailbox_first = items.first().is_some_and(|i| i.mailbox);
+    let rows: Vec<ChangeRow> = items
+        .into_iter()
+        .map(|i| change_row(i, member.tz()))
+        .collect();
+    format::render().view(
+        &v,
+        "members/rotate.html",
+        member.page(
+            "members",
+            data!({
+                "former": { "username": former.username },
+                "just_removed": query.removed.is_some(),
+                "rows": rows,
+                "mailbox_first": mailbox_first,
+            }),
+        ),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -298,4 +379,5 @@ pub fn routes() -> Routes {
         .add("/members/{id}/reject", post(reject))
         .add("/members/{id}/role", post(change_role))
         .add("/members/{id}/remove", post(remove))
+        .add("/members/{id}/rotate", get(rotate))
 }

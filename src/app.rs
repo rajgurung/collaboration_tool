@@ -122,6 +122,7 @@ impl Hooks for App {
 
     fn routes(ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::logins::routes())
             .add_route(controllers::documents::routes())
             .add_route(controllers::claude::routes())
             .add_route(controllers::oauth::routes())

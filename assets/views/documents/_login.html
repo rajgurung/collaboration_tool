@@ -1,0 +1,52 @@
+<div class="flex flex-col gap-4" data-login="{{ login.id }}">
+  <div class="flex items-start gap-3 {% if not sheet %}mx-1{% endif %}">
+    <span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span>
+    <div class="min-w-0 flex-1">
+      {% if sheet %}<h2 class="m-0 text-xl font-bold break-words">{{ login.title }}</h2>{% else %}<h1 class="m-0 text-2xl font-extrabold tracking-tight break-words">{{ login.title }}</h1>{% endif %}
+      <p class="meta m-0">Login · Added by {{ login.added_by }}, {{ login.added_on }}</p>
+    </div>
+    {% if sheet %}
+    {% if me.can_manage %}<a class="icon-btn" href="/documents/logins/{{ login.id }}" aria-label="Edit {{ login.title }}">{{<icon name="pencil" class="h-5 w-5"/>}}</a>{% endif %}
+    <button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button>
+    {% endif %}
+  </div>
+
+  <div class="list">
+    {% if login.username %}
+    <div class="kv"><span class="k">Username</span><div class="secret"><span class="v">{{ login.username }}</span><button type="button" class="icon-btn" data-copy-text="{{ login.username }}" data-copy-message="Username copied" aria-label="Copy username">{{<icon name="copy" class="h-5 w-5"/>}}</button></div></div>
+    {% endif %}
+    {% if login.url %}
+    <div class="kv"><span class="k">Website</span><div class="secret"><a class="v link-strong" href="{{ login.url }}" target="_blank" rel="noopener noreferrer">{{ login.display_url }}</a><a class="icon-btn" href="{{ login.url }}" target="_blank" rel="noopener noreferrer" aria-label="Open website">{{<icon name="external-link" class="h-5 w-5"/>}}</a></div></div>
+    {% endif %}
+    {% if can_reveal %}
+    <div class="kv" data-secret="password">
+      <span class="k">Password</span>
+      <div class="secret" data-secret-hidden><span class="v dots" aria-label="Hidden">••••••••••</span><button type="button" class="btn btn-secondary" data-secret-show>{{<icon name="eye" class="h-4 w-4"/>}}Show</button><button type="button" class="icon-btn" data-secret-copy aria-label="Copy password">{{<icon name="copy" class="h-5 w-5"/>}}</button></div>
+      <div data-secret-slot aria-live="polite"></div>
+    </div>
+    <div class="kv" {% if login.has_recovery %}data-secret="recovery"{% endif %}>
+      <span class="k">Recovery codes</span>
+      {% if login.has_recovery %}
+      <div class="secret" data-secret-hidden><span class="v meta text-[15px]">Saved, hidden</span><button type="button" class="btn btn-secondary" data-secret-show>{{<icon name="eye" class="h-4 w-4"/>}}Show</button></div>
+      <div data-secret-slot aria-live="polite"></div>
+      {% else %}
+      <span class="v meta text-[15px]">None saved</span>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="kv"><span class="k">Password</span><div class="lock-line">{{<icon name="lock" class="h-4 w-4"/>}}<span>Only owners, admins and people named on this login can see the password.{% if ask %} Ask {{ ask }} if you need it.{% endif %}</span></div></div>
+    {% endif %}
+  </div>
+
+  {% if login.notes %}
+  <div class="list"><div class="kv"><span class="k">Notes</span><p class="v m-0 whitespace-pre-line">{{ login.notes }}</p></div></div>
+  {% endif %}
+
+  <div class="flex flex-col gap-1.5 {% if not sheet %}mx-1{% endif %}">
+    <p class="section-label m-0">Who can see the password</p>
+    <p class="meta m-0 text-sm">Owners and admins: {{ managers }}. {% if named %}Also named: {{ named }}.{% else %}No members named.{% endif %}</p>
+  </div>
+  {% if can_reveal %}
+  <p class="meta m-0 flex items-center gap-1.5 {% if not sheet %}mx-1{% endif %}" data-unlocked-line {% if not unlocked_minutes %}hidden{% endif %}>{{<icon name="lock" class="h-4 w-4"/>}}<span>Unlocked for <span data-unlocked-minutes>{{ unlocked_minutes }}</span> more {% if unlocked_minutes == 1 %}minute{% else %}minutes{% endif %}</span></p>
+  {% endif %}
+</div>

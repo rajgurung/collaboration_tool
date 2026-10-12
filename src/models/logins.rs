@@ -517,6 +517,94 @@ impl Model {
     }
 }
 
+/// A login a removed person could still use, for "Change these at the
+/// source".
+#[derive(Debug)]
+pub struct ToChange {
+    pub login: Model,
+    /// Times they saw or copied it, and when last.
+    pub seen: usize,
+    pub last_seen: Option<DateTimeWithTimeZone>,
+    pub last_copied: Option<DateTimeWithTimeZone>,
+    /// They added or changed it, so they may know it without seeing it here.
+    pub wrote: bool,
+    /// A mailbox can reset the others, so it comes first.
+    pub mailbox: bool,
+}
+
+impl ToChange {
+    /// Every login `former` created, changed, saw or copied, plus any they
+    /// were allowed to see: mailboxes first, then the ones they saw (most
+    /// recent first), then the rest by title.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn for_former_member<C: ConnectionTrait>(
+        db: &C,
+        former: &memberships::Model,
+    ) -> ModelResult<Vec<Self>> {
+        let org_id = former.organisation_id;
+        let user_id = former.user_id;
+        let events = login_events::Model::by_user(
+            db,
+            org_id,
+            user_id,
+            &[action::REVEAL, action::COPY, action::CREATE, action::EDIT],
+        )
+        .await?;
+        let all = Model::for_org(db, org_id).await?;
+        let could_see = if former.role == role::OWNER || former.role == role::ADMIN {
+            all.iter().map(|l| l.id).collect()
+        } else {
+            login_accesses::Model::named_among(db, user_id, all.iter().map(|l| l.id)).await?
+        };
+        let mut list: Vec<Self> = all
+            .into_iter()
+            .filter_map(|login| {
+                let mine: Vec<&login_events::Model> = events
+                    .iter()
+                    .filter(|e| e.login_id == Some(login.id))
+                    .collect();
+                let looked: Vec<&&login_events::Model> = mine
+                    .iter()
+                    .filter(|e| e.action == action::REVEAL || e.action == action::COPY)
+                    .collect();
+                let wrote = login.created_by_id == Some(user_id)
+                    || mine
+                        .iter()
+                        .any(|e| e.action == action::CREATE || e.action == action::EDIT);
+                if looked.is_empty() && !wrote && !could_see.contains(&login.id) {
+                    return None;
+                }
+                let words = format!("{} {}", login.title, login.url).to_lowercase();
+                Some(Self {
+                    seen: looked.len(),
+                    last_seen: looked.first().map(|e| e.created_at),
+                    last_copied: looked
+                        .iter()
+                        .find(|e| e.action == action::COPY)
+                        .map(|e| e.created_at),
+                    wrote,
+                    mailbox: words.contains("mail") || words.contains("inbox"),
+                    login,
+                })
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            b.mailbox
+                .cmp(&a.mailbox)
+                .then(b.last_seen.cmp(&a.last_seen))
+                .then(
+                    a.login
+                        .title
+                        .to_lowercase()
+                        .cmp(&b.login.title.to_lowercase()),
+                )
+        });
+        Ok(list)
+    }
+}
+
 impl loco_rs::prelude::TenantEntity for Entity {
     type TenantId = i64;
 

@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::{
     extractors::{
+        client::client_ip,
         current_user::CurrentUser,
         session::{
             append_cookie, cleared_acting_org_cookie, cleared_session_cookie, redirect_response,
@@ -11,7 +12,11 @@ use crate::{
         },
     },
     mailers::{auth::AuthMailer, security::SecurityMailer},
-    models::{auth_attempts, users},
+    models::{
+        auth_attempts,
+        login_events::{self, action, Client, Entry},
+        logins, memberships, organisations, users,
+    },
     views::forms::field_errors,
 };
 
@@ -97,6 +102,9 @@ async fn login(
     };
     // The attempt recorded above stays as a failure unless this clears it.
     auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
+    if user.is_locked() {
+        return login_error(&v, &form, 403, LOCKED);
+    }
     format::render()
         .cookies(&[session_cookie(&ctx, &user)?])?
         .redirect(safe_next(&form.next).unwrap_or("/"))
@@ -104,6 +112,7 @@ async fn login(
 
 const INCORRECT: &str = "Email or password is incorrect.";
 const TOO_MANY: &str = "Too many failed sign-ins. Try again in 15 minutes, or reset your password.";
+const LOCKED: &str = "Your account is locked after too many wrong passwords. Reset your password with \"Forgot password\" to unlock it.";
 
 fn login_error(v: &TeraView, form: &LoginForm, status: u16, message: &str) -> Result<Response> {
     format::render().status(status).view(
@@ -115,15 +124,6 @@ fn login_error(v: &TeraView, form: &LoginForm, status: u16, message: &str) -> Re
             "error": message,
         }),
     )
-}
-
-/// The address limits are counted against. Requests without one (never
-/// expected behind Railway) share a single bucket.
-fn client_ip(remote: RemoteIP) -> String {
-    match remote {
-        RemoteIP::Forwarded(ip) | RemoteIP::Socket(ip) => ip.to_string(),
-        RemoteIP::None => "unknown".to_string(),
-    }
 }
 
 #[debug_handler]
@@ -144,8 +144,26 @@ async fn sign_out_everywhere(
     CurrentUser(user): CurrentUser,
     State(ctx): State<AppContext>,
     headers: HeaderMap,
+    client: Client,
 ) -> Result<Response> {
     users::Model::bump_session_version(&ctx, user.id).await?;
+    if let Some(membership) = memberships::Model::find_for_user(&ctx.db, user.id)
+        .await?
+        .filter(memberships::Model::is_active)
+    {
+        login_events::Model::record(
+            &ctx.db,
+            &client,
+            Entry {
+                org_id: membership.organisation_id,
+                login: None,
+                user: (user.id, &membership.username),
+                action: action::SIGN_OUT_EVERYWHERE,
+                detail: None,
+            },
+        )
+        .await?;
+    }
     let user = users::Model::find_by_id(&ctx.db, user.id).await?;
     let mut response = redirect_response(&headers, "/more?signed_out=1");
     append_cookie(&mut response, &session_cookie(&ctx, &user)?)?;
@@ -216,8 +234,9 @@ async fn reset(
     match user.reset_password_everywhere(&ctx, &form.password).await {
         Ok(user) => {
             auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
+            auth_attempts::Model::clear_reauth(&ctx.db, &user.email).await?;
             // The password is already changed; a failed email must not undo that.
-            if let Err(err) = SecurityMailer::password_changed(&ctx, &user).await {
+            if let Err(err) = tell_about_reset(&ctx, &user).await {
                 tracing::error!(error = %err, "could not send the password changed email");
             }
             format::redirect("/login?reset=1")
@@ -229,6 +248,24 @@ async fn reset(
             reset_form_error(&v, &token, &message)
         }
     }
+}
+
+/// Emails the person, and the owners too when the person can see login
+/// passwords: someone who took over their email could now see them.
+async fn tell_about_reset(ctx: &AppContext, user: &users::Model) -> Result<()> {
+    SecurityMailer::password_changed(ctx, user).await?;
+    let Some(membership) = memberships::Model::find_for_user(&ctx.db, user.id)
+        .await?
+        .filter(memberships::Model::is_active)
+    else {
+        return Ok(());
+    };
+    let org_id = membership.organisation_id;
+    if logins::Model::any_visible_to(&ctx.db, org_id, user.id, &membership.role).await? {
+        let org = organisations::Model::find_by_id(&ctx.db, org_id).await?;
+        SecurityMailer::member_password_changed(ctx, &org, user, &membership.username).await?;
+    }
+    Ok(())
 }
 
 fn reset_form_error(v: &TeraView, token: &str, message: &str) -> Result<Response> {

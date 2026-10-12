@@ -350,22 +350,34 @@ impl Model {
         Ok(user)
     }
 
-    /// Creates a session token. It carries the session version, so bumping
-    /// the version ends every session issued before.
+    /// Creates a session token for a new sign-in. It carries the session
+    /// version, so bumping the version ends every session issued before,
+    /// and a random sign-in id.
     ///
     /// # Errors
     ///
     /// when could not convert user claims to jwt token
     pub fn generate_jwt(&self, secret: &str, expiration: u64) -> ModelResult<String> {
+        self.generate_jwt_for_session(secret, expiration, &Uuid::new_v4().to_string())
+    }
+
+    /// Like [`Self::generate_jwt`], with a given sign-in id.
+    ///
+    /// # Errors
+    ///
+    /// when could not convert user claims to jwt token
+    pub fn generate_jwt_for_session(
+        &self,
+        secret: &str,
+        expiration: u64,
+        session_id: &str,
+    ) -> ModelResult<String> {
         let mut claims = Map::new();
         claims.insert(
             SESSION_VERSION_CLAIM.to_string(),
             self.session_version.into(),
         );
-        claims.insert(
-            SESSION_ID_CLAIM.to_string(),
-            Uuid::new_v4().to_string().into(),
-        );
+        claims.insert(SESSION_ID_CLAIM.to_string(), session_id.into());
         jwt::JWT::new(secret)
             .generate_token(expiration, self.pid.to_string(), claims)
             .map_err(ModelError::from)
