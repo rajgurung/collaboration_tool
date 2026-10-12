@@ -585,7 +585,6 @@ fn event_row(event: login_events::Model, tz: chrono_tz::Tz) -> EventRow {
         }
         action::EDIT => ("pencil", false, "changed".to_string()),
         action::DELETE => ("trash", false, "deleted".to_string()),
-        action::UNLOCK => ("lock", false, "entered their app password".to_string()),
         action::REAUTH_FAILED => (
             "circle-alert",
             true,
@@ -602,10 +601,7 @@ fn event_row(event: login_events::Model, tz: chrono_tz::Tz) -> EventRow {
     };
     // Re-entering the password is about the login they were trying to see,
     // which goes in the second line.
-    let trying = matches!(
-        event.action.as_str(),
-        action::UNLOCK | action::REAUTH_FAILED | action::LOCK
-    );
+    let trying = matches!(event.action.as_str(), action::REAUTH_FAILED | action::LOCK);
     let at = time::local(event.created_at, tz)
         .format("%H:%M")
         .to_string();
@@ -636,7 +632,13 @@ async fn activity(
     let today = time::today(tz);
     let mut days: Vec<serde_json::Value> = Vec::new();
     let mut current = None;
-    for event in login_events::Model::for_org(&ctx.db, member.org.id, 500).await? {
+    // Right app passwords are kept in the log but not listed: the reveal or
+    // copy that follows says the same thing.
+    let shown = login_events::Model::for_org(&ctx.db, member.org.id, 500)
+        .await?
+        .into_iter()
+        .filter(|e| e.action != action::UNLOCK);
+    for event in shown {
         let day = time::local(event.created_at, tz).date_naive();
         if current != Some(day) {
             current = Some(day);
