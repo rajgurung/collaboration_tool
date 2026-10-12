@@ -10,7 +10,7 @@ use crate::{
             session_cookie,
         },
     },
-    mailers::auth::AuthMailer,
+    mailers::{auth::AuthMailer, security::SecurityMailer},
     models::{
         auth_attempts::{self, kind},
         users,
@@ -233,6 +233,10 @@ async fn reset(
         Ok(user) => {
             users::Model::bump_session_version(&ctx, user.id).await?;
             auth_attempts::Model::clear(&ctx.db, &user.email).await?;
+            // The password is already changed; a failed email must not undo that.
+            if let Err(err) = SecurityMailer::password_changed(&ctx, &user).await {
+                tracing::error!(error = %err, "could not send the password changed email");
+            }
             format::redirect("/login?reset=1")
         }
         Err(err) => {

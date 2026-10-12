@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod mentions;
+pub mod security;
 
 use loco_rs::prelude::*;
 
@@ -29,21 +30,23 @@ pub(crate) async fn deliver(
 }
 
 /// Renders `subject.t`, `text.t` and `html.t` from a mailer template folder.
+/// Like Loco's SMTP path, nothing is escaped automatically: every variable in
+/// an `html.t` must use `| escape`.
 pub(crate) fn render(dir: &Dir<'_>, args: &mailer::Args) -> Result<ResendEmailArgs> {
     let context =
         tera::Context::from_serialize(&args.locals).map_err(|e| Error::string(&e.to_string()))?;
-    let part = |name: &str, autoescape: bool| -> Result<String> {
+    let part = |name: &str| -> Result<String> {
         let source = dir
             .get_file(name)
             .and_then(|f| f.contents_utf8())
             .ok_or_else(|| Error::string(&format!("missing mailer template {name}")))?;
-        tera::Tera::one_off(source, &context, autoescape).map_err(|e| Error::string(&e.to_string()))
+        tera::Tera::one_off(source, &context, false).map_err(|e| Error::string(&e.to_string()))
     };
     Ok(ResendEmailArgs {
         from: args.from.clone().unwrap_or_default(),
         to: args.to.clone(),
-        subject: part("subject.t", false)?.trim().to_string(),
-        text: part("text.t", false)?,
-        html: part("html.t", true)?,
+        subject: part("subject.t")?.trim().to_string(),
+        text: part("text.t")?,
+        html: part("html.t")?,
     })
 }

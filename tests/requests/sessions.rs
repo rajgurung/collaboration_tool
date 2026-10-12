@@ -114,6 +114,12 @@ async fn a_password_reset_ends_every_session() {
             .await;
         assert_eq!(res.status_code(), 303);
         assert!(!can_open_more(&request, &cookie).await);
+
+        // The reset link, then "Your password was changed".
+        let deliveries = ctx.mailer.as_ref().unwrap().deliveries();
+        assert_eq!(deliveries.count, 2);
+        assert!(deliveries.messages[1].contains("Your Collaboration Tool password was changed"));
+        assert!(deliveries.messages[1].contains("To: alice@example.com"));
     })
     .await;
 }
