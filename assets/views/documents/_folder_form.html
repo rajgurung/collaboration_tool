@@ -1,0 +1,10 @@
+<form id="{{ form_id }}" method="post" action="{{ action }}" hx-post="{{ action }}" class="grid gap-4">
+  {{<text_field name="name" label="Name" value={values.name} error={errors.name | default(value="")}/>}}
+  <label class="field">
+    <span class="field-label">Note (optional)</span>
+    <textarea name="note" class="input" rows="3" maxlength="500" placeholder="What goes here, or where the paper originals are kept">{{ values.note }}</textarea>
+    {% if errors.note %}<span class="field-error">{{ errors.note }}</span>{% endif %}
+  </label>
+  <p class="field-hint m-0">Everyone in {{ org.name }} can see this folder and add to it.</p>
+  <button type="submit" class="btn btn-primary btn-lg w-full">{{ submit }}</button>
+</form>

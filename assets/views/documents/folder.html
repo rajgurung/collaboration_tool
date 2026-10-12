@@ -1,0 +1,66 @@
+{% extends "layouts/app.html" %}
+{% block title %}{{ folder.name }} · Documents · {{ org.name }}{% endblock title %}
+{% block body_attrs %}hx-history="false"{% endblock body_attrs %}
+{% block topbar %}
+<a href="/documents" class="back mobile-only">{{<icon name="chevron-left" class="h-5 w-5"/>}}Documents</a>
+<h1 class="desktop-only">Documents</h1>
+<span class="flex-1 mobile-only"></span>
+{% if me.can_manage %}<button type="button" class="btn btn-secondary desktop-only" data-dialog-open="new-folder-title">{{<icon name="plus" class="h-4 w-4"/>}}New folder</button>{% endif %}
+<button type="button" class="btn btn-primary mobile-only" data-dialog-open="add-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>
+{% if me.can_manage %}<button type="button" class="icon-btn mobile-only" data-dialog-open="folder-settings-title" aria-label="Folder options">{{<icon name="ellipsis" class="h-5 w-5"/>}}</button>{% endif %}
+{% endblock topbar %}
+{% block content %}
+<div class="docs-layout">
+  <div class="desktop-only">{% include "documents/_folders.html" %}</div>
+  <section class="flex min-w-0 flex-col gap-3.5" aria-labelledby="folder-title">
+    <div class="flex flex-col gap-2.5">
+      <div class="flex items-start gap-2">
+        <h1 id="folder-title" class="page-title flex-1">{{ folder.name }}</h1>
+        {% if me.can_manage %}<button type="button" class="icon-btn desktop-only" data-dialog-open="folder-settings-title" aria-label="Folder options">{{<icon name="ellipsis" class="h-5 w-5"/>}}</button>{% endif %}
+        <button type="button" class="btn btn-primary desktop-only" data-dialog-open="add-title">{{<icon name="plus" class="h-4 w-4"/>}}Add</button>
+      </div>
+      {% if folder.note %}<div class="note-card">{{<icon name="sticky-note" class="h-4 w-4"/>}}<p class="m-0">{{ folder.note }}</p></div>{% endif %}
+    </div>
+    <div id="uploads" class="list upload-list" aria-live="polite"></div>
+    <div id="files" class="flex flex-col gap-3.5">{% include "documents/_files.html" %}</div>
+  </section>
+</div>
+
+<form method="post" action="/documents/folders/{{ folder.id }}/files" enctype="multipart/form-data"
+      hx-post="/documents/folders/{{ folder.id }}/files" hx-encoding="multipart/form-data"
+      hx-target="#files" hx-swap="innerHTML" data-upload>
+  <input type="file" name="file" class="sr-only" tabindex="-1" aria-hidden="true">
+</form>
+
+<dialog class="sheet" aria-labelledby="add-title">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex items-center gap-2"><h2 id="add-title" class="m-0 flex-1 text-[19px] font-bold">Add to {{ folder.name }}</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+    <div class="list">
+      <button type="button" class="add-row" data-pick="photo"><span class="tile">{{<icon name="camera" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Photo</span><span class="meta block">Take one, or pick from your photos</span></span></button>
+      <button type="button" class="add-row" data-pick="file"><span class="tile">{{<icon name="paperclip" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">File</span><span class="meta block">PDF, Word, Excel or PowerPoint</span></span></button>
+    </div>
+    <p class="meta m-0">Up to 25 MB each. Everyone in {{ org.name }} can open what you add.</p>
+  </div>
+</dialog>
+
+{% if me.can_manage %}
+<dialog class="sheet" aria-labelledby="folder-settings-title">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex items-center gap-2"><h2 id="folder-settings-title" class="m-0 flex-1 text-[19px] font-bold">Folder settings</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+    {% set form_id = "folder-" ~ folder.id ~ "-form" %}{% set action = "/documents/folders/" ~ folder.id %}{% set values = {"name": folder.name, "note": folder.note | default(value="")} %}{% set errors = {} %}{% set submit = "Save" %}
+    {% include "documents/_folder_form.html" %}
+    {% if files %}
+    <p class="meta m-0">Only empty folders can be deleted.</p>
+    {% else %}
+    <form method="post" action="/documents/folders/{{ folder.id }}/delete" hx-post="/documents/folders/{{ folder.id }}/delete"
+          hx-confirm="Delete the folder “{{ folder.name }}”? You can't undo this.">
+      <button type="submit" class="btn btn-danger btn-lg w-full">{{<icon name="trash" class="h-4 w-4"/>}}Delete folder</button>
+    </form>
+    {% endif %}
+  </div>
+</dialog>
+{% endif %}
+{% include "documents/_new_folder_dialog.html" %}
+{% endblock content %}

@@ -11,6 +11,7 @@
     <a href="/chat" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="/chat/unread" hx-trigger="load, every 60s"></span></a>
     <a href="/roadmap" class="side-link" {% if active == "roadmap" %}aria-current="page"{% endif %}>{{<icon name="map" class="h-5 w-5"/>}}Roadmap</a>
     <a href="/meetings" class="side-link" {% if active == "meetings" %}aria-current="page"{% endif %}>{{<icon name="message-square-text" class="h-5 w-5"/>}}Meetings</a>
+    {% if not me.acting %}<a href="/documents" class="side-link" {% if active == "documents" %}aria-current="page"{% endif %}>{{<icon name="folder" class="h-5 w-5"/>}}Documents</a>{% endif %}
     <a href="/members" class="side-link" {% if active == "members" %}aria-current="page"{% endif %}>{{<icon name="users" class="h-5 w-5"/>}}Members</a>
     {% if me.is_super_admin %}<a href="/admin" class="side-link" {% if active == "admin" %}aria-current="page"{% endif %}>{{<icon name="shield" class="h-5 w-5"/>}}Admin</a>{% endif %}
     <div class="mt-auto flex items-center gap-3 border-t border-line px-2 pt-3">

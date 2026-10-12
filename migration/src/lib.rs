@@ -28,6 +28,8 @@ mod m20261008_213319_claude_connector;
 mod m20261012_175013_add_session_version_to_users;
 mod m20261012_180045_auth_attempts;
 mod m20261012_181452_add_removed_to_memberships;
+mod m20261012_182629_folders;
+mod m20261012_182750_documents;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -60,6 +62,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_175013_add_session_version_to_users::Migration),
             Box::new(m20261012_180045_auth_attempts::Migration),
             Box::new(m20261012_181452_add_removed_to_memberships::Migration),
+            Box::new(m20261012_182629_folders::Migration),
+            Box::new(m20261012_182750_documents::Migration),
             // inject-above (do not remove this comment)
         ]
     }

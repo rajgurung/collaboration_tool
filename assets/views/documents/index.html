@@ -1,0 +1,24 @@
+{% extends "layouts/app.html" %}
+{% block title %}Documents · {{ org.name }}{% endblock title %}
+{% block body_attrs %}hx-history="false"{% endblock body_attrs %}
+{% block topbar %}
+<a href="/more" class="back mobile-only">{{<icon name="chevron-left" class="h-5 w-5"/>}}More</a>
+<h1 class="desktop-only">Documents</h1>
+<span class="flex-1 mobile-only"></span>
+{% if me.can_manage %}<button type="button" class="btn btn-secondary" data-dialog-open="new-folder-title">{{<icon name="plus" class="h-4 w-4"/>}}New folder</button>{% endif %}
+{% endblock topbar %}
+{% block content %}
+<h1 class="page-title mobile-only mb-5">Documents</h1>
+<div class="docs-layout">
+  <div class="flex flex-col gap-4">
+    {% include "documents/_folders.html" %}
+    {% if not me.can_manage %}<p class="meta mx-1 my-0">Owners and admins look after folders. You can add photos and files to any of them.</p>{% endif %}
+  </div>
+  <div class="card empty-state desktop-only">
+    <span class="tile">{{<icon name="folder" class="h-[22px] w-[22px]"/>}}</span>
+    <h2>Choose a folder</h2>
+    <p>Open a folder to see its files, or add a photo or file to it.</p>
+  </div>
+</div>
+{% include "documents/_new_folder_dialog.html" %}
+{% endblock content %}

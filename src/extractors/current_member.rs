@@ -179,7 +179,9 @@ impl FromRequestParts<AppContext> for CurrentMember {
     }
 }
 
-fn forbidden(message: &str) -> Error {
+/// A 403 with a message for the person.
+#[must_use]
+pub fn forbidden(message: &str) -> Error {
     Error::CustomError(
         StatusCode::FORBIDDEN,
         loco_rs::controller::ErrorDetail::new("forbidden", message),

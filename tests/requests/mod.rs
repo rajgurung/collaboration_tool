@@ -42,3 +42,5 @@ pub mod live_sign_out;
 pub mod remove_member;
 pub mod sessions;
 pub mod sign_in_limits;
+
+pub mod documents;

@@ -14,7 +14,7 @@ default-run = "collab-cli"
 loco-rs = { version = "1.2" }
 
 [dependencies]
-loco-rs = { workspace = true, features = ["multi-tenancy"] }
+loco-rs = { workspace = true, features = ["multi-tenancy", "storage_aws_s3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 tokio = { version = "1.45", default-features = false, features = [
@@ -71,6 +71,12 @@ rand = "0.9"
 base64 = "0.22"
 # Parses OAuth redirect URIs so they are matched exactly, never by prefix.
 url = "2"
+# Reads an upload's first bytes to tell its real type, whatever its name says.
+infer = "0.19"
+# Already used by axum; the bytes of an upload.
+bytes = "1"
+# Already used by url; encodes file names in Content-Disposition.
+percent-encoding = "2"
 
 [[bin]]
 name = "collab-cli"
@@ -84,3 +90,5 @@ rstest = { version = "0.25" }
 insta = { version = "1.34", features = ["redactions", "yaml", "filters"] }
 # Already in the tree through axum's ws feature; opens a real chat socket in tests.
 tokio-tungstenite = "0.29"
+# The version Loco's test server uses; builds multipart uploads in tests.
+axum-test = "17.3"

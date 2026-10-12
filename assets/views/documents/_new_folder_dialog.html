@@ -1,0 +1,10 @@
+{% if me.can_manage %}
+<dialog class="sheet" aria-labelledby="new-folder-title">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body flex flex-col gap-4">
+    <div class="flex items-center gap-2"><h2 id="new-folder-title" class="m-0 flex-1 text-[19px] font-bold">New folder</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+    {% set form_id = "new-folder-form" %}{% set action = "/documents/folders" %}{% set values = {"name": "", "note": ""} %}{% set errors = {} %}{% set submit = "Create folder" %}
+    {% include "documents/_folder_form.html" %}
+  </div>
+</dialog>
+{% endif %}

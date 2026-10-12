@@ -7,23 +7,56 @@ use loco_rs::{
     controller::AppRoutes,
     db::{self, truncate_table},
     environment::Environment,
+    storage::{drivers, Storage},
     task::Tasks,
-    Result,
+    Error, Result,
 };
 use migration::Migrator;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 #[allow(unused_imports)]
 use crate::{
-    controllers, initializers,
+    controllers,
+    data::settings::Settings,
+    initializers,
     models::_entities::{
-        access_tokens, auth_attempts, conversation_members, conversations, meeting_attendees,
-        meetings, memberships, messages, oauth_clients, oauth_codes, organisations, projects,
-        task_notes, tasks as task_items, users,
+        access_tokens, auth_attempts, conversation_members, conversations, documents, folders,
+        meeting_attendees, meetings, memberships, messages, oauth_clients, oauth_codes,
+        organisations, projects, task_notes, tasks as task_items, users,
     },
     tasks,
     workers::downloader::DownloadWorker,
 };
+
+/// Where uploaded documents live: R2 in production, memory in tests, and
+/// `tmp/storage` on disk in development.
+fn document_storage(ctx: &AppContext) -> Result<Storage> {
+    let driver = match ctx.environment {
+        Environment::Production => {
+            let r2 = Settings::from_context(ctx)?
+                .r2
+                .ok_or_else(|| Error::string("settings.r2 is required in production"))?;
+            drivers::aws::with_credentials_and_endpoint(
+                &r2.bucket,
+                "auto",
+                &r2.endpoint,
+                drivers::aws::Credential {
+                    key_id: r2.access_key_id,
+                    secret_key: r2.secret_access_key,
+                    token: None,
+                },
+            )?
+        }
+        Environment::Test => drivers::mem::new(),
+        _ => {
+            std::fs::create_dir_all(DEV_STORAGE)?;
+            drivers::local::new_with_prefix(DEV_STORAGE)?
+        }
+    };
+    Ok(Storage::single(driver))
+}
+
+const DEV_STORAGE: &str = "tmp/storage";
 
 pub struct App;
 #[async_trait]
@@ -55,7 +88,8 @@ impl Hooks for App {
             .insert(crate::data::chat_hub::ChatHub::new());
         ctx.shared_store
             .insert(crate::data::notify_hub::NotifyHub::new());
-        Ok(ctx)
+        let storage = document_storage(&ctx)?;
+        Ok(ctx.into_builder().storage(Arc::new(storage)).build())
     }
 
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
@@ -68,6 +102,7 @@ impl Hooks for App {
 
     fn routes(ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::documents::routes())
             .add_route(controllers::claude::routes())
             .add_route(controllers::oauth::routes())
             .add_route(controllers::mcp::routes(ctx))
@@ -105,6 +140,8 @@ impl Hooks for App {
     }
     async fn truncate(ctx: &AppContext) -> Result<()> {
         // Children before parents so foreign keys never block the delete.
+        truncate_table(&ctx.db, documents::Entity).await?;
+        truncate_table(&ctx.db, folders::Entity).await?;
         truncate_table(&ctx.db, auth_attempts::Entity).await?;
         truncate_table(&ctx.db, access_tokens::Entity).await?;
         truncate_table(&ctx.db, oauth_codes::Entity).await?;

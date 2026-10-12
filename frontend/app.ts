@@ -387,3 +387,190 @@ document.addEventListener("click", (event) => {
     applyTheme(dark ? "light" : "dark");
   }
 });
+
+// Sheets with panes (a file's options, rename, delete): <button data-show-pane="rename">
+// shows that pane. Closing the sheet goes back to the first one.
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLElement>("[data-show-pane]");
+  const dialog = button?.closest("dialog");
+  if (!button || !dialog) return;
+  dialog.querySelectorAll<HTMLElement>("[data-pane]").forEach((pane) => (pane.hidden = pane.dataset.pane !== button.dataset.showPane));
+  dialog.querySelector<HTMLInputElement>(`[data-pane="${button.dataset.showPane}"] input`)?.focus();
+});
+document.addEventListener(
+  "close",
+  (event) => {
+    if (!(event.target instanceof HTMLDialogElement) || !event.target.hasAttribute("data-panes")) return;
+    event.target.querySelectorAll<HTMLElement>("[data-pane]").forEach((pane) => (pane.hidden = pane.dataset.pane !== "menu"));
+  },
+  true,
+);
+
+// Documents: add a photo or a file to the open folder, one per request. Size
+// and type are checked here before sending, and again on the server.
+const MAX_UPLOAD = 25 * 1024 * 1024;
+const UPLOAD_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"];
+const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+const uploadForm = () => document.querySelector<HTMLFormElement>("form[data-upload]");
+
+function uploadRow(name: string, message: string, retry = false): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "list-row items-start";
+  row.dataset.uploadRow = "";
+  const tile = document.createElement("span");
+  tile.className = "tile tile-error";
+  tile.textContent = "!";
+  const body = document.createElement("div");
+  body.className = "min-w-0 flex-1";
+  const title = document.createElement("p");
+  title.className = "name truncate-1 m-0";
+  title.textContent = name;
+  const text = document.createElement("p");
+  text.className = "err-text m-0";
+  text.textContent = message;
+  body.append(title, text);
+  if (retry) {
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "text-link mt-1.5 min-h-8";
+    again.dataset.retryUpload = "";
+    again.textContent = "Try again";
+    body.append(again);
+  }
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "icon-btn";
+  dismiss.dataset.dismiss = "";
+  dismiss.setAttribute("aria-label", "Dismiss");
+  dismiss.textContent = "×";
+  row.append(tile, body, dismiss);
+  return row;
+}
+
+function progressRow(name: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "list-row";
+  row.dataset.uploadProgress = "";
+  const tile = document.createElement("span");
+  tile.className = "tile";
+  tile.innerHTML = '<span class="tile-type">…</span>';
+  const body = document.createElement("div");
+  body.className = "min-w-0 flex-1";
+  const title = document.createElement("p");
+  title.className = "name truncate-1 m-0";
+  title.textContent = name;
+  const bar = document.createElement("div");
+  bar.className = "bar mt-1.5";
+  bar.innerHTML = '<span style="width:0%"></span>';
+  const text = document.createElement("p");
+  text.className = "meta mt-1 mb-0";
+  text.dataset.progressText = "";
+  text.textContent = "Starting";
+  body.append(title, bar, text);
+  row.append(tile, body);
+  return row;
+}
+
+// A camera photo arrives as "image.jpg"; give it the date instead.
+function namedPhoto(file: File): File {
+  const match = /^image\.(jpe?g|png|heic|heif)$/i.exec(file.name);
+  if (!match) return file;
+  const now = new Date();
+  const day = now.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const time = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return new File([file], `Photo ${day}, ${time}.${match[1].toLowerCase()}`, { type: file.type });
+}
+
+function sendUpload(form: HTMLFormElement, name: string) {
+  document.getElementById("uploads")?.prepend(progressRow(name));
+  form.requestSubmit();
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const picker = target?.closest<HTMLElement>("[data-pick]");
+  const input = uploadForm()?.querySelector<HTMLInputElement>("input[type=file]");
+  if (picker && input) {
+    picker.closest("dialog")?.close();
+    input.accept = picker.dataset.pick === "photo" ? "image/*" : ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*";
+    input.click();
+    return;
+  }
+  const retry = target?.closest("[data-retry-upload]");
+  const form = uploadForm();
+  if (retry && form) {
+    const row = retry.closest<HTMLElement>("[data-upload-row]");
+    const name = row?.querySelector(".name")?.textContent ?? "";
+    row?.remove();
+    sendUpload(form, name);
+    return;
+  }
+  target?.closest("[data-dismiss]")?.closest("[data-upload-row]")?.remove();
+});
+
+document.addEventListener("change", (event) => {
+  const input = event.target;
+  const form = input instanceof HTMLInputElement ? input.form : null;
+  const uploads = document.getElementById("uploads");
+  if (!(input instanceof HTMLInputElement) || !form?.hasAttribute("data-upload") || !uploads) return;
+  let file = input.files?.[0];
+  if (!file) return;
+  if (uploads.querySelector("[data-upload-progress]")) {
+    showToast({ kind: "error", message: "Wait for the file that is being added to finish." });
+    input.value = "";
+    return;
+  }
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const problem =
+    file.size > MAX_UPLOAD
+      ? `Too big: ${megabytes(file.size)}. The limit is 25 MB. Try saving a smaller copy.`
+      : UPLOAD_EXTENSIONS.includes(ext)
+        ? ""
+        : "This kind of file can't be added. Use a photo, PDF or Office file.";
+  if (problem) {
+    uploads.prepend(uploadRow(file.name, problem));
+    input.value = "";
+    return;
+  }
+  const named = namedPhoto(file);
+  if (named !== file) {
+    try {
+      const files = new DataTransfer();
+      files.items.add(named);
+      input.files = files.files;
+      file = named;
+    } catch {
+      // Older browsers keep the camera's own name.
+    }
+  }
+  sendUpload(form, file.name);
+});
+
+// Progress fires for the upload and then for the download of the response;
+// only the upload part moves the bar.
+document.body.addEventListener("htmx:xhr:progress", (event) => {
+  const { loaded, total, lengthComputable } = (event as CustomEvent<{ loaded: number; total: number; lengthComputable: boolean }>).detail;
+  const row = document.querySelector<HTMLElement>("[data-upload-progress]");
+  if (!(event.target as Element).closest?.("form[data-upload]") || !row || row.dataset.sent || !lengthComputable) return;
+  row.querySelector<HTMLElement>(".bar > span")!.style.width = `${Math.round((loaded / total) * 100)}%`;
+  const text = row.querySelector<HTMLElement>("[data-progress-text]")!;
+  text.textContent = `${megabytes(loaded)} of ${megabytes(total)}`;
+  if (loaded >= total) {
+    row.dataset.sent = "1";
+    text.textContent = "Saving";
+  }
+});
+
+document.body.addEventListener("htmx:afterRequest", (event) => {
+  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
+  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload")) return;
+  const row = document.querySelector<HTMLElement>("[data-upload-progress]");
+  const name = row?.querySelector(".name")?.textContent ?? "";
+  row?.remove();
+  // A refusal comes back as its own error row; keep the file only to retry a failed send.
+  if (successful || xhr.status === 422) {
+    elt.reset();
+    return;
+  }
+  document.getElementById("uploads")?.prepend(uploadRow(name, "Stopped part way. Check your connection.", true));
+});
