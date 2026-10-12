@@ -34,3 +34,5 @@ pub mod mcp;
 pub mod oauth;
 
 pub mod claude;
+
+pub mod documents;

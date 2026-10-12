@@ -90,6 +90,10 @@ pub async fn send_due(ctx: &AppContext) -> Result<usize> {
     let app_url = Settings::from_context(ctx)?.app_url;
     let mut sent = 0;
     for ((org_id, user_id), list) in by_person {
+        // Someone removed (or otherwise not active) gets nothing more.
+        if !memberships::Model::is_active_member(&ctx.db, org_id, user_id).await? {
+            continue;
+        }
         let (Some(user), Some(org)) = (
             users::Entity::find_by_id(user_id).one(&ctx.db).await?,
             organisations::Entity::find_by_id(org_id)
@@ -123,4 +127,44 @@ pub async fn send_due(ctx: &AppContext) -> Result<usize> {
         }
     }
     Ok(sent)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{super::render, *};
+
+    #[test]
+    fn chat_text_in_the_email_is_escaped() {
+        let items = [Item {
+            who: "<b>mallory</b>".to_string(),
+            headline: "mentioned you in #general".to_string(),
+            excerpt: r#"look <a href="https://evil.example">here</a>"#.to_string(),
+            url: "https://collab.rajgurung.me/chat/1".to_string(),
+        }];
+        let args = mailer::Args {
+            to: "raj@example.com".to_string(),
+            locals: json!({
+                "subject": "s",
+                "name": "raj",
+                "org": "Acme & Co",
+                "count": 1,
+                "items": items,
+                "notifications_url": "https://collab.rajgurung.me/notifications",
+            }),
+            ..Default::default()
+        };
+        let email = render(&unread, &args).unwrap();
+        assert!(
+            !email.html.contains("<a href=\"https://evil.example\""),
+            "{}",
+            email.html
+        );
+        assert!(email.html.contains("&lt;a href="), "{}", email.html);
+        assert!(!email.html.contains("<b>mallory</b>"));
+        assert!(email.html.contains("Acme &amp; Co"));
+        assert!(
+            email.html.contains(r#"href="https:"#),
+            "real links still work"
+        );
+    }
 }

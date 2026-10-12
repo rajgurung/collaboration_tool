@@ -5,7 +5,7 @@ use sea_orm::sea_query::{ExprTrait, Func};
 
 pub use super::_entities::memberships::{ActiveModel, Column, Entity, Model};
 use super::{
-    conversation_members, conversations, field_error, organisations,
+    access_tokens, conversation_members, conversations, field_error, notifications, organisations,
     users::{self, RegisterParams},
 };
 
@@ -21,6 +21,7 @@ pub mod status {
     pub const PENDING: &str = "pending";
     pub const ACTIVE: &str = "active";
     pub const REJECTED: &str = "rejected";
+    pub const REMOVED: &str = "removed";
 }
 
 #[async_trait::async_trait]
@@ -237,6 +238,77 @@ impl Model {
         Ok(membership.update(db).await?)
     }
 
+    /// Removes an active member. The rules are checked in a transaction that
+    /// locks the organisation's owners: nobody removes themselves, only an
+    /// owner removes an owner, and the last owner stays. Removal ends the
+    /// person's sessions and live connections, revokes their Claude tokens,
+    /// takes them out of every conversation and stops mention emails to them.
+    ///
+    /// # Errors
+    /// `EntityNotFound` when `id` is not in this organisation, `Message` when
+    /// a rule refuses it, or database errors.
+    pub async fn remove(
+        ctx: &AppContext,
+        org_id: i64,
+        remover_id: i64,
+        id: i64,
+    ) -> ModelResult<Self> {
+        let txn = ctx.db.begin().await?;
+        let owners = Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Role.eq(role::OWNER))
+            .filter(Column::Status.eq(status::ACTIVE))
+            .lock_exclusive()
+            .all(&txn)
+            .await?;
+        let target = Entity::find_by_id(id)
+            .in_tenant(org_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        let remover = Self::active_in(&txn, org_id, remover_id)
+            .await?
+            .filter(|m| m.role == role::OWNER || m.role == role::ADMIN)
+            .ok_or_else(|| ModelError::msg("Only owners and admins can remove people."))?;
+        if target.user_id == remover_id {
+            return Err(ModelError::msg("You can't remove yourself."));
+        }
+        if !target.is_active() {
+            return Err(ModelError::msg("Only approved members can be removed."));
+        }
+        if target.role == role::OWNER {
+            if remover.role != role::OWNER {
+                return Err(ModelError::msg("Only an owner can remove an owner."));
+            }
+            if owners.len() <= 1 {
+                return Err(ModelError::msg("The last owner can't be removed."));
+            }
+        }
+        let user_id = target.user_id;
+        let mut membership = target.into_active_model();
+        membership.status = ActiveValue::Set(status::REMOVED.to_string());
+        membership.removed_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
+        membership.removed_by_id = ActiveValue::Set(Some(remover_id));
+        let membership = membership.update(&txn).await?;
+        users::Model::increment_session_version(&txn, user_id).await?;
+        access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
+        conversation_members::Model::remove_everywhere(&txn, org_id, user_id).await?;
+        notifications::Model::stop_emails(&txn, org_id, user_id).await?;
+        txn.commit().await?;
+        users::Model::close_live_connections(ctx, user_id);
+        Ok(membership)
+    }
+
+    /// Who may see a Remove button for `target`. [`Self::remove`] checks the
+    /// same rules again when it runs.
+    #[must_use]
+    pub fn can_remove(&self, remover_id: i64, remover_role: &str, owners: usize) -> bool {
+        let manager = remover_role == role::OWNER || remover_role == role::ADMIN;
+        let owner_rule = self.role != role::OWNER || (remover_role == role::OWNER && owners > 1);
+        manager && self.user_id != remover_id && self.is_active() && owner_rule
+    }
+
     /// Makes an active member an admin or turns an admin back into a member.
     /// Owners keep their role.
     ///
@@ -354,6 +426,11 @@ impl Model {
     #[must_use]
     pub fn is_pending(&self) -> bool {
         self.status == status::PENDING
+    }
+
+    #[must_use]
+    pub fn is_removed(&self) -> bool {
+        self.status == status::REMOVED
     }
 }
 

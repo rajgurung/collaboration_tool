@@ -1,0 +1,5 @@
+<div class="list-row items-start" data-upload-row>
+  <span class="tile tile-error">{{<icon name="circle-alert" class="h-5 w-5"/>}}</span>
+  <div class="min-w-0 flex-1"><p class="name truncate-1 m-0" {% if not name %}hidden{% endif %}>{{ name }}</p><p class="err-text m-0">{{ message }}</p></div>
+  <button type="button" class="icon-btn" data-dismiss aria-label="Dismiss">{{<icon name="x" class="h-5 w-5"/>}}</button>
+</div>

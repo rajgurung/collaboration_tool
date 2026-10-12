@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::http::HeaderMap;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -22,10 +24,16 @@ struct MemberRow {
     status: String,
     color: &'static str,
     is_me: bool,
+    can_remove: bool,
 }
 
 impl MemberRow {
-    fn new(membership: &memberships::Model, user: &users::Model, me: &CurrentMember) -> Self {
+    fn new(
+        membership: &memberships::Model,
+        user: &users::Model,
+        me: &CurrentMember,
+        owners: usize,
+    ) -> Self {
         Self {
             id: membership.id,
             username: membership.username.clone(),
@@ -34,8 +42,24 @@ impl MemberRow {
             status: membership.status.clone(),
             color: avatar_color(&membership.username),
             is_me: user.id == me.user.id,
+            can_remove: !me.acting && membership.can_remove(me.user.id, &me.role, owners),
         }
     }
+}
+
+/// Someone who was removed, for the owners' "Removed" list.
+#[derive(Debug, Serialize)]
+struct RemovedRow {
+    username: String,
+    color: &'static str,
+    removed_by: String,
+    removed_on: String,
+}
+
+fn active_owners(rows: &[(memberships::Model, users::Model)]) -> usize {
+    rows.iter()
+        .filter(|(m, _)| m.is_active() && m.role == memberships::role::OWNER)
+        .count()
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,20 +67,55 @@ struct RoleForm {
     role: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct IndexQuery {
+    removed: Option<i64>,
+}
+
 #[debug_handler]
 async fn index(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<IndexQuery>,
 ) -> Result<Response> {
-    let rows: Vec<MemberRow> = memberships::Model::list_for_org(&ctx.db, member.org.id)
-        .await?
+    let all = memberships::Model::list_for_org(&ctx.db, member.org.id).await?;
+    let owners = active_owners(&all);
+    let names: HashMap<i64, &str> = all
         .iter()
-        .map(|(m, u)| MemberRow::new(m, u, &member))
+        .map(|(m, _)| (m.user_id, m.username.as_str()))
         .collect();
-    let (pending, active): (Vec<_>, Vec<_>) = rows
-        .into_iter()
-        .filter(|r| r.status != memberships::status::REJECTED)
+    let removed: Vec<RemovedRow> = all
+        .iter()
+        .filter(|(m, _)| m.is_removed())
+        .map(|(m, _)| RemovedRow {
+            username: m.username.clone(),
+            color: avatar_color(&m.username),
+            removed_by: m
+                .removed_by_id
+                .and_then(|id| names.get(&id).map(|n| (*n).to_string()))
+                .unwrap_or_else(|| "someone".to_string()),
+            removed_on: m.removed_at.map_or_else(String::new, |at| {
+                time::local(at, member.tz()).format("%-d %b %Y").to_string()
+            }),
+        })
+        .collect();
+    // The name comes from the database, never from the URL.
+    let flash = query
+        .removed
+        .and_then(|id| all.iter().find(|(m, _)| m.id == id && m.is_removed()))
+        .map(|(m, _)| {
+            data!({
+                "kind": "success",
+                "message": format!("{} was removed and signed out.", m.username),
+            })
+        });
+    let (pending, active): (Vec<_>, Vec<_>) = all
+        .iter()
+        .map(|(m, u)| MemberRow::new(m, u, &member, owners))
+        .filter(|r| {
+            r.status == memberships::status::PENDING || r.status == memberships::status::ACTIVE
+        })
         .partition(|r| r.status == memberships::status::PENDING);
     let join_url = format!(
         "{}/join/{}",
@@ -71,6 +130,8 @@ async fn index(
             data!({
                 "active_members": active,
                 "pending": if member.can_manage() { pending } else { Vec::new() },
+                "removed": if member.is_owner() { removed } else { Vec::new() },
+                "flash": flash,
                 "join_url": join_url,
                 "timezone": member.org.timezone,
                 "timezones": time::all_names(),
@@ -145,9 +206,12 @@ async fn respond(
     if !headers.contains_key("hx-request") {
         return Ok(redirect_response(headers, "/members"));
     }
-    let membership = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    let user = users::Model::find_by_id(&ctx.db, membership.user_id).await?;
-    let row = MemberRow::new(&membership, &user, member);
+    let all = memberships::Model::list_for_org(&ctx.db, member.org.id).await?;
+    let (membership, user) = all
+        .iter()
+        .find(|(m, _)| m.id == id)
+        .ok_or(Error::NotFound)?;
+    let row = MemberRow::new(membership, user, member, active_owners(&all));
     let template = if row.status == memberships::status::PENDING
         || row.status == memberships::status::REJECTED
     {
@@ -161,6 +225,32 @@ async fn respond(
             serde_json::json!({ "toast": toast }).to_string(),
         )
         .view(v, template, member.page("members", data!({ "row": row })))
+}
+
+/// Owners and admins remove someone from the organisation, then see the
+/// members page again. A refusal is an error toast.
+#[debug_handler]
+async fn remove(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Response> {
+    member.require_manager()?;
+    member.require_own_membership()?;
+    match memberships::Model::remove(&ctx, member.org.id, member.user.id, id).await {
+        // A full reload, so the counts and the Removed list are current.
+        Ok(removed) => Ok(redirect_response(
+            &headers,
+            &format!("/members?removed={}", removed.id),
+        )),
+        Err(ModelError::Message(message)) => format::render()
+            .status(422)
+            .header("HX-Reswap", "none")
+            .header("HX-Trigger", toast("error", &message))
+            .text(&message),
+        Err(err) => Err(err.into()),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,4 +297,5 @@ pub fn routes() -> Routes {
         .add("/members/{id}/approve", post(approve))
         .add("/members/{id}/reject", post(reject))
         .add("/members/{id}/role", post(change_role))
+        .add("/members/{id}/remove", post(remove))
 }

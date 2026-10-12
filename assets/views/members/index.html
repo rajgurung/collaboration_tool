@@ -39,6 +39,24 @@
     <div class="list">
       {% for row in active_members %}{% include "members/_row.html" %}{% endfor %}
     </div>
+    {% if me.can_manage %}<p class="meta mx-1 my-0">Admins can remove members and other admins. Only an owner can remove an owner, and the last owner can't be removed.</p>{% endif %}
   </section>
+
+  {% if removed %}
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Removed · {{ removed | length }}</h2>
+    <div class="list">
+      {% for row in removed %}
+      <div class="list-row">
+        {{<avatar name={row.username} color={row.color} size="md"/>}}
+        <div class="min-w-0 flex-1">
+          <p class="truncate-1 m-0 font-medium">{{ row.username }}</p>
+          <p class="meta truncate-1 m-0">Removed by {{ row.removed_by }}{% if row.removed_on %} on {{ row.removed_on }}{% endif %}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 </div>
 {% endblock content %}

@@ -173,6 +173,24 @@ impl Model {
         Ok(counts)
     }
 
+    /// Takes someone out of every conversation in an organisation, so they
+    /// can no longer read or post in any of them.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn remove_everywhere<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        Entity::delete_many()
+            .filter(Column::OrganisationId.eq(org_id))
+            .filter(Column::UserId.eq(user_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn is_member<C: ConnectionTrait>(

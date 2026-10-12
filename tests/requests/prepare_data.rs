@@ -90,7 +90,7 @@ pub async fn join(
     cookie_from(&response.headers().clone())
 }
 
-fn cookie_from(headers: &axum::http::HeaderMap) -> (HeaderName, HeaderValue) {
+pub fn cookie_from(headers: &axum::http::HeaderMap) -> (HeaderName, HeaderValue) {
     let set_cookie = headers
         .get("set-cookie")
         .expect("response should set the session cookie")

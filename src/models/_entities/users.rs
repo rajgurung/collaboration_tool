@@ -25,16 +25,23 @@ pub struct Model {
     pub magic_link_token: Option<String>,
     pub magic_link_expiration: Option<DateTimeWithTimeZone>,
     pub is_super_admin: bool,
+    pub session_version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::access_tokens::Entity")]
     AccessTokens,
+    #[sea_orm(has_many = "super::auth_attempts::Entity")]
+    AuthAttempts,
     #[sea_orm(has_many = "super::conversation_members::Entity")]
     ConversationMembers,
     #[sea_orm(has_many = "super::conversations::Entity")]
     Conversations,
+    #[sea_orm(has_many = "super::documents::Entity")]
+    Documents,
+    #[sea_orm(has_many = "super::folders::Entity")]
+    Folders,
     #[sea_orm(has_many = "super::meeting_attendees::Entity")]
     MeetingAttendees,
     #[sea_orm(has_many = "super::meetings::Entity")]
@@ -61,6 +68,12 @@ impl Related<super::access_tokens::Entity> for Entity {
     }
 }
 
+impl Related<super::auth_attempts::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AuthAttempts.def()
+    }
+}
+
 impl Related<super::conversation_members::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ConversationMembers.def()
@@ -70,6 +83,18 @@ impl Related<super::conversation_members::Entity> for Entity {
 impl Related<super::conversations::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Conversations.def()
+    }
+}
+
+impl Related<super::documents::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Documents.def()
+    }
+}
+
+impl Related<super::folders::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Folders.def()
     }
 }
 

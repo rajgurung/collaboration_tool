@@ -19,3 +19,6 @@ debug/
 # Editors and OS
 .idea/
 .DS_Store
+
+# Uploaded documents in development (see document_storage in src/app.rs)
+/tmp/storage/

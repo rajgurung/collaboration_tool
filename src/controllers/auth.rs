@@ -3,11 +3,15 @@ use loco_rs::{hash, prelude::*};
 use serde::Deserialize;
 
 use crate::{
-    extractors::session::{
-        cleared_acting_org_cookie, cleared_session_cookie, redirect_response, session_cookie,
+    extractors::{
+        current_user::CurrentUser,
+        session::{
+            append_cookie, cleared_acting_org_cookie, cleared_session_cookie, redirect_response,
+            session_cookie,
+        },
     },
-    mailers::auth::AuthMailer,
-    models::users,
+    mailers::{auth::AuthMailer, security::SecurityMailer},
+    models::{auth_attempts, users},
     views::forms::field_errors,
 };
 
@@ -72,31 +76,54 @@ async fn login_page(
 async fn login(
     ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
+    remote: RemoteIP,
     Form(form): Form<LoginForm>,
 ) -> Result<Response> {
-    let user = match users::Model::find_by_email(&ctx.db, &form.email).await {
-        Ok(user) if user.verify_password(&form.password) => user,
-        Ok(_) => return login_failed(&v, &form),
-        Err(_) => {
+    let ip = client_ip(remote);
+    let user = users::Model::find_by_email(&ctx.db, &form.email).await.ok();
+    let user_id = user.as_ref().map(|u| u.id);
+    if !auth_attempts::Model::begin_login(&ctx.db, &form.email, user_id, &ip).await? {
+        // Same work as a real check, so the refusal does not reveal anything.
+        let _ = hash::verify_password(&form.password, DUMMY_HASH);
+        return login_error(&v, &form, 429, TOO_MANY);
+    }
+    let user = match user {
+        Some(user) if user.verify_password(&form.password) => user,
+        Some(_) => return login_error(&v, &form, 422, INCORRECT),
+        None => {
             let _ = hash::verify_password(&form.password, DUMMY_HASH);
-            return login_failed(&v, &form);
+            return login_error(&v, &form, 422, INCORRECT);
         }
     };
+    // The attempt recorded above stays as a failure unless this clears it.
+    auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
     format::render()
         .cookies(&[session_cookie(&ctx, &user)?])?
         .redirect(safe_next(&form.next).unwrap_or("/"))
 }
 
-fn login_failed(v: &TeraView, form: &LoginForm) -> Result<Response> {
-    format::render().status(422).view(
+const INCORRECT: &str = "Email or password is incorrect.";
+const TOO_MANY: &str = "Too many failed sign-ins. Try again in 15 minutes, or reset your password.";
+
+fn login_error(v: &TeraView, form: &LoginForm, status: u16, message: &str) -> Result<Response> {
+    format::render().status(status).view(
         v,
         "auth/login.html",
         data!({
             "email": form.email,
             "next": safe_next(&form.next),
-            "error": "Email or password is incorrect.",
+            "error": message,
         }),
     )
+}
+
+/// The address limits are counted against. Requests without one (never
+/// expected behind Railway) share a single bucket.
+fn client_ip(remote: RemoteIP) -> String {
+    match remote {
+        RemoteIP::Forwarded(ip) | RemoteIP::Socket(ip) => ip.to_string(),
+        RemoteIP::None => "unknown".to_string(),
+    }
 }
 
 #[debug_handler]
@@ -106,14 +133,22 @@ async fn logout(State(ctx): State<AppContext>, headers: HeaderMap) -> Result<Res
         cleared_session_cookie(&ctx)?,
         cleared_acting_org_cookie(&ctx)?,
     ] {
-        response.headers_mut().append(
-            axum::http::header::SET_COOKIE,
-            cookie
-                .to_string()
-                .parse()
-                .map_err(|_| Error::string("invalid cookie header"))?,
-        );
+        append_cookie(&mut response, &cookie)?;
     }
+    Ok(response)
+}
+
+/// Ends every session of this user, then signs this device back in.
+#[debug_handler]
+async fn sign_out_everywhere(
+    CurrentUser(user): CurrentUser,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    users::Model::bump_session_version(&ctx, user.id).await?;
+    let user = users::Model::find_by_id(&ctx.db, user.id).await?;
+    let mut response = redirect_response(&headers, "/more?signed_out=1");
+    append_cookie(&mut response, &session_cookie(&ctx, &user)?)?;
     Ok(response)
 }
 
@@ -123,21 +158,29 @@ async fn forgot_page(ViewEngine(v): ViewEngine<TeraView>) -> Result<Response> {
 }
 
 /// Always shows the same confirmation, so the form cannot be used to find out
-/// which emails have accounts.
+/// which emails have accounts, or that a limit was reached.
 #[debug_handler]
 async fn forgot(
     ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
+    remote: RemoteIP,
     Form(form): Form<ForgotForm>,
 ) -> Result<Response> {
-    if let Ok(user) = users::Model::find_by_email(&ctx.db, &form.email).await {
-        let user = user
-            .into_active_model()
-            .set_forgot_password_sent(&ctx.db)
-            .await?;
-        AuthMailer::forgot_password(&ctx, &user).await?;
+    let ip = client_ip(remote);
+    let user = users::Model::find_by_email(&ctx.db, &form.email).await.ok();
+    let user_id = user.as_ref().map(|u| u.id);
+    if auth_attempts::Model::begin_forgot(&ctx.db, &form.email, user_id, &ip).await? {
+        if let Some(user) = user {
+            let user = user
+                .into_active_model()
+                .set_forgot_password_sent(&ctx.db)
+                .await?;
+            AuthMailer::forgot_password(&ctx, &user).await?;
+        } else {
+            tracing::debug!("password reset requested for unknown email");
+        }
     } else {
-        tracing::debug!("password reset requested for unknown email");
+        tracing::info!("password reset limit reached");
     }
     format::render().view(&v, "auth/forgot_sent.html", data!({}))
 }
@@ -170,12 +213,15 @@ async fn reset(
     if form.password != form.password_confirmation {
         return reset_form_error(&v, &token, "The two passwords do not match.");
     }
-    match user
-        .into_active_model()
-        .reset_password(&ctx.db, &form.password)
-        .await
-    {
-        Ok(_) => format::redirect("/login?reset=1"),
+    match user.reset_password_everywhere(&ctx, &form.password).await {
+        Ok(user) => {
+            auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
+            // The password is already changed; a failed email must not undo that.
+            if let Err(err) = SecurityMailer::password_changed(&ctx, &user).await {
+                tracing::error!(error = %err, "could not send the password changed email");
+            }
+            format::redirect("/login?reset=1")
+        }
         Err(err) => {
             let message = field_errors(&err)
                 .and_then(|errors| errors.into_values().next())
@@ -204,6 +250,7 @@ pub fn routes() -> Routes {
         .add("/login", get(login_page))
         .add("/login", post(login))
         .add("/logout", post(logout))
+        .add("/account/sign-out-everywhere", post(sign_out_everywhere))
         .add("/forgot", get(forgot_page))
         .add("/forgot", post(forgot))
         .add("/reset/{token}", get(reset_page))

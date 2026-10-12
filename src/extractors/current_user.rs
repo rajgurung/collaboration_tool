@@ -5,7 +5,8 @@ use super::session::redirect_response;
 use crate::models::users;
 
 /// The signed-in user. Handlers that take this never run for anonymous
-/// requests: those are redirected to `/login`.
+/// requests or for sessions ended by a session version bump: those are
+/// redirected to `/login`.
 pub struct CurrentUser(pub users::Model);
 
 impl FromRequestParts<AppContext> for CurrentUser {
@@ -20,8 +21,8 @@ impl FromRequestParts<AppContext> for CurrentUser {
             return Err(login());
         };
         match users::Model::find_by_pid(&ctx.db, &jwt.claims.pid).await {
-            Ok(user) => Ok(Self(user)),
-            Err(_) => Err(login()),
+            Ok(user) if user.is_current_session(&jwt.claims.claims) => Ok(Self(user)),
+            _ => Err(login()),
         }
     }
 }

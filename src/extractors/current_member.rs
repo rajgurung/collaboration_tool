@@ -82,6 +82,19 @@ impl CurrentMember {
         }
     }
 
+    /// # Errors
+    /// 403 when a super admin is acting inside an organisation they do not
+    /// belong to. Documents and removing members need their own membership.
+    pub fn require_own_membership(&self) -> Result<()> {
+        if self.acting {
+            Err(forbidden(
+                "Leave admin mode and use your own membership to do that.",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Context every app-layout page needs: org, signed-in user and active tab.
     #[must_use]
     pub fn page(&self, active: &str, mut extra: serde_json::Value) -> serde_json::Value {
@@ -149,6 +162,8 @@ impl FromRequestParts<AppContext> for CurrentMember {
         }
         let template = if membership.is_pending() {
             "tenancy/waiting.html"
+        } else if membership.is_removed() {
+            "tenancy/removed.html"
         } else {
             "tenancy/declined.html"
         };
@@ -164,7 +179,9 @@ impl FromRequestParts<AppContext> for CurrentMember {
     }
 }
 
-fn forbidden(message: &str) -> Error {
+/// A 403 with a message for the person.
+#[must_use]
+pub fn forbidden(message: &str) -> Error {
     Error::CustomError(
         StatusCode::FORBIDDEN,
         loco_rs::controller::ErrorDetail::new("forbidden", message),

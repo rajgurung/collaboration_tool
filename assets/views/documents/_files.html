@@ -1,0 +1,66 @@
+{% if files %}
+<p class="count">{{ count }}</p>
+<div>
+  <div class="file-head desktop-only" aria-hidden="true"><span>Name</span><span>Added by</span><span>Added</span><span>Size</span><span></span></div>
+  <div class="list">
+    {% for f in files %}
+    <div class="file-row" id="file-{{ f.id }}">
+      <a class="file-main" href="/documents/files/{{ f.id }}" {% if f.opens_inline %}target="_blank" rel="noopener"{% endif %}>
+        <span class="tile">{% if f.is_image %}{{<icon name="image" class="h-5 w-5"/>}}{% else %}<span class="tile-type">{{ f.label }}</span>{% endif %}</span>
+        <span class="min-w-0 flex-1">
+          <span class="name truncate-1 block">{{ f.name }}</span>
+          <span class="meta who mobile-only">{{<avatar name={f.uploader} color={f.color} size="2xs" label={false}/>}}{{ f.uploader }} · {{ f.added }} · {{ f.size }}</span>
+        </span>
+      </a>
+      <span class="who desktop-only text-sm">{{<avatar name={f.uploader} color={f.color} size="xs" label={false}/>}}<span class="truncate-1">{{ f.uploader }}</span></span>
+      <span class="meta desktop-only">{{ f.added }}</span>
+      <span class="meta desktop-only">{{ f.size }}</span>
+      <button type="button" class="icon-btn" data-dialog-open="file-{{ f.id }}-title" aria-label="Options for {{ f.name }}">{{<icon name="ellipsis" class="h-5 w-5"/>}}</button>
+      <dialog class="sheet" aria-labelledby="file-{{ f.id }}-title" data-panes>
+        <div class="sheet-handle"></div>
+        <div class="sheet-body flex flex-col gap-4">
+          <div class="flex items-center gap-3">
+            <span class="tile">{% if f.is_image %}{{<icon name="image" class="h-5 w-5"/>}}{% else %}<span class="tile-type">{{ f.label }}</span>{% endif %}</span>
+            <div class="min-w-0 flex-1"><h2 id="file-{{ f.id }}-title" class="name m-0 break-words">{{ f.name }}</h2><p class="meta m-0">Added by {{ f.uploader }} · {{ f.added }} · {{ f.size }}</p></div>
+            <button type="button" class="icon-btn self-start" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button>
+          </div>
+          <div class="list" data-pane="menu">
+            {% if f.opens_inline %}<a class="list-row" href="/documents/files/{{ f.id }}" target="_blank" rel="noopener">{{<icon name="external-link" class="h-5 w-5"/>}}<span class="flex-1">Open</span></a>{% endif %}
+            <a class="list-row" href="/documents/files/{{ f.id }}?download=1">{{<icon name="download" class="h-5 w-5"/>}}<span class="flex-1">Download</span></a>
+            <button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit" data-show-pane="rename">{{<icon name="pencil" class="h-5 w-5"/>}}<span class="flex-1">Rename</span></button>
+            {% if f.can_delete %}<button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-danger" data-show-pane="delete">{{<icon name="trash" class="h-5 w-5"/>}}<span class="flex-1">Delete</span></button>{% endif %}
+          </div>
+          {% if not f.can_delete %}<p class="meta m-0" data-pane="menu">Only the person who added a file, owners and admins can delete it.</p>{% endif %}
+          <form data-pane="rename" hidden method="post" action="/documents/files/{{ f.id }}/rename" hx-post="/documents/files/{{ f.id }}/rename"
+                hx-target="#files" hx-swap="innerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="grid gap-3">
+            <label class="field">
+              <span class="field-label">Name</span>
+              <span class="flex items-center gap-2"><input class="input" name="name" value="{{ f.stem }}" maxlength="200" required autocomplete="off"><span class="meta shrink-0">.{{ f.ext }}</span></span>
+            </label>
+            <button type="submit" class="btn btn-primary btn-lg w-full">Save name</button>
+          </form>
+          {% if f.can_delete %}
+          <form data-pane="delete" hidden method="post" action="/documents/files/{{ f.id }}/delete" hx-post="/documents/files/{{ f.id }}/delete"
+                hx-target="#files" hx-swap="innerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-3">
+            <p class="m-0 text-[19px] font-bold">Delete “{{ f.name }}”?</p>
+            <p class="m-0 text-muted">It goes for everyone in {{ org.name }}. There is no bin, so you can't get it back.</p>
+            <button type="submit" class="btn btn-lg btn-danger-solid w-full">Delete for everyone</button>
+            <button type="button" class="btn btn-lg btn-secondary w-full" data-dialog-close>Keep it</button>
+          </form>
+          {% endif %}
+        </div>
+      </dialog>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="card empty-state">
+  <span class="tile">{{<icon name="folder" class="h-[22px] w-[22px]"/>}}</span>
+  <h2>Nothing in {{ folder.name }} yet</h2>
+  <p>Take a photo of a paper, or add a PDF or Office file. Everyone in {{ org.name }} can open it.</p>
+  <button type="button" class="btn btn-primary btn-lg" data-pick="photo">{{<icon name="camera" class="h-4 w-4"/>}}Add a photo</button>
+  <button type="button" class="text-link min-h-11" data-pick="file">Add a file instead</button>
+</div>
+{% if me.can_manage %}<p class="meta mx-1 my-0">Only empty folders can be deleted. Use “...” above to rename or delete this one.</p>{% endif %}
+{% endif %}

@@ -25,3 +25,9 @@ mod task_assignees;
 mod notifications;
 
 mod saved_views;
+
+mod auth_attempts;
+
+mod folders;
+
+mod documents;

@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 pub use super::_entities::organisations::{ActiveModel, Column, Entity, Model};
 use super::{
-    conversations, memberships, projects, tasks,
+    conversations, folders, memberships, projects, tasks,
     users::{self, RegisterParams},
 };
 
@@ -148,8 +148,9 @@ impl Model {
         Ok((user, org))
     }
 
-    /// Creates an organisation with `owner` as its active owner and the
-    /// `general` channel. Run it inside a transaction.
+    /// Creates an organisation with `owner` as its active owner, the
+    /// `general` channel and the starter document folders. Run it inside a
+    /// transaction.
     ///
     /// # Errors
     /// On database errors.
@@ -169,6 +170,7 @@ impl Model {
         .await?;
         memberships::Model::create_owner(db, &org, owner).await?;
         conversations::Model::create_general(db, &org, owner).await?;
+        folders::Model::create_starters(db, org.id, owner.id).await?;
         Ok(org)
     }
 }

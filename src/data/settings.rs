@@ -15,6 +15,29 @@ pub struct Settings {
     pub resend_api_key: String,
     /// Used by `cargo loco task super_admin`.
     pub super_admin: SuperAdminSettings,
+    /// Cloudflare R2, where production keeps uploaded documents. Development
+    /// stores them on disk and tests in memory, so only production sets it.
+    #[serde(default)]
+    pub r2: Option<R2Settings>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct R2Settings {
+    pub bucket: String,
+    /// `https://<account id>.r2.cloudflarestorage.com`
+    pub endpoint: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+}
+
+/// Never print the keys.
+impl std::fmt::Debug for R2Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("R2Settings")
+            .field("bucket", &self.bucket)
+            .field("endpoint", &self.endpoint)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
