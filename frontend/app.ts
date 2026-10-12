@@ -487,6 +487,14 @@ const failedFiles = new WeakMap<Element, File>();
 function queueUpload(file: File) {
   const row = progressRow(file.name);
   row.querySelector("[data-progress-text]")!.textContent = "Waiting";
+  // A waiting file can be taken off the queue with the same X as an error row.
+  const cancel = document.querySelector<HTMLTemplateElement>("#upload-error-template")?.content.querySelector("[data-dismiss]")?.cloneNode(true) as HTMLElement | undefined;
+  if (cancel) {
+    delete cancel.dataset.dismiss;
+    cancel.dataset.cancelUpload = "";
+    cancel.setAttribute("aria-label", `Don't add ${file.name}`);
+    row.append(cancel);
+  }
   document.getElementById("uploads")?.append(row);
   uploadQueue.push({ file, row });
   startNextUpload();
@@ -498,10 +506,17 @@ function startNextUpload() {
   if (currentUpload || !form || !input) return;
   const next = uploadQueue.shift();
   if (!next) return;
+  try {
+    const files = new DataTransfer();
+    files.items.add(next.file);
+    input.files = files.files;
+  } catch {
+    // This browser can't hand the file to the form; say so and carry on with the rest.
+    next.row.replaceWith(uploadRow(next.file.name, "Couldn't add it. Use Add instead.") ?? "");
+    return startNextUpload();
+  }
   currentUpload = next;
-  const files = new DataTransfer();
-  files.items.add(next.file);
-  input.files = files.files;
+  next.row.querySelector("[data-cancel-upload]")?.remove();
   next.row.querySelector("[data-progress-text]")!.textContent = "Starting";
   form.requestSubmit();
 }
@@ -543,6 +558,16 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (target?.closest("[data-dismiss]")) row?.remove();
+  const waiting = target?.closest("[data-cancel-upload]")?.closest<HTMLElement>("[data-upload-progress]");
+  const queued = uploadQueue.findIndex((upload) => upload.row === waiting);
+  if (waiting && queued >= 0) {
+    uploadQueue.splice(queued, 1);
+    waiting.remove();
+  }
+});
+
+window.addEventListener("beforeunload", (event) => {
+  if (currentUpload || uploadQueue.length) event.preventDefault();
 });
 
 document.addEventListener("change", (event) => {
@@ -553,42 +578,48 @@ document.addEventListener("change", (event) => {
   files.forEach(addUpload);
 });
 
-// Dragging files from the computer onto an open folder. dragenter and dragleave
-// fire for every child crossed, so a counter keeps the overlay steady.
+// Dragging files from the computer onto an open folder's pane. Any file drag is
+// cancelled on every page, so a drop never opens the file in the browser; only
+// the open folder's pane takes it. dragleave fires for every child crossed, so a
+// counter tells when the drag has left the window.
 let dragDepth = 0;
-const carriesFiles = (event: DragEvent) => !!uploadForm() && !!event.dataTransfer?.types.includes("Files");
+const fileDrag = (event: DragEvent) => !!event.dataTransfer?.types.includes("Files");
+const overDropPane = (event: DragEvent) => !!uploadForm() && !!(event.target as Element | null)?.closest?.(".drop-pane");
 
 function showDropOverlay(show: boolean) {
   if (!show) dragDepth = 0;
   const overlay = document.querySelector<HTMLElement>("[data-drop-overlay]");
-  if (overlay) overlay.hidden = !show;
+  if (overlay && overlay.hidden === show) overlay.hidden = !show;
 }
 
 document.addEventListener("dragenter", (event) => {
-  if (!carriesFiles(event)) return;
+  if (!fileDrag(event)) return;
   event.preventDefault();
   dragDepth += 1;
-  showDropOverlay(true);
 });
 document.addEventListener("dragover", (event) => {
-  if (!carriesFiles(event)) return;
+  if (!fileDrag(event)) return;
   event.preventDefault();
-  event.dataTransfer!.dropEffect = "copy";
+  const accept = overDropPane(event);
+  event.dataTransfer!.dropEffect = accept ? "copy" : "none";
+  showDropOverlay(accept);
 });
 document.addEventListener("dragleave", (event) => {
-  if (!carriesFiles(event)) return;
+  if (!fileDrag(event)) return;
   dragDepth -= 1;
   if (dragDepth <= 0) showDropOverlay(false);
 });
 document.addEventListener("drop", (event) => {
-  if (!carriesFiles(event)) return;
+  if (!fileDrag(event)) return;
   event.preventDefault();
   showDropOverlay(false);
-  Array.from(event.dataTransfer!.files).forEach(addUpload);
+  if (overDropPane(event)) Array.from(event.dataTransfer!.files).forEach(addUpload);
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") showDropOverlay(false);
 });
+// pointermove never fires during a drag, so one after it means a dragleave was missed.
+document.addEventListener("pointermove", () => showDropOverlay(false));
 
 // Progress fires for the upload and then for the download of the response;
 // only the upload part moves the bar.

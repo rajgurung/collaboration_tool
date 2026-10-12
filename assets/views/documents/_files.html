@@ -62,6 +62,7 @@
   <p>Take a photo of a paper, or add a PDF or Office file. Everyone in {{ org.name }} can open it.</p>
   <button type="button" class="btn btn-primary btn-lg" data-pick="photo">{{<icon name="camera" class="h-4 w-4"/>}}Add a photo</button>
   <button type="button" class="text-link min-h-11" data-pick="file">Add a file instead</button>
+  <p class="drop-hint">Drag files here to add them.</p>
 </div>
 {% if me.can_manage %}<p class="meta mx-1 my-0">Only empty folders can be deleted. Use “...” above to rename or delete this one.</p>{% endif %}
 {% endif %}
