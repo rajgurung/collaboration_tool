@@ -27,7 +27,7 @@ pub enum Relation {
         from = "Column::FolderId",
         to = "super::folders::Column::Id",
         on_update = "Cascade",
-        on_delete = "Restrict"
+        on_delete = "NoAction"
     )]
     Folders,
     #[sea_orm(

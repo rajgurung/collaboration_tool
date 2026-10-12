@@ -30,6 +30,12 @@ mod m20261012_180045_auth_attempts;
 mod m20261012_181452_add_removed_to_memberships;
 mod m20261012_182629_folders;
 mod m20261012_182750_documents;
+mod m20261012_203014_add_secrets_unlock_to_users;
+mod m20261012_203023_org_keys;
+mod m20261012_203253_logins;
+mod m20261012_203441_login_accesses;
+mod m20261012_203616_login_events;
+mod m20261012_203901_logins_starter_folder;
 mod m20261012_204623_add_done_at_to_tasks;
 pub struct Migrator;
 
@@ -65,6 +71,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_181452_add_removed_to_memberships::Migration),
             Box::new(m20261012_182629_folders::Migration),
             Box::new(m20261012_182750_documents::Migration),
+            Box::new(m20261012_203014_add_secrets_unlock_to_users::Migration),
+            Box::new(m20261012_203023_org_keys::Migration),
+            Box::new(m20261012_203253_logins::Migration),
+            Box::new(m20261012_203441_login_accesses::Migration),
+            Box::new(m20261012_203616_login_events::Migration),
+            Box::new(m20261012_203901_logins_starter_folder::Migration),
             Box::new(m20261012_204623_add_done_at_to_tasks::Migration),
             // inject-above (do not remove this comment)
         ]

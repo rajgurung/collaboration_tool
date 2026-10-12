@@ -1,4 +1,5 @@
-//! Failed sign-ins and password reset requests, counted for rate limits.
+//! Failed sign-ins, password reset requests and wrong app passwords typed to
+//! unlock logins, counted for rate limits.
 //! Emails are kept only as a hash of the normalised address, so unknown
 //! emails are counted the same as real ones.
 use chrono::{DateTime, Duration, Utc};
@@ -12,6 +13,7 @@ pub type AuthAttempts = Entity;
 pub mod kind {
     pub const LOGIN: &str = "login";
     pub const FORGOT: &str = "forgot";
+    pub const REAUTH: &str = "reauth";
 }
 
 /// Failed sign-ins for one email that lock it.
@@ -23,11 +25,22 @@ pub const LOCK_MINUTES: i64 = 15;
 /// Reset emails per email address, and per IP, in an hour.
 pub const FORGOT_EMAIL_LIMIT: u64 = 3;
 pub const FORGOT_IP_LIMIT: u64 = 10;
+/// Wrong app passwords inside a session that lock the account until reset.
+pub const REAUTH_LIMIT: u64 = 5;
 /// Rows older than this are deleted when new ones are written.
 const KEEP_HOURS: i64 = 24;
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {}
+
+/// Why an attempt to unlock logins was refused before checking it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReauthRefusal {
+    /// The person has used up their tries; the account locks.
+    Locked,
+    /// Too many tries from this address; it clears itself.
+    TooManyFromIp,
+}
 
 /// The stored form of an email: SHA-256 of the normalised address.
 #[must_use]
@@ -100,6 +113,70 @@ impl Model {
             .into_iter()
             .map(|row| row.created_at.with_timezone(&Utc))
             .collect())
+    }
+
+    /// Records an attempt to unlock logins before the password is checked.
+    /// `Ok(None)` when it may go ahead: the IP is not over its limit and the
+    /// person has fewer than [`REAUTH_LIMIT`] other failures (attempts still
+    /// being checked count as failures, so guesses sent at once cannot get
+    /// past the limit). Otherwise the attempt is deleted and the refusal says
+    /// why.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn begin_reauth<C: ConnectionTrait>(
+        db: &C,
+        email: &str,
+        user_id: i64,
+        ip: &str,
+    ) -> ModelResult<Option<ReauthRefusal>> {
+        let row = Self::record(db, kind::REAUTH, email, Some(user_id), ip).await?;
+        let by_ip = Entity::find()
+            .filter(Column::Ip.eq(ip))
+            .filter(Column::Kind.eq(kind::REAUTH))
+            .filter(Column::Id.ne(row.id))
+            .filter(Column::CreatedAt.gt(Utc::now() - Duration::minutes(LOCK_MINUTES)))
+            .count(db)
+            .await?;
+        let earlier = Self::reauth_failures(db, email).await?.saturating_sub(1);
+        let refusal = if earlier >= REAUTH_LIMIT {
+            Some(ReauthRefusal::Locked)
+        } else if by_ip >= LOGIN_IP_LIMIT as u64 {
+            Some(ReauthRefusal::TooManyFromIp)
+        } else {
+            None
+        };
+        if refusal.is_some() {
+            Entity::delete_by_id(row.id).exec(db).await?;
+        }
+        Ok(refusal)
+    }
+
+    /// Wrong (or still unchecked) app passwords for this email since the last
+    /// unlock, within the last day.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn reauth_failures<C: ConnectionTrait>(db: &C, email: &str) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .filter(Column::EmailHash.eq(email_hash(email)))
+            .filter(Column::Kind.eq(kind::REAUTH))
+            .filter(Column::CreatedAt.gt(Utc::now() - Duration::hours(KEEP_HOURS)))
+            .count(db)
+            .await?)
+    }
+
+    /// Forgets an email's wrong app passwords, after a right one or a reset.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn clear_reauth<C: ConnectionTrait>(db: &C, email: &str) -> ModelResult<()> {
+        Entity::delete_many()
+            .filter(Column::EmailHash.eq(email_hash(email)))
+            .filter(Column::Kind.eq(kind::REAUTH))
+            .exec(db)
+            .await?;
+        Ok(())
     }
 
     /// Records a reset request, then counts it with the others in the last

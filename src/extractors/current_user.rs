@@ -9,6 +9,12 @@ use crate::models::users;
 /// redirected to `/login`.
 pub struct CurrentUser(pub users::Model);
 
+/// The sign-in id (`sid` claim) of the request's session cookie, put in the
+/// request extensions by [`CurrentUser`]. Absent on tokens issued before
+/// sign-ins had ids.
+#[derive(Clone)]
+pub struct SessionId(pub String);
+
 impl FromRequestParts<AppContext> for CurrentUser {
     type Rejection = Response;
 
@@ -21,7 +27,12 @@ impl FromRequestParts<AppContext> for CurrentUser {
             return Err(login());
         };
         match users::Model::find_by_pid(&ctx.db, &jwt.claims.pid).await {
-            Ok(user) if user.is_current_session(&jwt.claims.claims) => Ok(Self(user)),
+            Ok(user) if user.is_current_session(&jwt.claims.claims) => {
+                if let Some(sid) = users::Model::session_id(&jwt.claims.claims) {
+                    parts.extensions.insert(SessionId(sid));
+                }
+                Ok(Self(user))
+            }
             _ => Err(login()),
         }
     }
