@@ -85,6 +85,10 @@ async fn new_organisations_start_with_a_company_folder() {
         assert_eq!(folder.status_code(), 200);
         assert!(folder.text().contains("Nothing in Company yet"));
         assert!(folder.text().contains(r#"hx-history="false""#));
+        assert!(
+            !folder.text().contains("Drag files here"),
+            "the hint sits under the file count"
+        );
         let page = request.get("/documents").add_header(alice.0, alice.1).await;
         assert_eq!(page.status_code(), 200);
         let body = page.text();
@@ -117,6 +121,16 @@ async fn a_member_adds_a_photo_and_everyone_can_open_it() {
         assert_eq!(res.status_code(), 200);
         assert!(res.headers()["hx-trigger"].to_str().unwrap().contains("Added Share certificate.png"));
         assert!(res.text().contains("Share certificate.png"));
+        assert!(res.text().contains("Drag files here to add them."));
+
+        let page = request
+            .get(&format!("/documents/folders/{}", company.id))
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await
+            .text();
+        assert!(page.contains("data-drop-overlay hidden"), "members can drop files too");
+        assert!(page.contains("Drop to add to Company"));
+        assert!(page.contains(r#"aria-hidden="true" multiple>"#));
 
         let file = only_file(&ctx).await;
         assert_eq!(file.content_type, "image/png");

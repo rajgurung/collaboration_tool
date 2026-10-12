@@ -12,7 +12,7 @@
 {% block content %}
 <div class="docs-layout">
   <div class="desktop-only">{% include "documents/_folders.html" %}</div>
-  <section class="flex min-w-0 flex-col gap-3.5" aria-labelledby="folder-title">
+  <section class="drop-pane flex min-w-0 flex-col gap-3.5" aria-labelledby="folder-title">
     <div class="flex flex-col gap-2.5">
       <div class="flex items-start gap-2">
         <h1 id="folder-title" class="page-title flex-1">{{ folder.name }}</h1>
@@ -23,13 +23,20 @@
     </div>
     <div id="uploads" class="list upload-list" aria-live="polite"></div>
     <div id="files" class="flex flex-col gap-3.5">{% include "documents/_files.html" %}</div>
+    <div class="drop-overlay" data-drop-overlay hidden>
+      <div class="drop-overlay-body">
+        {{<icon name="upload" class="h-7 w-7"/>}}
+        <p class="m-0 text-[17px] font-bold">Drop to add to {{ folder.name }}</p>
+        <p class="meta m-0">Photos, PDF and Office files, up to 25 MB each</p>
+      </div>
+    </div>
   </section>
 </div>
 
 <form method="post" action="/documents/folders/{{ folder.id }}/files" enctype="multipart/form-data"
       hx-post="/documents/folders/{{ folder.id }}/files" hx-encoding="multipart/form-data"
       hx-target="#files" hx-swap="innerHTML" data-upload>
-  <input type="file" name="file" class="sr-only" tabindex="-1" aria-hidden="true">
+  <input type="file" name="file" class="sr-only" tabindex="-1" aria-hidden="true" multiple>
 </form>
 <template id="image-icon-template">{{<icon name="image" class="h-5 w-5"/>}}</template>
 <template id="upload-error-template">{% set name = "" %}{% set message = "" %}{% include "documents/_upload_error.html" %}</template>

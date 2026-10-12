@@ -477,45 +477,37 @@ function namedPhoto(file: File): File {
   return new File([file], `Photo ${day}, ${time}.${match[1].toLowerCase()}`, { type: file.type });
 }
 
-function sendUpload(form: HTMLFormElement, name: string) {
-  document.getElementById("uploads")?.prepend(progressRow(name));
+// Files go one at a time: the next starts when the current request finishes,
+// whether it worked or not. A failed upload's file is kept on its row for Try again.
+type Upload = { file: File; row: HTMLElement };
+const uploadQueue: Upload[] = [];
+let currentUpload: Upload | null = null;
+const failedFiles = new WeakMap<Element, File>();
+
+function queueUpload(file: File) {
+  const row = progressRow(file.name);
+  row.querySelector("[data-progress-text]")!.textContent = "Waiting";
+  document.getElementById("uploads")?.append(row);
+  uploadQueue.push({ file, row });
+  startNextUpload();
+}
+
+function startNextUpload() {
+  const form = uploadForm();
+  const input = form?.querySelector<HTMLInputElement>("input[type=file]");
+  if (currentUpload || !form || !input) return;
+  const next = uploadQueue.shift();
+  if (!next) return;
+  currentUpload = next;
+  const files = new DataTransfer();
+  files.items.add(next.file);
+  input.files = files.files;
+  next.row.querySelector("[data-progress-text]")!.textContent = "Starting";
   form.requestSubmit();
 }
 
-document.addEventListener("click", (event) => {
-  const target = event.target as Element | null;
-  const picker = target?.closest<HTMLElement>("[data-pick]");
-  const input = uploadForm()?.querySelector<HTMLInputElement>("input[type=file]");
-  if (picker && input) {
-    picker.closest("dialog")?.close();
-    input.accept = picker.dataset.pick === "photo" ? "image/*" : ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*";
-    input.click();
-    return;
-  }
-  const retry = target?.closest("[data-retry-upload]");
-  const form = uploadForm();
-  if (retry && form) {
-    const row = retry.closest<HTMLElement>("[data-upload-row]");
-    const name = row?.querySelector(".name")?.textContent ?? "";
-    row?.remove();
-    sendUpload(form, name);
-    return;
-  }
-  target?.closest("[data-dismiss]")?.closest("[data-upload-row]")?.remove();
-});
-
-document.addEventListener("change", (event) => {
-  const input = event.target;
-  const form = input instanceof HTMLInputElement ? input.form : null;
-  const uploads = document.getElementById("uploads");
-  if (!(input instanceof HTMLInputElement) || !form?.hasAttribute("data-upload") || !uploads) return;
-  let file = input.files?.[0];
-  if (!file) return;
-  if (uploads.querySelector("[data-upload-progress]")) {
-    showToast({ kind: "error", message: "Wait for the file that is being added to finish." });
-    input.value = "";
-    return;
-  }
+// Checks one file before it joins the queue; a bad one gets an error row instead.
+function addUpload(file: File) {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   const problem =
     file.size > MAX_UPLOAD
@@ -525,29 +517,84 @@ document.addEventListener("change", (event) => {
         : "This kind of file can't be added. Use a photo, PDF or Office file.";
   if (problem) {
     const row = uploadRow(file.name, problem);
-    if (row) uploads.prepend(row);
-    input.value = "";
+    if (row) document.getElementById("uploads")?.prepend(row);
     return;
   }
-  const named = namedPhoto(file);
-  if (named !== file) {
-    try {
-      const files = new DataTransfer();
-      files.items.add(named);
-      input.files = files.files;
-      file = named;
-    } catch {
-      // Older browsers keep the camera's own name.
-    }
+  queueUpload(namedPhoto(file));
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const picker = target?.closest<HTMLElement>("[data-pick]");
+  const input = uploadForm()?.querySelector<HTMLInputElement>("input[type=file]");
+  if (picker && input) {
+    picker.closest("dialog")?.close();
+    const photo = picker.dataset.pick === "photo";
+    input.accept = photo ? "image/*" : ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*";
+    input.multiple = !photo;
+    input.click();
+    return;
   }
-  sendUpload(form, file.name);
+  const row = target?.closest<HTMLElement>("[data-upload-row]");
+  const file = row && failedFiles.get(row);
+  if (target?.closest("[data-retry-upload]") && row && file) {
+    row.remove();
+    queueUpload(file);
+    return;
+  }
+  if (target?.closest("[data-dismiss]")) row?.remove();
+});
+
+document.addEventListener("change", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.form?.hasAttribute("data-upload")) return;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  files.forEach(addUpload);
+});
+
+// Dragging files from the computer onto an open folder. dragenter and dragleave
+// fire for every child crossed, so a counter keeps the overlay steady.
+let dragDepth = 0;
+const carriesFiles = (event: DragEvent) => !!uploadForm() && !!event.dataTransfer?.types.includes("Files");
+
+function showDropOverlay(show: boolean) {
+  if (!show) dragDepth = 0;
+  const overlay = document.querySelector<HTMLElement>("[data-drop-overlay]");
+  if (overlay) overlay.hidden = !show;
+}
+
+document.addEventListener("dragenter", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  showDropOverlay(true);
+});
+document.addEventListener("dragover", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer!.dropEffect = "copy";
+});
+document.addEventListener("dragleave", (event) => {
+  if (!carriesFiles(event)) return;
+  dragDepth -= 1;
+  if (dragDepth <= 0) showDropOverlay(false);
+});
+document.addEventListener("drop", (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  showDropOverlay(false);
+  Array.from(event.dataTransfer!.files).forEach(addUpload);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") showDropOverlay(false);
 });
 
 // Progress fires for the upload and then for the download of the response;
 // only the upload part moves the bar.
 document.body.addEventListener("htmx:xhr:progress", (event) => {
   const { loaded, total, lengthComputable } = (event as CustomEvent<{ loaded: number; total: number; lengthComputable: boolean }>).detail;
-  const row = document.querySelector<HTMLElement>("[data-upload-progress]");
+  const row = currentUpload?.row;
   if (!(event.target as Element).closest?.("form[data-upload]") || !row || row.dataset.sent || !lengthComputable) return;
   row.querySelector<HTMLElement>(".bar > span")!.style.width = `${Math.round((loaded / total) * 100)}%`;
   const text = row.querySelector<HTMLElement>("[data-progress-text]")!;
@@ -560,23 +607,24 @@ document.body.addEventListener("htmx:xhr:progress", (event) => {
 
 document.body.addEventListener("htmx:afterRequest", (event) => {
   const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
-  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload")) return;
-  const row = document.querySelector<HTMLElement>("[data-upload-progress]");
-  const name = row?.querySelector(".name")?.textContent ?? "";
-  row?.remove();
+  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload") || !currentUpload) return;
+  const { file, row } = currentUpload;
+  currentUpload = null;
+  row.remove();
+  elt.reset();
+  // htmx still holds this form's request until the handler returns, so start the next one after.
+  setTimeout(startNextUpload);
   // A refusal comes back as its own error row.
-  if (successful || xhr.status === 422) {
-    elt.reset();
-    return;
-  }
+  if (successful || xhr.status === 422) return;
   // Status 0: the connection dropped. Keep the file so Try again can resend it.
   const dropped = xhr.status === 0;
-  if (!dropped) elt.reset();
   const message = dropped
     ? "Stopped part way. Check your connection."
     : xhr.status === 413
       ? "Too big. The limit is 25 MB. Try saving a smaller copy."
       : "Couldn't add it. Try again, or reload the page.";
-  const failed = uploadRow(name, message, dropped);
-  if (failed) document.getElementById("uploads")?.prepend(failed);
+  const failed = uploadRow(file.name, message, dropped);
+  if (!failed) return;
+  if (dropped) failedFiles.set(failed, file);
+  document.getElementById("uploads")?.prepend(failed);
 });
