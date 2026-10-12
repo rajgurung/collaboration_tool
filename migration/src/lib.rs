@@ -25,6 +25,7 @@ mod m20261008_173439_add_emailed_at_to_notifications;
 mod m20261008_175915_saved_views;
 mod m20261008_181908_add_timezone_to_organisations;
 mod m20261008_213319_claude_connector;
+mod m20261012_175013_add_session_version_to_users;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -54,6 +55,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261008_175915_saved_views::Migration),
             Box::new(m20261008_181908_add_timezone_to_organisations::Migration),
             Box::new(m20261008_213319_claude_connector::Migration),
+            Box::new(m20261012_175013_add_session_version_to_users::Migration),
             // inject-above (do not remove this comment)
         ]
     }

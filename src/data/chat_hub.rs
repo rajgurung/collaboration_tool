@@ -26,6 +26,9 @@ pub enum ChatEvent {
         conversation_id: i64,
         receipts: Arc<Vec<ReceiptUpdate>>,
     },
+    /// The user's sessions were ended (sign out everywhere, password reset,
+    /// removal). Their open sockets close.
+    SignedOut { user_id: i64 },
 }
 
 /// The current receipt for one message, for its author's screen.

@@ -4,9 +4,17 @@ use tokio::sync::broadcast;
 
 const CAPACITY: usize = 256;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotifyEvent {
+    /// This user has new notifications.
+    Changed(i64),
+    /// This user's sessions were ended; their open streams close.
+    SignedOut(i64),
+}
+
 #[derive(Clone)]
 pub struct NotifyHub {
-    tx: broadcast::Sender<i64>,
+    tx: broadcast::Sender<NotifyEvent>,
 }
 
 impl Default for NotifyHub {
@@ -25,12 +33,17 @@ impl NotifyHub {
     /// Tells every open page of these users to refresh their bell.
     pub fn publish(&self, user_ids: &[i64]) {
         for id in user_ids {
-            let _ = self.tx.send(*id);
+            let _ = self.tx.send(NotifyEvent::Changed(*id));
         }
     }
 
+    /// Closes every open stream of this user.
+    pub fn sign_out(&self, user_id: i64) {
+        let _ = self.tx.send(NotifyEvent::SignedOut(user_id));
+    }
+
     #[must_use]
-    pub fn subscribe(&self) -> broadcast::Receiver<i64> {
+    pub fn subscribe(&self) -> broadcast::Receiver<NotifyEvent> {
         self.tx.subscribe()
     }
 }

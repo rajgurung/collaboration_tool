@@ -3,8 +3,12 @@ use loco_rs::{hash, prelude::*};
 use serde::Deserialize;
 
 use crate::{
-    extractors::session::{
-        cleared_acting_org_cookie, cleared_session_cookie, redirect_response, session_cookie,
+    extractors::{
+        current_user::CurrentUser,
+        session::{
+            append_cookie, cleared_acting_org_cookie, cleared_session_cookie, redirect_response,
+            session_cookie,
+        },
     },
     mailers::auth::AuthMailer,
     models::users,
@@ -106,14 +110,22 @@ async fn logout(State(ctx): State<AppContext>, headers: HeaderMap) -> Result<Res
         cleared_session_cookie(&ctx)?,
         cleared_acting_org_cookie(&ctx)?,
     ] {
-        response.headers_mut().append(
-            axum::http::header::SET_COOKIE,
-            cookie
-                .to_string()
-                .parse()
-                .map_err(|_| Error::string("invalid cookie header"))?,
-        );
+        append_cookie(&mut response, &cookie)?;
     }
+    Ok(response)
+}
+
+/// Ends every session of this user, then signs this device back in.
+#[debug_handler]
+async fn sign_out_everywhere(
+    CurrentUser(user): CurrentUser,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    users::Model::bump_session_version(&ctx, user.id).await?;
+    let user = users::Model::find_by_id(&ctx.db, user.id).await?;
+    let mut response = redirect_response(&headers, "/more?signed_out=1");
+    append_cookie(&mut response, &session_cookie(&ctx, &user)?)?;
     Ok(response)
 }
 
@@ -175,7 +187,10 @@ async fn reset(
         .reset_password(&ctx.db, &form.password)
         .await
     {
-        Ok(_) => format::redirect("/login?reset=1"),
+        Ok(user) => {
+            users::Model::bump_session_version(&ctx, user.id).await?;
+            format::redirect("/login?reset=1")
+        }
         Err(err) => {
             let message = field_errors(&err)
                 .and_then(|errors| errors.into_values().next())
@@ -204,6 +219,7 @@ pub fn routes() -> Routes {
         .add("/login", get(login_page))
         .add("/login", post(login))
         .add("/logout", post(logout))
+        .add("/account/sign-out-everywhere", post(sign_out_everywhere))
         .add("/forgot", get(forgot_page))
         .add("/forgot", post(forgot))
         .add("/reset/{token}", get(reset_page))

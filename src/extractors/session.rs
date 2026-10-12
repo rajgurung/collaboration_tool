@@ -68,6 +68,21 @@ fn base_cookie(
         .same_site(cookie::SameSite::Lax))
 }
 
+/// Adds a `Set-Cookie` header to a response built by hand.
+///
+/// # Errors
+/// When the cookie is not a valid header value.
+pub fn append_cookie(response: &mut Response, cookie: &Cookie<'_>) -> Result<()> {
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        cookie
+            .to_string()
+            .parse()
+            .map_err(|_| Error::string("invalid cookie header"))?,
+    );
+    Ok(())
+}
+
 /// Sends the browser to `to`. HTMX requests get an `HX-Redirect` header instead,
 /// because HTMX would otherwise swap the redirected page into the current one.
 #[must_use]

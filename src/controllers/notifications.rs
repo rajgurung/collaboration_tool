@@ -10,10 +10,10 @@ use chrono::{DateTime, FixedOffset, Utc};
 use futures_util::stream::{self, Stream};
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::{
-    data::notify_hub::NotifyHub,
+    data::notify_hub::{NotifyEvent, NotifyHub},
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
         conversations, memberships, messages,
@@ -430,23 +430,29 @@ async fn stream(
         .shared_store
         .get::<NotifyHub>()
         .ok_or_else(|| Error::string("notify hub missing"))?;
-    let me = member.user.id;
-    let events = stream::unfold(hub.subscribe(), move |mut rx| async move {
+    Ok(Sse::new(events_for(hub.subscribe(), member.user.id))
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(25))))
+}
+
+/// The events for `me`. Ends when their sessions are ended, so a signed-out
+/// browser stops listening; its reconnect is then sent to sign in.
+fn events_for(
+    rx: broadcast::Receiver<NotifyEvent>,
+    me: i64,
+) -> impl Stream<Item = std::result::Result<Event, Infallible>> {
+    let notify = || Ok(Event::default().event("notify").data("1"));
+    stream::unfold(rx, move |mut rx| async move {
         loop {
             match rx.recv().await {
-                Ok(id) if id == me => {
-                    return Some((Ok(Event::default().event("notify").data("1")), rx))
-                }
+                Ok(NotifyEvent::Changed(id)) if id == me => return Some((notify(), rx)),
+                Ok(NotifyEvent::SignedOut(id)) if id == me => return None,
                 // Missed some: refresh anyway, the count is read fresh.
-                Err(RecvError::Lagged(_)) => {
-                    return Some((Ok(Event::default().event("notify").data("1")), rx))
-                }
+                Err(RecvError::Lagged(_)) => return Some((notify(), rx)),
                 Ok(_) => {}
                 Err(RecvError::Closed) => return None,
             }
         }
-    });
-    Ok(Sse::new(events).keep_alive(KeepAlive::new().interval(Duration::from_secs(25))))
+    })
 }
 
 pub fn routes() -> Routes {
@@ -456,4 +462,22 @@ pub fn routes() -> Routes {
         .add("/notifications/stream", get(stream))
         .add("/notifications/read", post(read_all))
         .add("/notifications/{id}/open", post(open))
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::StreamExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn the_stream_ends_when_its_user_is_signed_out() {
+        let hub = NotifyHub::new();
+        let mut events = Box::pin(events_for(hub.subscribe(), 7));
+        hub.publish(&[8, 7]);
+        hub.sign_out(8);
+        assert!(events.next().await.is_some(), "a notice for 7");
+        hub.sign_out(7);
+        assert!(events.next().await.is_none(), "closed for 7");
+    }
 }

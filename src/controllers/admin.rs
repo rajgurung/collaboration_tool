@@ -4,7 +4,7 @@ use loco_rs::prelude::*;
 use crate::{
     extractors::{
         current_user::CurrentUser,
-        session::{acting_org_cookie, cleared_acting_org_cookie, redirect_response},
+        session::{acting_org_cookie, append_cookie, cleared_acting_org_cookie, redirect_response},
     },
     models::{memberships, organisations, users},
     views::layout::avatar_color,
@@ -91,17 +91,6 @@ async fn leave(
     let mut response = redirect_response(&headers, "/admin");
     append_cookie(&mut response, &cleared_acting_org_cookie(&ctx)?)?;
     Ok(response)
-}
-
-fn append_cookie(response: &mut Response, cookie: &cookie::Cookie<'_>) -> Result<()> {
-    response.headers_mut().append(
-        axum::http::header::SET_COOKIE,
-        cookie
-            .to_string()
-            .parse()
-            .map_err(|_| Error::string("invalid cookie header"))?,
-    );
-    Ok(())
 }
 
 pub fn routes() -> Routes {

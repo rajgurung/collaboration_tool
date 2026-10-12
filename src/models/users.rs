@@ -1,13 +1,20 @@
 use async_trait::async_trait;
 use chrono::{offset::Local, Duration};
 use loco_rs::{auth::jwt, hash, prelude::*};
-use sea_orm::TransactionSession;
+use sea_orm::{sea_query::ExprTrait, TransactionSession};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
 pub use super::_entities::users::{self, ActiveModel, Entity, Model};
+use crate::data::{
+    chat_hub::{ChatEvent, ChatHub},
+    notify_hub::NotifyHub,
+};
+
+/// The JWT claim holding the session version.
+const SESSION_VERSION_CLAIM: &str = "sv";
 
 pub const MAGIC_LINK_LENGTH: i8 = 32;
 pub const MAGIC_LINK_EXPIRATION_MIN: i8 = 5;
@@ -338,15 +345,74 @@ impl Model {
         Ok(user)
     }
 
-    /// Creates a JWT
+    /// Creates a session token. It carries the session version, so bumping
+    /// the version ends every session issued before.
     ///
     /// # Errors
     ///
     /// when could not convert user claims to jwt token
     pub fn generate_jwt(&self, secret: &str, expiration: u64) -> ModelResult<String> {
+        let mut claims = Map::new();
+        claims.insert(
+            SESSION_VERSION_CLAIM.to_string(),
+            self.session_version.into(),
+        );
         jwt::JWT::new(secret)
-            .generate_token(expiration, self.pid.to_string(), Map::new())
+            .generate_token(expiration, self.pid.to_string(), claims)
             .map_err(ModelError::from)
+    }
+
+    /// Whether a token's claims belong to this user's current sessions. A
+    /// token with no version (issued before versions existed) is refused.
+    #[must_use]
+    pub fn is_current_session(&self, claims: &Map<String, serde_json::Value>) -> bool {
+        claims
+            .get(SESSION_VERSION_CLAIM)
+            .and_then(serde_json::Value::as_i64)
+            == Some(i64::from(self.session_version))
+    }
+
+    /// Signs the user out everywhere: every session token stops working, and
+    /// their open chat sockets and notification streams close.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn bump_session_version(ctx: &AppContext, user_id: i64) -> ModelResult<()> {
+        Self::increment_session_version(&ctx.db, user_id).await?;
+        Self::close_live_connections(ctx, user_id);
+        Ok(())
+    }
+
+    /// The database half of [`Self::bump_session_version`], for callers inside
+    /// a transaction. Call [`Self::close_live_connections`] after committing.
+    /// One `UPDATE`, so two bumps at once never lose one.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn increment_session_version<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        users::Entity::update_many()
+            .col_expr(
+                users::Column::SessionVersion,
+                Expr::col(users::Column::SessionVersion).add(1),
+            )
+            .col_expr(users::Column::UpdatedAt, Expr::value(chrono::Utc::now()))
+            .filter(users::Column::Id.eq(user_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// Closes the user's open chat sockets and notification streams.
+    pub fn close_live_connections(ctx: &AppContext, user_id: i64) {
+        if let Some(hub) = ctx.shared_store.get::<ChatHub>() {
+            hub.publish(ChatEvent::SignedOut { user_id });
+        }
+        if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
+            hub.sign_out(user_id);
+        }
     }
 }
 

@@ -91,6 +91,10 @@ async fn run(mut socket: WebSocket, session: Session) {
                 _ => break,
             },
             event = events.recv() => match event {
+                Ok(ChatEvent::SignedOut { user_id }) if user_id == session.user_id => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
+                }
                 Ok(ChatEvent::Message { conversation_id, author_id, message })
                     if conversation_id == session.conversation_id =>
                 {
