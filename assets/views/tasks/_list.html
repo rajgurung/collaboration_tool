@@ -1,6 +1,7 @@
 <div id="task-list" class="flex flex-col gap-5"
-     hx-get="/tasks/list?filter={{ filter }}&q={{ q }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
-  {% if q %}<p class="meta m-0">Showing tasks matching “{{ q }}”. <a href="/tasks?filter={{ filter }}" class="text-link">Clear</a></p>{% endif %}
+     hx-get="/tasks/list?filter={{ filter }}&q={{ q }}{{ within_query }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
+  {% if within %}<p class="meta m-0">Showing {% if filter == "done" %}done tasks{% else %}tasks{% endif %} for {{ within }}. <a href="/tasks?filter={{ filter }}{% if q %}&q={{ q }}{% endif %}" class="text-link">Show all</a></p>{% endif %}
+  {% if q %}<p class="meta m-0">Showing tasks matching “{{ q }}”. <a href="/tasks?filter={{ filter }}{{ within_query }}" class="text-link">Clear</a></p>{% endif %}
   {% for group in groups %}
   <section class="flex flex-col gap-2" aria-label="{{ group.label }}">
     <h2 class="section-label flex items-center gap-2">{{ group.label }} · {{ group.rows | length }}</h2>

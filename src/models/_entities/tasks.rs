@@ -17,6 +17,7 @@ pub struct Model {
     pub sort_order: i64,
     pub organisation_id: i64,
     pub project_id: Option<i64>,
+    pub done_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

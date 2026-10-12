@@ -31,6 +31,8 @@ const FILTERS: [(&str, &str); 4] = [
     ("blocked", "Blocked"),
     ("done", "Done"),
 ];
+/// How many done tasks a board lane shows; the rest are in the Done view.
+const DONE_SHOWN: usize = 5;
 /// Board scopes: whose tasks the board shows.
 const SCOPES: [(&str, &str); 2] = [("all", "All"), ("mine", "Mine")];
 /// Board swimlanes.
@@ -57,6 +59,11 @@ struct ListQuery {
     scope: Option<String>,
     #[serde(default)]
     group: Option<String>,
+    /// Narrows the list to one project or one person, e.g. from a board lane.
+    #[serde(default)]
+    project: Option<i64>,
+    #[serde(default)]
+    person: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -93,11 +100,13 @@ struct Row {
     priority: String,
     notes: usize,
     people: Vec<Chip>,
+    #[serde(skip)]
+    done_at: Option<chrono::DateTime<chrono::FixedOffset>>,
 }
 
 #[derive(Debug, Serialize)]
 struct Group {
-    label: &'static str,
+    label: String,
     rows: Vec<Row>,
 }
 
@@ -112,7 +121,10 @@ struct Lane {
     done: usize,
     pct: usize,
     project_id: Option<i64>,
+    person_id: Option<i64>,
     cells: Vec<Vec<Row>>,
+    /// The Done cell shows only the latest few; this says there are more.
+    more_done: bool,
 }
 
 fn due_label(date: Option<chrono::NaiveDate>) -> String {
@@ -136,6 +148,7 @@ struct Workspace {
     notes: HashMap<i64, usize>,
     /// Today where the organisation is, for "overdue".
     today: chrono::NaiveDate,
+    tz: chrono_tz::Tz,
 }
 
 impl Workspace {
@@ -144,6 +157,7 @@ impl Workspace {
         let team_list = memberships::Model::team(&ctx.db, org_id).await?;
         Ok(Self {
             today: time::today(member.tz()),
+            tz: member.tz(),
             team_order: team_list.iter().map(|(id, _)| *id).collect(),
             team: team_list.into_iter().collect(),
             projects: projects::Model::list_for_org(&ctx.db, org_id).await?,
@@ -196,6 +210,9 @@ impl Workspace {
                 .get(&t.id)
                 .map(|ids| ids.iter().filter_map(|id| self.chip(*id)).collect())
                 .unwrap_or_default(),
+            done_at: t
+                .done_at
+                .or_else(|| (t.status == "done").then_some(t.updated_at)),
         }
     }
 }
@@ -210,9 +227,75 @@ fn matches_search(row: &Row, needle: &str) -> bool {
             .any(|p| p.name.to_lowercase().contains(needle))
 }
 
-/// The task list for one filter and search, grouped by status, plus filter counts.
-fn list_data(ws: &Workspace, me: i64, filter: &str, q: &str) -> serde_json::Value {
+/// Which Done group a task finished in: "This week", "Last week", or its
+/// month, e.g. "September 2026". Weeks start on Monday in the organisation's zone.
+fn done_period(ws: &Workspace, done_at: chrono::DateTime<chrono::FixedOffset>) -> String {
+    let day = time::local(done_at, ws.tz).date_naive();
+    let this_week = ws.today.week(chrono::Weekday::Mon).first_day();
+    if day >= this_week {
+        "This week".to_string()
+    } else if day >= this_week - chrono::Duration::days(7) {
+        "Last week".to_string()
+    } else {
+        day.format("%B %Y").to_string()
+    }
+}
+
+/// Narrows the task list to one project or one person.
+#[derive(Debug, Default, Clone, Copy)]
+struct Within {
+    project: Option<i64>,
+    person: Option<i64>,
+}
+
+impl Within {
+    fn from_query(query: &ListQuery) -> Self {
+        // One at a time: a project wins over a person.
+        Self {
+            project: query.project,
+            person: query.person.filter(|_| query.project.is_none()),
+        }
+    }
+
+    /// The project or person's name, or `None` when there is no narrowing or
+    /// the id isn't in this organisation (then the list isn't narrowed).
+    fn name(self, ws: &Workspace) -> Option<String> {
+        if let Some(id) = self.project {
+            ws.projects
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.name.clone())
+        } else {
+            self.person.and_then(|id| ws.team.get(&id).cloned())
+        }
+    }
+
+    fn matches(self, row: &Row) -> bool {
+        self.project.is_none_or(|id| row.project_id == Some(id))
+            && self
+                .person
+                .is_none_or(|id| row.people.iter().any(|p| p.id == id))
+    }
+
+    fn query(self) -> String {
+        match (self.project, self.person) {
+            (Some(id), _) => format!("&project={id}"),
+            (None, Some(id)) => format!("&person={id}"),
+            (None, None) => String::new(),
+        }
+    }
+}
+
+/// The task list for one filter and search, grouped by status, plus filter
+/// counts. The Done filter groups by when tasks were finished instead.
+fn list_data(ws: &Workspace, me: i64, filter: &str, q: &str, within: Within) -> serde_json::Value {
     let needle = q.trim().to_lowercase();
+    let within_name = within.name(ws);
+    let within = if within_name.is_some() {
+        within
+    } else {
+        Within::default()
+    };
     let matches = |t: &tasks::Model, f: &str| match f {
         "mine" => ws.assigned_to(t, me) && t.status != "done",
         "blocked" => t.status == "blocked",
@@ -237,26 +320,54 @@ fn list_data(ws: &Workspace, me: i64, filter: &str, q: &str) -> serde_json::Valu
         ("todo", "To do"),
         ("done", "Done"),
     ];
-    let mut groups: Vec<Group> = order
-        .iter()
-        .map(|(_, label)| Group {
-            label,
-            rows: Vec::new(),
-        })
-        .collect();
-    for row in ws
+    let mut rows: Vec<Row> = ws
         .tasks
         .iter()
         .filter(|t| matches(t, filter))
         .map(|t| ws.row(t))
-        .filter(|r| matches_search(r, &needle))
-    {
-        if let Some(i) = order.iter().position(|(key, _)| *key == row.status) {
-            groups[i].rows.push(row);
+        .filter(|r| matches_search(r, &needle) && within.matches(r))
+        .collect();
+    let mut groups: Vec<Group> = Vec::new();
+    if filter == "done" {
+        rows.sort_by_key(|r| std::cmp::Reverse(r.done_at));
+        for row in rows {
+            let label = row
+                .done_at
+                .map(|at| done_period(ws, at))
+                .unwrap_or_default();
+            match groups.last_mut() {
+                Some(group) if group.label == label => group.rows.push(row),
+                _ => groups.push(Group {
+                    label,
+                    rows: vec![row],
+                }),
+            }
         }
+    } else {
+        groups = order
+            .iter()
+            .map(|(_, label)| Group {
+                label: (*label).to_string(),
+                rows: Vec::new(),
+            })
+            .collect();
+        for row in rows {
+            if let Some(i) = order.iter().position(|(key, _)| *key == row.status) {
+                groups[i].rows.push(row);
+            }
+        }
+        groups.retain(|g| !g.rows.is_empty());
     }
-    groups.retain(|g| !g.rows.is_empty());
-    serde_json::json!({ "filters": filters, "filter": filter, "groups": groups, "q": q })
+    serde_json::json!({
+        "filters": filters,
+        "filter": filter,
+        "groups": groups,
+        "q": q,
+        "within": within_name,
+        "within_project": within.project,
+        "within_person": within.person,
+        "within_query": within.query(),
+    })
 }
 
 /// The board: status columns, with one swimlane per project, person, or none.
@@ -282,11 +393,27 @@ fn board_data(
     let lane = |key: String,
                 name: String,
                 color: String,
-                person: bool,
                 project_id: Option<i64>,
+                person_id: Option<i64>,
+                person: bool,
                 rows: Vec<&Row>| {
         let done = rows.iter().filter(|r| r.status == "done").count();
         let total = rows.len();
+        let cells = STATUSES
+            .iter()
+            .map(|(status, _, _)| {
+                let mut cell: Vec<Row> = rows
+                    .iter()
+                    .filter(|r| r.status == *status)
+                    .map(|r| (*r).clone())
+                    .collect();
+                if *status == "done" {
+                    cell.sort_by_key(|r| std::cmp::Reverse(r.done_at));
+                    cell.truncate(DONE_SHOWN);
+                }
+                cell
+            })
+            .collect();
         Lane {
             key,
             name,
@@ -296,15 +423,9 @@ fn board_data(
             done,
             pct: (done * 100).checked_div(total).unwrap_or(0),
             project_id,
-            cells: STATUSES
-                .iter()
-                .map(|(status, _, _)| {
-                    rows.iter()
-                        .filter(|r| r.status == *status)
-                        .map(|r| (*r).clone())
-                        .collect()
-                })
-                .collect(),
+            person_id,
+            cells,
+            more_done: done > DONE_SHOWN,
         }
     };
     let lanes: Vec<Lane> = match group {
@@ -324,8 +445,9 @@ fn board_data(
                             format!("person-{id}"),
                             name.clone(),
                             avatar_color(name).to_string(),
-                            true,
                             None,
+                            Some(*id),
+                            true,
                             mine,
                         )
                     })
@@ -337,8 +459,9 @@ fn board_data(
                     "unassigned".into(),
                     "Unassigned".into(),
                     "#d6d3cb".into(),
-                    true,
                     None,
+                    None,
+                    true,
                     nobody,
                 ));
             }
@@ -348,8 +471,9 @@ fn board_data(
             "all".into(),
             "All tasks".into(),
             "#f2a93b".into(),
-            false,
             None,
+            None,
+            false,
             rows.iter().collect(),
         )],
         _ => {
@@ -364,8 +488,9 @@ fn board_data(
                             format!("project-{}", p.id),
                             p.name.clone(),
                             p.accent.clone(),
-                            false,
                             Some(p.id),
+                            None,
+                            false,
                             theirs,
                         )
                     })
@@ -377,8 +502,9 @@ fn board_data(
                     "no-project".into(),
                     "No project".into(),
                     "#d6d3cb".into(),
-                    false,
                     None,
+                    None,
+                    false,
                     chores,
                 ));
             }
@@ -453,7 +579,13 @@ async fn index(
         view: view.to_string(),
         q: query.q.trim().to_string(),
     };
-    let mut data = list_data(&ws, member.user.id, filter, &query.q);
+    let mut data = list_data(
+        &ws,
+        member.user.id,
+        filter,
+        &query.q,
+        Within::from_query(&query),
+    );
     data["views"] = serde_json::json!(views
         .iter()
         .map(|v| serde_json::json!({
@@ -461,7 +593,7 @@ async fn index(
             "name": v.name,
             "url": v.setup().url(),
             "is_default": v.is_default,
-            "current": v.setup() == current,
+            "current": filter != "done" && v.setup() == current,
         }))
         .collect::<Vec<_>>());
     data["setup_query"] = serde_json::json!(current.query());
@@ -485,7 +617,13 @@ async fn list_partial(
     format::render().view(
         &v,
         "tasks/_list.html",
-        list_data(&ws, member.user.id, filter, &query.q),
+        list_data(
+            &ws,
+            member.user.id,
+            filter,
+            &query.q,
+            Within::from_query(&query),
+        ),
     )
 }
 

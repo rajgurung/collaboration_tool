@@ -103,13 +103,21 @@ impl ActiveModelBehavior for ActiveModel {
     where
         C: ConnectionTrait,
     {
-        if !insert && self.updated_at.is_unchanged() {
-            let mut this = self;
-            this.updated_at = sea_orm::ActiveValue::Set(chrono::Utc::now().into());
-            Ok(this)
-        } else {
-            Ok(self)
+        let mut this = self;
+        if !insert && this.updated_at.is_unchanged() {
+            this.updated_at = ActiveValue::Set(chrono::Utc::now().into());
         }
+        // Every route that changes the status saves through here, so this is
+        // the one place that records when a task was finished.
+        if let Some(status) = this.status.try_as_ref() {
+            let done_at = this.done_at.try_as_ref().copied().flatten();
+            if status != "done" && done_at.is_some() {
+                this.done_at = ActiveValue::Set(None);
+            } else if status == "done" && done_at.is_none() {
+                this.done_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
+            }
+        }
+        Ok(this)
     }
 }
 

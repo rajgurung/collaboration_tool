@@ -449,6 +449,49 @@ async fn update_task_changes_only_what_it_is_given() {
 
 #[tokio::test]
 #[serial]
+async fn update_task_records_when_a_task_was_finished() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let token = token_for(&ctx, "alice@example.com").await;
+        let (_, task) = tool(
+            &request,
+            &token,
+            "create_task",
+            json!({ "title": "Ship it" }),
+        )
+        .await;
+        let id = task["id"].as_i64().unwrap();
+        let done_at = || async {
+            tasks::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .done_at
+        };
+
+        tool(
+            &request,
+            &token,
+            "update_task",
+            json!({ "task_id": id, "status": "done" }),
+        )
+        .await;
+        assert!(done_at().await.is_some());
+        tool(
+            &request,
+            &token,
+            "update_task",
+            json!({ "task_id": id, "status": "todo" }),
+        )
+        .await;
+        assert_eq!(done_at().await, None);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn other_organisations_are_out_of_reach() {
     request::<App, _, _>(|request, ctx| async move {
         sign_up(&request, "Acme", "alice", "alice@example.com").await;
