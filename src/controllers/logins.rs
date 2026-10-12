@@ -149,6 +149,9 @@ async fn login_data(
         "login": {
             "id": login.id,
             "title": login.title,
+            // Zero-width spaces let a long email break after "@" or "."
+            // rather than mid-word.
+            "title_wrap": login.title.replace('@', "@\u{200B}").replace('.', ".\u{200B}"),
             "username": login.username,
             "url": login.url,
             "display_url": logins::display_url(&login.url),

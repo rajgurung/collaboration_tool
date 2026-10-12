@@ -2,9 +2,7 @@
   <div class="flex items-start gap-3 {% if not sheet %}mx-1{% endif %}">
     <span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span>
     <div class="min-w-0 flex-1">
-      {# Long emails break after "@" or "." rather than mid-word. #}
-      {% set title = login.title | escape | replace(from="@", to="@<wbr>") | replace(from=".", to=".<wbr>") %}
-      {% if sheet %}<h2 class="login-title m-0 text-xl font-bold">{{ title | safe }}</h2>{% else %}<h1 class="login-title m-0 text-xl font-extrabold tracking-tight md:text-2xl">{{ title | safe }}</h1>{% endif %}
+      {% if sheet %}<h2 class="login-title m-0 text-xl font-bold">{{ login.title_wrap }}</h2>{% else %}<h1 class="login-title m-0 text-xl font-extrabold tracking-tight md:text-2xl">{{ login.title_wrap }}</h1>{% endif %}
       <p class="meta m-0">Login · Added by {{ login.added_by }}, {{ login.added_on }}</p>
     </div>
     {% if sheet %}
