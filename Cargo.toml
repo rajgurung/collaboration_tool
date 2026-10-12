@@ -80,6 +80,10 @@ bytes = "1"
 opendal = { version = "0.58", default-features = false, features = ["http-transport-reqwest"] }
 # Already used by url; encodes file names in Content-Disposition.
 percent-encoding = "2"
+# Encrypts login passwords and recovery codes (XChaCha20-Poly1305).
+chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
+# Keeps keys and decrypted secrets out of Debug output and zeroes them on drop.
+secrecy = { version = "0.10", features = ["serde"] }
 
 [[bin]]
 name = "collab-cli"

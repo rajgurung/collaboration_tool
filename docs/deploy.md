@@ -39,6 +39,7 @@ The app ships as one Docker image (`Dockerfile`). Railway builds it from the rep
 | `MAILER_USER` | yes | SMTP user |
 | `MAILER_PASSWORD` | yes | SMTP password or API key |
 | `RESEND_API_KEY` | production | Sending-only Resend key. When set, email goes through Resend's HTTPS API instead of SMTP. |
+| `SECRETS_KEK` | yes | Encrypts every organisation's key for login passwords. Base64 of 32 random bytes: `openssl rand -base64 32`. The app refuses to start without it, with a value that is not 32 bytes, or with the development key. Keep a copy offline, outside Railway: losing it loses every stored password, and changing it makes them unreadable. |
 | `PORT` | set by Railway | The app binds `0.0.0.0:$PORT` |
 | `SUPER_ADMIN_EMAIL` | no | Defaults to `gurungraj26@gmail.com` |
 | `SUPER_ADMIN_USERNAME` | no | Defaults to `raj` |

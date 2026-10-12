@@ -42,6 +42,7 @@ pub mod notifications;
 pub mod oauth_clients;
 pub mod oauth_codes;
 pub mod saved_views;
+pub mod secrets;
 pub mod task_assignees;
 
 /// Invisible characters that can make text read differently from what it is:

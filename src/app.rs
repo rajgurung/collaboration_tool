@@ -105,6 +105,8 @@ impl Hooks for App {
             .insert(crate::data::chat_hub::ChatHub::new());
         ctx.shared_store
             .insert(crate::data::notify_hub::NotifyHub::new());
+        let kek = crate::models::secrets::crypto::Kek::from_context(&ctx)?;
+        ctx.shared_store.insert(Arc::new(kek));
         let storage = document_storage(&ctx)?;
         Ok(ctx.into_builder().storage(Arc::new(storage)).build())
     }

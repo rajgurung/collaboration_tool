@@ -128,6 +128,9 @@ auth:
 
 # App settings, read through `crate::data::settings::Settings`.
 settings:
+  # Encrypts login passwords. A fixed key for development only; production
+  # refuses to start with it.
+  secrets_kek: "EUqaJ5SN03zOzpn2Ec9MZ7fVH4UrZP4wo4/lTTAVwlE="
   # Public URL of the app, used in email links and the Origin check on form posts.
   app_url: <%= get_env(name="APP_URL", default="http://localhost:5150") %>
   # Sender for outgoing email. Must be an address your mail provider allows.
