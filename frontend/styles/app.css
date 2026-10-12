@@ -557,7 +557,7 @@
   .landing h1, .landing h2, .landing h3 { text-wrap: balance; }
   .landing [id] { scroll-margin-top: 80px; }
   .lp-wrap { max-width: 1200px; margin: 0 auto; padding-inline: 24px; }
-  .lp-eyebrow { font: 500 12px/1 var(--lp-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--link); }
+  .lp-eyebrow { font: 500 12px/1.5 var(--lp-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--link); }
   .lp-btn-ghost { background: var(--surface); }
   .lp-btn-dark { background: var(--on-accent); color: var(--accent); }
   .lp-btn-dark:hover { opacity: 0.9; }

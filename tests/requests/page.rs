@@ -42,8 +42,13 @@ async fn home_page_shows_documents() {
         assert!(body.contains(r#"id="documents""#), "{body}");
         assert!(body.contains(r##"href="#documents""##), "{body}");
         assert!(body.contains("Company papers, one tap away."), "{body}");
-        assert!(!body.to_lowercase().contains("password"), "{body}");
-        assert!(!body.contains("Logins"), "{body}");
+        // The Documents section claims only what is live: no logins yet.
+        let start = body.find(r#"id="documents""#).expect("documents section");
+        let section = &body[start..];
+        let section = section[..section.find("</section>").expect("section end")].to_lowercase();
+        for banned in ["password", "login", "encrypt", "attach"] {
+            assert!(!section.contains(banned), "{banned} in: {section}");
+        }
     })
     .await;
 }
