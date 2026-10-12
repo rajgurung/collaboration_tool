@@ -1,11 +1,251 @@
-{% extends "layouts/auth.html" %}
-{% block title %}Collaboration Tool{% endblock title %}
-{% block panel %}
-<h1 class="m-0 text-3xl font-semibold leading-tight">Every promise has an owner.</h1>
-<p class="mt-3 text-base text-muted">{{ t(key="app-tagline", lang="en-US") }}</p>
-<div class="mt-8 grid gap-3">
-  <a href="/signup" class="btn btn-primary btn-lg">Create an organisation</a>
-  <a href="/login" class="btn btn-secondary btn-lg">Sign in</a>
+{% extends "layouts/base.html" %}
+{% block title %}Collaboration Tool: roadmaps, tasks, meetings and chat{% endblock title %}
+{% block body %}
+{% set app_name = t(key="app-name", lang="en-US") %}
+<div class="landing">
+<header class="lp-nav">
+  <div class="lp-wrap">
+    <a class="lp-brand" href="/">
+      <img src="/static/favicon.svg" alt="" width="30" height="30">
+      <span class="lp-brand-name">{{ app_name }}</span>
+    </a>
+    <nav class="lp-nav-links" aria-label="Sections">
+      <a href="#tasks">Tasks</a><a href="#chat">Chat</a><a href="#roadmap">Roadmap</a><a href="#meetings">Meetings</a><a href="#claude">Claude</a>
+    </nav>
+    <div class="lp-nav-cta">
+      <a class="lp-signin" href="/login">Sign in</a>
+      <a class="btn btn-primary" href="/signup">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="lp-hero">
+    <div class="lp-wrap">
+      <div class="lp-hero-copy">
+        <span class="lp-eyebrow">Roadmaps · Tasks · Meetings · Chat</span>
+        <h1>Every promise has an <span class="lp-owner">owner.</span></h1>
+        <p class="lp-lede">One shared workspace for a small team. Plan what's next, give every task a name, and talk it through in the same place.</p>
+        <div class="lp-hero-actions">
+          <a class="btn btn-primary btn-lg" href="/signup">Create your organisation</a>
+          <a class="btn btn-secondary btn-lg lp-btn-ghost" href="/login">Sign in</a>
+        </div>
+        <p class="lp-hero-note">Works on your phone and at your desk.</p>
+      </div>
+
+      <div class="lp-window" role="img" aria-label="The Tasks board, with columns for To do, In progress, Blocked and Done">
+        <div class="lp-win-bar" aria-hidden="true"><div class="lp-dots"><i></i><i></i><i></i></div><div class="lp-win-url">collab.rajgurung.me/tasks</div></div>
+        <div class="lp-win-body" aria-hidden="true">
+          <div class="lp-win-side">
+            <div class="lp-org"><span class="lp-org-dot">H</span>Himalayan Ritual</div>
+            <span>Home</span><span class="lp-on">Tasks</span><span>Chat <span class="lp-count">3</span></span><span>Roadmap</span><span>Meetings</span><span>Members</span>
+          </div>
+          <div class="lp-win-main">
+            <div class="lp-board-head">
+              <h3>Tasks</h3>
+              <span class="lp-chip lp-chip-on">Spring launch</span><span class="lp-chip">Mine</span><span class="lp-chip">Blocked</span><span class="lp-chip">By person</span>
+            </div>
+            <div class="lp-board-wrap">
+              <div class="lp-board">
+                <div class="lp-col">
+                  <div class="lp-col-h"><span class="dot" style="--dot: var(--todo)"></span>To do<span>3</span></div>
+                  <div class="lp-card"><span class="lp-card-title">Write care guide for the copper kettle</span><div class="lp-meta"><span class="lp-tag">Low</span><div class="lp-avs"><span class="lp-av lp-a3">S</span></div></div></div>
+                  <div class="lp-card"><span class="lp-card-title">Update wholesale price list</span><div class="lp-meta"><span class="lp-tag">Medium</span>Fri<div class="lp-avs"><span class="lp-av lp-a1">R</span></div></div></div>
+                </div>
+                <div class="lp-col">
+                  <div class="lp-col-h"><span class="dot" style="--dot: var(--progress)"></span>In progress<span>2</span></div>
+                  <div class="lp-card lp-mover"><span class="lp-card-title">Photograph the spring tea range</span><div class="lp-meta"><span class="lp-tag lp-tag-hi">High</span>Today<div class="lp-avs"><span class="lp-av lp-a2">P</span><span class="lp-av lp-a1">R</span></div></div></div>
+                  <div class="lp-card"><span class="lp-card-title">Draft launch email</span><div class="lp-meta"><span class="lp-tag">Medium</span><div class="lp-avs"><span class="lp-av lp-a4">M</span></div></div></div>
+                </div>
+                <div class="lp-col">
+                  <div class="lp-col-h"><span class="dot" style="--dot: var(--blocked)"></span>Blocked<span>1</span></div>
+                  <div class="lp-card"><span class="lp-card-title">Reorder 500 gift boxes</span><div class="lp-meta"><span class="lp-tag lp-tag-hi">High</span>Waiting on supplier<div class="lp-avs"><span class="lp-av lp-a3">S</span></div></div></div>
+                </div>
+                <div class="lp-col">
+                  <div class="lp-col-h"><span class="dot" style="--dot: var(--done)"></span>Done<span>6</span></div>
+                  <div class="lp-card"><span class="lp-card-title">Choose packaging colours</span><div class="lp-meta"><span class="lp-tag">Medium</span><div class="lp-avs"><span class="lp-av lp-a4">M</span><span class="lp-av lp-a2">P</span></div></div></div>
+                  <div class="lp-card"><span class="lp-card-title">Book the photographer</span><div class="lp-meta"><span class="lp-tag">Low</span><div class="lp-avs"><span class="lp-av lp-a1">R</span></div></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="lp-toast"><span class="lp-av lp-av-md lp-a2">P</span><span><b>Priya</b> mentioned you on “Photograph the spring tea range”</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="lp-strip">
+    <div class="lp-wrap">
+      <ul>
+        <li><strong>One owner, or several</strong><span>Every task has names on it, so nothing falls between people.</span></li>
+        <li><strong>Built for the phone</strong><span>Check the board and reply to chat from anywhere.</span></li>
+        <li><strong>Your team, your space</strong><span>Each organisation gets its own private workspace.</span></li>
+        <li><strong>Light or dark</strong><span>Follows your device, or pick one and it sticks.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="lp-wrap lp-features">
+    <section class="lp-feature" id="tasks">
+      <div class="lp-copy">
+        <span class="lp-eyebrow">Tasks</span>
+        <h2>See who's doing what, at a glance.</h2>
+        <p>A board with To do, In progress, Blocked and Done. Drag a card to move it. Group by project or by person to see each lane.</p>
+        <ul class="lp-ticks">
+          <li>Assign one person or the whole crew</li>
+          <li>Save a view you use often and bring it back in one tap</li>
+          <li>Switch to a list with columns on desktop</li>
+        </ul>
+      </div>
+      <div class="lp-panel" role="img" aria-label="Tasks grouped by person, with a saved view called My week">
+        <div aria-hidden="true">
+          <div class="lp-board-head"><h3>By person</h3><span class="lp-chip lp-chip-on">Saved: My week</span><span class="lp-chip">Launch blockers</span></div>
+          <div class="lp-people">
+            <div class="lp-person">
+              <div class="lp-person-head"><span class="lp-person-name"><span class="lp-av lp-a2">P</span>Priya</span><span>2 open</span></div>
+              <div class="lp-card"><span class="lp-card-title">Photograph the spring tea range</span><div class="lp-meta"><span class="dot" style="--dot: var(--progress)"></span>In progress<span class="lp-tag lp-tag-hi lp-push">High</span></div></div>
+            </div>
+            <div class="lp-person">
+              <div class="lp-person-head"><span class="lp-person-name"><span class="lp-av lp-a3">S</span>Sonam</span><span>1 blocked</span></div>
+              <div class="lp-card"><span class="lp-card-title">Reorder 500 gift boxes</span><div class="lp-meta"><span class="dot" style="--dot: var(--blocked)"></span>Blocked · waiting on supplier</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-feature lp-flip" id="chat">
+      <div class="lp-copy">
+        <span class="lp-eyebrow">Chat</span>
+        <h2>Talk it through next to the work.</h2>
+        <p>Channels, groups and direct messages that update live, with no refresh. Mention someone and they get a notification. If they leave it unread, they get an email.</p>
+        <ul class="lp-ticks">
+          <li>@name for one person, @everyone for the room</li>
+          <li>See who has read your message</li>
+          <li>Unread counts so nothing gets buried</li>
+        </ul>
+      </div>
+      <div class="lp-panel" role="img" aria-label="A chat channel called spring-launch, with messages from Priya and Sonam">
+        <div class="lp-chat" aria-hidden="true">
+          <div class="lp-chat-h"># spring-launch<span>5 members</span></div>
+          <div class="lp-msg"><span class="lp-av lp-av-md lp-a2">P</span><div class="lp-bubble"><small>Priya</small>Shoot is booked for Thursday. <span class="lp-mention">@Raj</span> can you bring the copper kettle?</div></div>
+          <div class="lp-msg lp-msg-me"><div class="lp-bubble">Yes. I'll bring the gift boxes we have too.</div></div>
+          <div class="lp-receipt">Read by<span class="lp-avs"><span class="lp-av lp-a2">P</span><span class="lp-av lp-a3">S</span><span class="lp-av lp-a4">M</span></span></div>
+          <div class="lp-msg"><span class="lp-av lp-av-md lp-a3">S</span><div class="lp-bubble"><small>Sonam</small>Supplier says Monday for the new boxes. I've marked it blocked.</div></div>
+          <div class="lp-composer">Message #spring-launch<b>Send</b></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-feature" id="roadmap">
+      <div class="lp-copy">
+        <span class="lp-eyebrow">Roadmap</span>
+        <h2>Now, next, later. Nothing more.</h2>
+        <p>Every project sits in one of three lanes. The whole team can see what matters this month and what's waiting its turn.</p>
+        <ul class="lp-ticks">
+          <li>Progress comes from the project's tasks</li>
+          <li>Roadmap: now stays on your Home screen</li>
+          <li>Move a project when plans change</li>
+        </ul>
+      </div>
+      <div class="lp-panel" role="img" aria-label="The roadmap, with projects in Now, Next and Later lanes">
+        <div class="lp-lanes" aria-hidden="true">
+          <div class="lp-lane lp-lane-now"><h4>Now<span>2</span></h4>
+            <div class="lp-proj"><b>Spring launch</b><div class="lp-bar"><i style="width: 62%"></i></div><div class="lp-proj-meta"><span>8 of 13 done</span><span>Active</span></div></div>
+            <div class="lp-proj"><b>Wholesale catalogue</b><div class="lp-bar"><i style="width: 30%"></i></div><div class="lp-proj-meta"><span>3 of 10 done</span><span>Active</span></div></div>
+          </div>
+          <div class="lp-lane"><h4>Next<span>1</span></h4>
+            <div class="lp-proj"><b>Tea tasting events</b><div class="lp-bar"><i style="width: 0"></i></div><div class="lp-proj-meta"><span>0 of 6</span><span>Planned</span></div></div>
+          </div>
+          <div class="lp-lane"><h4>Later<span>1</span></h4>
+            <div class="lp-proj"><b>Ship to Europe</b><div class="lp-bar"><i style="width: 0"></i></div><div class="lp-proj-meta"><span>Idea</span><span>Later</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-feature lp-flip" id="meetings">
+      <div class="lp-copy">
+        <span class="lp-eyebrow">Meetings</span>
+        <h2>Leave every meeting with a decision.</h2>
+        <p>Log each meeting with what was discussed, who was there and what you agreed. The decision stays where the whole team can find it.</p>
+        <ul class="lp-ticks">
+          <li>Everyone who attended is listed</li>
+          <li>The latest decision sits on Home</li>
+        </ul>
+      </div>
+      <div class="lp-panel" role="img" aria-label="A meeting called Weekly launch check-in, with its decision and four attendees">
+        <div class="lp-meeting" aria-hidden="true">
+          <div class="lp-meeting-h"><div class="lp-date"><span>OCT</span><b>14</b></div><div><b>Weekly launch check-in</b><small>4 attendees</small></div></div>
+          <div class="lp-decision"><small>Decision</small>Launch the spring range on 1 November, with or without the new gift boxes.</div>
+          <div class="lp-attendees">
+            <div class="lp-attendee"><span class="lp-av lp-av-sm lp-a1">R</span>Raj</div>
+            <div class="lp-attendee"><span class="lp-av lp-av-sm lp-a2">P</span>Priya</div>
+            <div class="lp-attendee"><span class="lp-av lp-av-sm lp-a3">S</span>Sonam</div>
+            <div class="lp-attendee"><span class="lp-av lp-av-sm lp-a4">M</span>Maya</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="lp-claude" id="claude">
+    <div class="lp-wrap lp-claude-grid">
+      <div class="lp-copy">
+        <span class="lp-eyebrow">Works with Claude</span>
+        <h2>Ask Claude to update the board for you.</h2>
+        <p>Connect Claude to your workspace once. Then it can read your projects, create tasks and leave notes, acting as you and only with your permission.</p>
+        <ul class="lp-ticks">
+          <li>Connect in a few clicks from the Claude page</li>
+          <li>Teammates are notified exactly as if you made the change</li>
+          <li>Disconnect any time</li>
+        </ul>
+      </div>
+      <figure class="lp-term">
+        <figcaption class="sr-only">Example conversation with Claude</figcaption>
+        <p class="lp-you">What's blocked on the spring launch?</p>
+        <p class="lp-tool">● list_tasks project_id=1 status="blocked"</p>
+        <p>One task is blocked: “Reorder 500 gift boxes”, owned by Sonam. The supplier said Monday.</p>
+        <p class="lp-you">Add a task for me to call them Friday if nothing arrives.</p>
+        <p class="lp-tool">● create_task title="Call supplier about gift boxes" assignees=["me"] due_on="2026-10-16" priority="high"</p>
+        <p class="lp-ok">✓ Created “Call supplier about gift boxes”, assigned to you.</p>
+      </figure>
+    </div>
+  </section>
+
+  <section class="lp-steps" id="start">
+    <div class="lp-wrap">
+      <div class="lp-steps-head">
+        <span class="lp-eyebrow">Get started</span>
+        <h2>Up and running before your next meeting.</h2>
+      </div>
+      <ol>
+        <li><h3>Create your organisation</h3><p>Pick a name and you have a private workspace. It takes under a minute.</p></li>
+        <li><h3>Invite your team</h3><p>Share the invite link, then approve people as they ask to join.</p></li>
+        <li><h3>Follow the checklist</h3><p>Home walks you through your first project, task and chat. You'll see it once.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="lp-cta">
+    <div class="lp-wrap">
+      <div class="lp-cta-box">
+        <svg class="lp-peak" viewBox="0 0 64 64" aria-hidden="true"><path d="M13 43 25 21l7 11 7-19 13 30H13Z" fill="currentColor"/></svg>
+        <h2>Give every promise an owner.</h2>
+        <p>{{ t(key="app-tagline", lang="en-US") }}</p>
+        <a class="btn btn-lg lp-btn-dark" href="/signup">Create your organisation</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="lp-footer">
+  <div class="lp-wrap">
+    <a class="lp-brand" href="/"><img src="/static/favicon.svg" alt="" width="30" height="30"><span>{{ app_name }}</span></a>
+    <span>© 2026</span>
+    <nav aria-label="Footer"><a href="/login">Sign in</a><a href="/signup">Create an organisation</a></nav>
+  </div>
+</footer>
 </div>
-<p class="meta mt-6">{{ t(key="app-name", lang="en-US") }}</p>
-{% endblock panel %}
+{% endblock body %}

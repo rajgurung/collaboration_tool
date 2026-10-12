@@ -16,11 +16,15 @@ async fn can_get_home_page() {
         let res = request.get("/").await;
 
         assert_eq!(res.status_code(), 200);
+        let body = res.text();
         assert!(
-            res.text().contains("Create an organisation"),
-            "expected the rendered view, got: {}",
-            res.text()
+            body.contains("Every promise has an"),
+            "expected the rendered view, got: {body}"
         );
+        assert!(body.contains(r#"href="/signup""#), "{body}");
+        assert!(body.contains(r#"href="/login""#), "{body}");
+        // The full landing page, not the old card in the auth layout.
+        assert!(!body.contains("auth-card"), "{body}");
     })
     .await;
 }
