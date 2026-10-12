@@ -67,11 +67,17 @@ struct RoleForm {
     role: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct IndexQuery {
+    removed: Option<i64>,
+}
+
 #[debug_handler]
 async fn index(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<IndexQuery>,
 ) -> Result<Response> {
     let all = memberships::Model::list_for_org(&ctx.db, member.org.id).await?;
     let owners = active_owners(&all);
@@ -94,6 +100,16 @@ async fn index(
             }),
         })
         .collect();
+    // The name comes from the database, never from the URL.
+    let flash = query
+        .removed
+        .and_then(|id| all.iter().find(|(m, _)| m.id == id && m.is_removed()))
+        .map(|(m, _)| {
+            data!({
+                "kind": "success",
+                "message": format!("{} was removed and signed out.", m.username),
+            })
+        });
     let (pending, active): (Vec<_>, Vec<_>) = all
         .iter()
         .map(|(m, u)| MemberRow::new(m, u, &member, owners))
@@ -115,6 +131,7 @@ async fn index(
                 "active_members": active,
                 "pending": if member.can_manage() { pending } else { Vec::new() },
                 "removed": if member.is_owner() { removed } else { Vec::new() },
+                "flash": flash,
                 "join_url": join_url,
                 "timezone": member.org.timezone,
                 "timezones": time::all_names(),
@@ -210,8 +227,8 @@ async fn respond(
         .view(v, template, member.page("members", data!({ "row": row })))
 }
 
-/// Owners and admins remove someone from the organisation. HTMX gets an empty
-/// body that takes the row away, plus a toast; a refusal is an error toast.
+/// Owners and admins remove someone from the organisation, then see the
+/// members page again. A refusal is an error toast.
 #[debug_handler]
 async fn remove(
     member: CurrentMember,
@@ -222,16 +239,11 @@ async fn remove(
     member.require_manager()?;
     member.require_own_membership()?;
     match memberships::Model::remove(&ctx, member.org.id, member.user.id, id).await {
-        Ok(removed) if headers.contains_key("hx-request") => format::render()
-            .header(
-                "HX-Trigger",
-                toast(
-                    "success",
-                    &format!("{} was removed and signed out.", removed.username),
-                ),
-            )
-            .html(""),
-        Ok(_) => Ok(redirect_response(&headers, "/members")),
+        // A full reload, so the counts and the Removed list are current.
+        Ok(removed) => Ok(redirect_response(
+            &headers,
+            &format!("/members?removed={}", removed.id),
+        )),
         Err(ModelError::Message(message)) => format::render()
             .status(422)
             .header("HX-Reswap", "none")

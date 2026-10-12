@@ -104,13 +104,31 @@ async fn removing_someone_locks_them_out_of_everything() {
             .await;
         let mut notify = ctx.shared_store.get::<NotifyHub>().unwrap().subscribe();
 
-        let (status, toast) = remove(&request, &alice, &carol_m).await;
-        assert_eq!(status, 200);
-        assert!(
-            toast.contains("carol was removed and signed out."),
-            "{toast}"
-        );
+        let res = request
+            .post(&format!("/members/{}/remove", carol_m.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .add_header("HX-Request", "true")
+            .await;
+        let back = format!("/members?removed={}", carol_m.id);
+        assert_eq!(res.headers()["hx-redirect"], back.as_str());
         assert_eq!(status_of(&ctx, carol_m.id).await, "removed");
+        let page = request
+            .get(&back)
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert!(page.contains("carol was removed and signed out."));
+        // The name comes from the database: a member id that was not removed shows nothing.
+        let alice_m = memberships::Model::find_for_user(&ctx.db, org.created_by_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        let page = request
+            .get(&format!("/members?removed={}", alice_m.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert!(!page.contains("was removed and signed out."));
 
         // Her session ended, and her open pages were told.
         let res = request

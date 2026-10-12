@@ -413,37 +413,23 @@ const UPLOAD_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "pdf", 
 const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 const uploadForm = () => document.querySelector<HTMLFormElement>("form[data-upload]");
 
-function uploadRow(name: string, message: string, retry = false): HTMLElement {
-  const row = document.createElement("div");
-  row.className = "list-row items-start";
-  row.dataset.uploadRow = "";
-  const tile = document.createElement("span");
-  tile.className = "tile tile-error";
-  tile.textContent = "!";
-  const body = document.createElement("div");
-  body.className = "min-w-0 flex-1";
-  const title = document.createElement("p");
-  title.className = "name truncate-1 m-0";
+// An error row like the server's (documents/_upload_error.html), cloned from the page.
+function uploadRow(name: string, message: string, retry = false): HTMLElement | null {
+  const template = document.querySelector<HTMLTemplateElement>("#upload-error-template");
+  const row = template?.content.firstElementChild?.cloneNode(true) as HTMLElement | undefined;
+  if (!row) return null;
+  const title = row.querySelector<HTMLElement>(".name")!;
   title.textContent = name;
-  const text = document.createElement("p");
-  text.className = "err-text m-0";
-  text.textContent = message;
-  body.append(title, text);
+  title.hidden = !name;
+  row.querySelector(".err-text")!.textContent = message;
   if (retry) {
     const again = document.createElement("button");
     again.type = "button";
     again.className = "text-link mt-1.5 min-h-8";
     again.dataset.retryUpload = "";
     again.textContent = "Try again";
-    body.append(again);
+    row.querySelector(".err-text")!.after(again);
   }
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "icon-btn";
-  dismiss.dataset.dismiss = "";
-  dismiss.setAttribute("aria-label", "Dismiss");
-  dismiss.textContent = "×";
-  row.append(tile, body, dismiss);
   return row;
 }
 
@@ -453,7 +439,10 @@ function progressRow(name: string): HTMLElement {
   row.dataset.uploadProgress = "";
   const tile = document.createElement("span");
   tile.className = "tile";
-  tile.innerHTML = '<span class="tile-type">…</span>';
+  const label = document.createElement("span");
+  label.className = "tile-type";
+  label.textContent = (name.split(".").pop() ?? "").toUpperCase();
+  tile.append(label);
   const body = document.createElement("div");
   body.className = "min-w-0 flex-1";
   const title = document.createElement("p");
@@ -528,7 +517,8 @@ document.addEventListener("change", (event) => {
         ? ""
         : "This kind of file can't be added. Use a photo, PDF or Office file.";
   if (problem) {
-    uploads.prepend(uploadRow(file.name, problem));
+    const row = uploadRow(file.name, problem);
+    if (row) uploads.prepend(row);
     input.value = "";
     return;
   }
@@ -572,5 +562,6 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
     elt.reset();
     return;
   }
-  document.getElementById("uploads")?.prepend(uploadRow(name, "Stopped part way. Check your connection.", true));
+  const failed = uploadRow(name, "Stopped part way. Check your connection.", true);
+  if (failed) document.getElementById("uploads")?.prepend(failed);
 });
