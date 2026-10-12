@@ -11,10 +11,7 @@ use crate::{
         },
     },
     mailers::{auth::AuthMailer, security::SecurityMailer},
-    models::{
-        auth_attempts::{self, kind},
-        users,
-    },
+    models::{auth_attempts, users},
     views::forms::field_errors,
 };
 
@@ -83,25 +80,23 @@ async fn login(
     Form(form): Form<LoginForm>,
 ) -> Result<Response> {
     let ip = client_ip(remote);
-    if auth_attempts::Model::login_locked(&ctx.db, &form.email, &ip).await? {
+    let user = users::Model::find_by_email(&ctx.db, &form.email).await.ok();
+    let user_id = user.as_ref().map(|u| u.id);
+    if !auth_attempts::Model::begin_login(&ctx.db, &form.email, user_id, &ip).await? {
         // Same work as a real check, so the refusal does not reveal anything.
         let _ = hash::verify_password(&form.password, DUMMY_HASH);
         return login_error(&v, &form, 429, TOO_MANY);
     }
-    let user = match users::Model::find_by_email(&ctx.db, &form.email).await {
-        Ok(user) if user.verify_password(&form.password) => user,
-        Ok(user) => {
-            auth_attempts::Model::record(&ctx.db, kind::LOGIN, &form.email, Some(user.id), &ip)
-                .await?;
-            return login_error(&v, &form, 422, INCORRECT);
-        }
-        Err(_) => {
+    let user = match user {
+        Some(user) if user.verify_password(&form.password) => user,
+        Some(_) => return login_error(&v, &form, 422, INCORRECT),
+        None => {
             let _ = hash::verify_password(&form.password, DUMMY_HASH);
-            auth_attempts::Model::record(&ctx.db, kind::LOGIN, &form.email, None, &ip).await?;
             return login_error(&v, &form, 422, INCORRECT);
         }
     };
-    auth_attempts::Model::clear(&ctx.db, &user.email).await?;
+    // The attempt recorded above stays as a failure unless this clears it.
+    auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
     format::render()
         .cookies(&[session_cookie(&ctx, &user)?])?
         .redirect(safe_next(&form.next).unwrap_or("/"))
@@ -172,16 +167,9 @@ async fn forgot(
     Form(form): Form<ForgotForm>,
 ) -> Result<Response> {
     let ip = client_ip(remote);
-    if auth_attempts::Model::forgot_allowed(&ctx.db, &form.email, &ip).await? {
-        let user = users::Model::find_by_email(&ctx.db, &form.email).await.ok();
-        auth_attempts::Model::record(
-            &ctx.db,
-            kind::FORGOT,
-            &form.email,
-            user.as_ref().map(|u| u.id),
-            &ip,
-        )
-        .await?;
+    let user = users::Model::find_by_email(&ctx.db, &form.email).await.ok();
+    let user_id = user.as_ref().map(|u| u.id);
+    if auth_attempts::Model::begin_forgot(&ctx.db, &form.email, user_id, &ip).await? {
         if let Some(user) = user {
             let user = user
                 .into_active_model()
@@ -225,14 +213,9 @@ async fn reset(
     if form.password != form.password_confirmation {
         return reset_form_error(&v, &token, "The two passwords do not match.");
     }
-    match user
-        .into_active_model()
-        .reset_password(&ctx.db, &form.password)
-        .await
-    {
+    match user.reset_password_everywhere(&ctx, &form.password).await {
         Ok(user) => {
-            users::Model::bump_session_version(&ctx, user.id).await?;
-            auth_attempts::Model::clear(&ctx.db, &user.email).await?;
+            auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
             // The password is already changed; a failed email must not undo that.
             if let Err(err) = SecurityMailer::password_changed(&ctx, &user).await {
                 tracing::error!(error = %err, "could not send the password changed email");

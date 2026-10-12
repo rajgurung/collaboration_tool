@@ -405,6 +405,27 @@ impl Model {
         Ok(())
     }
 
+    /// Sets a new password from a reset link and ends every session, in one
+    /// transaction, then closes the user's live connections.
+    ///
+    /// # Errors
+    /// Validation errors for a bad password, or database errors.
+    pub async fn reset_password_everywhere(
+        self,
+        ctx: &AppContext,
+        password: &str,
+    ) -> ModelResult<Self> {
+        let txn = ctx.db.begin().await?;
+        let user = self
+            .into_active_model()
+            .reset_password(&txn, password)
+            .await?;
+        Self::increment_session_version(&txn, user.id).await?;
+        txn.commit().await?;
+        Self::close_live_connections(ctx, user.id);
+        Ok(user)
+    }
+
     /// Closes the user's open chat sockets and notification streams.
     pub fn close_live_connections(ctx: &AppContext, user_id: i64) {
         if let Some(hub) = ctx.shared_store.get::<ChatHub>() {
@@ -487,9 +508,9 @@ impl ActiveModel {
     /// # Errors
     ///
     /// when has DB query error or could not hashed the given password
-    pub async fn reset_password(
+    pub async fn reset_password<C: ConnectionTrait>(
         mut self,
-        db: &DatabaseConnection,
+        db: &C,
         password: &str,
     ) -> ModelResult<Model> {
         ValidatorTrait::validate(&PasswordParams {

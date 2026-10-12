@@ -11,7 +11,7 @@ const TOO_MANY: &str = "Too many failed sign-ins. Try again in 15 minutes";
 async fn sign_in(request: &TestServer, email: &str, password: &str, ip: &str) -> (u16, String) {
     let res = request
         .post("/login")
-        .add_header("X-Forwarded-For", ip)
+        .add_header("X-Real-IP", ip)
         .form(&serde_json::json!({ "email": email, "password": password }))
         .await;
     (res.status_code().as_u16(), res.text())
@@ -125,7 +125,7 @@ async fn reset_emails_are_limited_per_email_and_per_ip() {
         for _ in 0..4 {
             let res = request
                 .post("/forgot")
-                .add_header("X-Forwarded-For", "203.0.113.1")
+                .add_header("X-Real-IP", "203.0.113.1")
                 .form(&serde_json::json!({ "email": USER_EMAIL }))
                 .await;
             assert_eq!(res.status_code(), 200);
@@ -136,7 +136,7 @@ async fn reset_emails_are_limited_per_email_and_per_ip() {
         for n in 0..12 {
             let res = request
                 .post("/forgot")
-                .add_header("X-Forwarded-For", "198.51.100.7")
+                .add_header("X-Real-IP", "198.51.100.7")
                 .form(&serde_json::json!({ "email": format!("someone{n}@example.com") }))
                 .await;
             assert_eq!(res.status_code(), 200);
@@ -152,6 +152,30 @@ async fn reset_emails_are_limited_per_email_and_per_ip() {
         assert_eq!(
             auth_attempts::Entity::find().count(&ctx.db).await.unwrap(),
             13
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn sign_ins_sent_at_once_cannot_slip_past_the_limit() {
+    request::<App, _, _>(|request, ctx| async move {
+        create_user(&ctx, USER_EMAIL, USER_NAME).await;
+        let tries = (0..10).map(|n| {
+            let ip = format!("203.0.113.{n}");
+            let request = &request;
+            async move { sign_in(request, USER_EMAIL, "wrong-password", &ip).await.0 }
+        });
+        let statuses = futures_util::future::join_all(tries).await;
+        let checked = statuses.iter().filter(|s| **s == 422).count();
+        let refused = statuses.iter().filter(|s| **s == 429).count();
+        assert!(checked <= 5, "{statuses:?}");
+        assert_eq!(checked + refused, 10, "{statuses:?}");
+        // Refused attempts are not kept, so they never stretch the lock.
+        assert_eq!(
+            auth_attempts::Entity::find().count(&ctx.db).await.unwrap(),
+            checked as u64
         );
     })
     .await;

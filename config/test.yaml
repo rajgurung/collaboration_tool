@@ -30,11 +30,12 @@ server:
         uri: "/static"
         path: "assets/static"
       fallback: "assets/static/404.html"
-    # Client IP for sign-in limits. Railway's edge is the only proxy in front
-    # of the app (Cloudflare is DNS only). See "Client IP" in docs/deploy.md.
+    # Client IP for sign-in limits: Railway's edge sets X-Real-IP. Without
+    # the header (local runs) the socket address is used. See "Client IP" in
+    # docs/deploy.md.
     remote_ip:
       enable: true
-      source: RightmostXForwardedFor
+      source: XRealIp
 
 # Worker Configuration
 workers:
@@ -77,7 +78,8 @@ database:
   # When enabled, the sql query will be logged.
   enable_logging: false
   # Set the timeout duration when acquiring a connection.
-  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  # Long enough for tests that send requests at once through the one connection.
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="5000") %>
   # Set the idle duration before closing a connection.
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
   # Minimum number of connections for a pool.
