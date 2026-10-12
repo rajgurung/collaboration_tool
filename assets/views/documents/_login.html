@@ -2,11 +2,13 @@
   <div class="flex items-start gap-3 {% if not sheet %}mx-1{% endif %}">
     <span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span>
     <div class="min-w-0 flex-1">
-      {% if sheet %}<h2 class="m-0 text-xl font-bold break-words">{{ login.title }}</h2>{% else %}<h1 class="m-0 text-2xl font-extrabold tracking-tight break-words">{{ login.title }}</h1>{% endif %}
+      {# Long emails break after "@" or "." rather than mid-word. #}
+      {% set title = login.title | escape | replace(from="@", to="@<wbr>") | replace(from=".", to=".<wbr>") %}
+      {% if sheet %}<h2 class="login-title m-0 text-xl font-bold">{{ title | safe }}</h2>{% else %}<h1 class="login-title m-0 text-xl font-extrabold tracking-tight md:text-2xl">{{ title | safe }}</h1>{% endif %}
       <p class="meta m-0">Login · Added by {{ login.added_by }}, {{ login.added_on }}</p>
     </div>
     {% if sheet %}
-    {% if me.can_manage %}<a class="icon-btn" href="/documents/logins/{{ login.id }}" aria-label="Edit {{ login.title }}">{{<icon name="pencil" class="h-5 w-5"/>}}</a>{% endif %}
+    {% if me.can_manage %}<a class="icon-btn" href="/documents/logins/{{ login.id }}?edit=1" aria-label="Edit {{ login.title }}">{{<icon name="pencil" class="h-5 w-5"/>}}</a>{% endif %}
     <button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button>
     {% endif %}
   </div>
@@ -47,6 +49,6 @@
     <p class="meta m-0 text-sm">Owners and admins: {{ managers }}. {% if named %}Also named: {{ named }}.{% else %}No members named.{% endif %}</p>
   </div>
   {% if can_reveal %}
-  <p class="meta m-0 flex items-center gap-1.5 {% if not sheet %}mx-1{% endif %}" data-unlocked-line {% if not unlocked_minutes %}hidden{% endif %}>{{<icon name="lock" class="h-4 w-4"/>}}<span>Unlocked for <span data-unlocked-minutes>{{ unlocked_minutes }}</span> more {% if unlocked_minutes == 1 %}minute{% else %}minutes{% endif %}</span></p>
+  <p class="meta m-0 flex items-center gap-1.5 {% if not sheet %}mx-1{% endif %}" data-unlocked-line data-seconds="{{ unlocked_seconds }}" {% if not unlocked_seconds %}hidden{% endif %}>{{<icon name="lock" class="h-4 w-4"/>}}<span data-unlocked-text></span></p>
   {% endif %}
 </div>

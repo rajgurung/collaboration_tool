@@ -414,13 +414,15 @@ impl Model {
         fresh && session_id.is_some() && self.secrets_unlocked_sid.as_deref() == session_id
     }
 
-    /// Whole minutes left on the unlock, rounded up, for "Unlocked for 4
-    /// more minutes".
+    /// Seconds left on the unlock, for the "Unlocked for 4 more minutes"
+    /// line that counts down in the page.
     #[must_use]
-    pub fn unlocked_minutes_left(&self) -> i64 {
+    pub fn unlocked_seconds_left(&self) -> i64 {
         self.secrets_unlocked_until.map_or(0, |until| {
-            let seconds = (until.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds();
-            (std::cmp::max(seconds, 0) + 59) / 60
+            std::cmp::max(
+                (until.with_timezone(&chrono::Utc) - chrono::Utc::now()).num_seconds(),
+                0,
+            )
         })
     }
 

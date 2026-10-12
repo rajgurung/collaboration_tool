@@ -394,6 +394,7 @@ async fn showing_a_password_needs_an_unlock_from_the_same_session() {
         assert_eq!(res.status_code(), 200);
         assert_eq!(res.text(), CODES);
         assert_eq!(res.headers()["cache-control"], "no-store");
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
         assert_eq!(events(&ctx, "copy").await.len(), 1);
 
         // The owner hears about each one; the email never carries the secret.
@@ -914,6 +915,212 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
         let login = only_login(&ctx).await;
         assert_eq!(login.title, "Companies House");
         assert!(events(&ctx, "reveal").await.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_logins_folder_takes_no_files() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let (name, value) = header(&acme.alice);
+        let res = request
+            .post(&format!("/documents/folders/{}/files", acme.folder.id))
+            .add_header(name, value)
+            .multipart(
+                axum_test::multipart::MultipartForm::new().add_part(
+                    "file",
+                    axum_test::multipart::Part::bytes(super::documents::PDF.to_vec())
+                        .file_name("passwords.pdf"),
+                ),
+            )
+            .await;
+        assert_eq!(res.status_code(), 422);
+        assert!(res.text().contains("The Logins folder holds logins only."));
+        assert_eq!(
+            collab::models::documents::Entity::find()
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+
+        // No picker, drop zone or hint; owners are offered a login, members are told who adds them.
+        let page = request
+            .get(&format!("/documents/folders/{}", acme.folder.id))
+            .add_header(acme.alice.0.clone(), acme.alice.1.clone())
+            .await
+            .text();
+        assert!(!page.contains("data-upload"));
+        assert!(!page.contains("data-drop-overlay"));
+        assert!(!page.contains("Drag files here"));
+        assert!(!page.contains("data-pick"));
+        assert!(page.contains("Add a login"));
+        let page = request
+            .get(&format!("/documents/folders/{}", acme.folder.id))
+            .add_header(acme.bob.0.clone(), acme.bob.1.clone())
+            .await
+            .text();
+        assert!(page.contains("Owners and admins add shared logins here."));
+        assert!(!page.contains("data-upload"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_locked_account_loses_its_claude_tokens() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let before = super::mcp::token_for(&ctx, "carol@example.com").await;
+        let list = |token: String| {
+            let request = &request;
+            async move {
+                super::mcp::rpc(request, &token, "tools/list", serde_json::json!({}))
+                    .await
+                    .status
+            }
+        };
+        assert_eq!(list(before.clone()).await, 200);
+        for _ in 0..5 {
+            unlock(&request, &acme.carol, "wrong").await;
+        }
+        let carol = users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap();
+        assert!(carol.is_locked());
+        assert_eq!(list(before).await, 401, "revoked when the account locked");
+        // A token made later is refused too, while the account is locked.
+        let after = super::mcp::token_for(&ctx, "carol@example.com").await;
+        assert_eq!(list(after).await, 401);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn an_old_cookie_without_a_sign_in_id_gets_one_when_it_unlocks() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        add(&request, &acme.alice, acme.folder.id, &[]).await;
+        let id = only_login(&ctx).await.id;
+        let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap();
+        let config = ctx.config.get_jwt_config().unwrap();
+        // How tokens looked before sign-ins had ids: a session version only.
+        let mut claims = serde_json::Map::new();
+        claims.insert("sv".to_string(), alice.session_version.into());
+        let old = loco_rs::auth::jwt::JWT::new(&config.secret)
+            .generate_token(config.expiration, alice.pid.to_string(), claims)
+            .unwrap();
+        let old: Cookie = (
+            axum::http::HeaderName::from_static("cookie"),
+            axum::http::HeaderValue::from_str(&format!("auth_token={old}")).unwrap(),
+        );
+        assert_eq!(reveal(&request, &old, id).await.status_code(), 423);
+        let res = unlock(&request, &old, USER_PASSWORD).await;
+        assert_eq!(res.status_code(), 200);
+        let new = super::prepare_data::cookie_from(&res.headers().clone());
+        let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap();
+        assert!(alice.secrets_unlocked_sid.is_some());
+        let res = reveal(&request, &new, id).await;
+        assert_eq!(res.status_code(), 200);
+        assert!(res.text().contains(SECRET));
+        assert_eq!(
+            reveal(&request, &old, id).await.status_code(),
+            423,
+            "the old cookie stays locked"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn editing_a_login_keeps_what_removed_people_could_see() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let dave_id = user_id(&ctx, "dave@example.com").await;
+        add(
+            &request,
+            &acme.alice,
+            acme.folder.id,
+            &[("access", dave_id.to_string())],
+        )
+        .await;
+        let login = only_login(&ctx).await;
+        let dave_m = memberships::Model::find_for_user(&ctx.db, dave_id)
+            .await
+            .unwrap()
+            .unwrap();
+        post(
+            &request,
+            &acme.alice,
+            &format!("/members/{}/remove", dave_m.id),
+            &[],
+        )
+        .await;
+        let res = post(
+            &request,
+            &acme.alice,
+            &format!("/documents/logins/{}", login.id),
+            &[
+                ("title", "Companies House"),
+                ("password", ""),
+                ("recovery", ""),
+            ],
+        )
+        .await;
+        assert_eq!(res.status_code(), 303, "{}", res.text());
+        let named = collab::models::login_accesses::Model::user_ids(&ctx.db, login.id)
+            .await
+            .unwrap();
+        assert_eq!(named, vec![dave_id]);
+        let page = request
+            .get(&format!("/members/{}/rotate", dave_m.id))
+            .add_header(acme.alice.0.clone(), acme.alice.1.clone())
+            .await
+            .text();
+        assert!(page.contains("Could see it, never opened it"), "{page}");
+    })
+    .await;
+}
+
+/// The rotate list belongs to its organisation, and needs your own membership.
+#[tokio::test]
+#[serial]
+async fn the_rotate_list_stays_inside_its_organisation() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let dave_m =
+            memberships::Model::find_for_user(&ctx.db, user_id(&ctx, "dave@example.com").await)
+                .await
+                .unwrap()
+                .unwrap();
+        post(
+            &request,
+            &acme.alice,
+            &format!("/members/{}/remove", dave_m.id),
+            &[],
+        )
+        .await;
+        let path = format!("/members/{}/rotate", dave_m.id);
+        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let res = request
+            .get(&path)
+            .add_header(gina.0.clone(), gina.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 404);
+        assert!(!res.text().contains("dave"));
+        let admin = super::admin::super_admin_cookie(&request, &ctx).await;
+        let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.org.id);
+        let res = request.get(&path).add_header("cookie", acting).await;
+        assert_eq!(res.status_code(), 403);
+        assert_eq!(request.get(&path).await.status_code(), 303, "logged out");
     })
     .await;
 }

@@ -20,7 +20,7 @@
 </div>
 
 {% if me.can_manage %}
-<dialog class="sheet" aria-labelledby="edit-login-title">
+<dialog class="sheet" aria-labelledby="edit-login-title" {% if open_edit %}data-open-on-load{% endif %}>
   <div class="sheet-handle"></div>
   <div class="sheet-body flex flex-col gap-4">
     <div class="flex items-center gap-2"><h2 id="edit-login-title" class="m-0 flex-1 text-[19px] font-bold">Edit {{ login.title }}</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>

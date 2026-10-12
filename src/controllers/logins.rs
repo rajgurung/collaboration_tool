@@ -159,7 +159,7 @@ async fn login_data(
         },
         "folder": { "id": folder.id, "name": folder.name },
         "can_reveal": can_reveal,
-        "unlocked_minutes": if unlocked { member.user.unlocked_minutes_left() } else { 0 },
+        "unlocked_seconds": if unlocked { member.user.unlocked_seconds_left() } else { 0 },
         "managers": and_list(&managers),
         "named": and_list(&named),
         "ask": ask.join(" or "),
@@ -186,6 +186,11 @@ async fn login_data(
 
 /// A login's page. HTMX requests (the desktop side sheet) get only the
 /// details.
+#[derive(Deserialize)]
+struct ShowQuery {
+    edit: Option<String>,
+}
+
 #[debug_handler]
 async fn show(
     member: CurrentMember,
@@ -193,6 +198,7 @@ async fn show(
     ViewEngine(v): ViewEngine<TeraView>,
     headers: HeaderMap,
     Path(id): Path<i64>,
+    Query(query): Query<ShowQuery>,
 ) -> Result<Response> {
     member.require_own_membership()?;
     let login = logins::Model::find_in_org(&ctx.db, member.org.id, id).await?;
@@ -205,6 +211,7 @@ async fn show(
     }
     page["folders"] =
         serde_json::to_value(folder_rows(&ctx, &member, Some(login.folder_id)).await?)?;
+    page["open_edit"] = (query.edit.is_some() && member.can_manage()).into();
     format::render()
         .header(header::CACHE_CONTROL.as_str(), "no-store")
         .view(&v, "documents/login.html", member.page("documents", page))
@@ -568,6 +575,8 @@ struct EventRow {
     bad: bool,
     who: String,
     text: String,
+    /// "1 of 5", kept on one line.
+    count: Option<String>,
     title: Option<String>,
     meta: String,
 }
@@ -592,7 +601,7 @@ fn event_row(event: login_events::Model, tz: chrono_tz::Tz) -> EventRow {
         action::REAUTH_FAILED => (
             "circle-alert",
             true,
-            format!("typed a wrong app password ({detail})"),
+            "typed a wrong app password".to_string(),
         ),
         action::LOCK => (
             "lock",
@@ -613,11 +622,13 @@ fn event_row(event: login_events::Model, tz: chrono_tz::Tz) -> EventRow {
         Some(title) if trying => (None, format!("{at} · trying to see {title}")),
         title => (title, at),
     };
+    let count = (event.action == action::REAUTH_FAILED).then_some(detail);
     EventRow {
         icon,
         bad,
         who: event.username,
         text,
+        count,
         title,
         meta,
     }

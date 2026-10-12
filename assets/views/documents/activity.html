@@ -18,7 +18,7 @@
     <div class="ev {% if e.bad %}ev-bad{% endif %}">
       <span class="ev-icon">{{<icon name={e.icon} class="h-4 w-4"/>}}</span>
       <div class="min-w-0 flex-1">
-        <p class="m-0 break-words"><strong>{{ e.who }}</strong> {{ e.text }}{% if e.title %} <strong>{{ e.title }}</strong>{% endif %}</p>
+        <p class="m-0 break-words"><strong>{{ e.who }}</strong> {{ e.text }}{% if e.count %} <span class="whitespace-nowrap">({{ e.count }})</span>{% endif %}{% if e.title %} <strong>{{ e.title }}</strong>{% endif %}</p>
         <p class="meta m-0">{{ e.meta }}</p>
       </div>
     </div>

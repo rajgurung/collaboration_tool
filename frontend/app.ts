@@ -716,13 +716,32 @@ function secretAsk(button: Element, kind: SecretAsk["kind"]): SecretAsk | null {
   return { kind, loginId, field: box.dataset.secret ?? "password", box };
 }
 
-function markUnlocked() {
-  document.querySelectorAll<HTMLElement>("[data-unlocked-line]").forEach((line) => {
-    line.hidden = false;
-    const minutes = line.querySelector("[data-unlocked-minutes]");
-    if (minutes) minutes.textContent = "5";
+// "Unlocked for 4 more minutes" counts down and hides when the unlock ends,
+// so it never claims an unlock the server has already dropped.
+function tickUnlocked(line: HTMLElement) {
+  const left = Number(line.dataset.seconds ?? "0") - (Date.now() - Number(line.dataset.since ?? Date.now())) / 1000;
+  line.hidden = left <= 0;
+  const minutes = Math.ceil(left / 60);
+  const text = line.querySelector("[data-unlocked-text]");
+  if (text) text.textContent = `Unlocked for ${minutes} more ${minutes === 1 ? "minute" : "minutes"}`;
+}
+function startUnlocked(root: ParentNode, seconds?: number) {
+  root.querySelectorAll<HTMLElement>("[data-unlocked-line]").forEach((line) => {
+    if (seconds !== undefined) line.dataset.seconds = String(seconds);
+    line.dataset.since = String(Date.now());
+    tickUnlocked(line);
   });
 }
+window.setInterval(() => document.querySelectorAll<HTMLElement>("[data-unlocked-line]").forEach(tickUnlocked), 5000);
+startUnlocked(document);
+document.body.addEventListener("htmx:afterSwap", (event) => startUnlocked((event as CustomEvent<{ target: Element }>).detail.target));
+
+function markUnlocked() {
+  startUnlocked(document, 5 * 60);
+}
+
+// The edit sheet opens straight away when a page asks for it (?edit=1).
+document.querySelector<HTMLDialogElement>("dialog[data-open-on-load]")?.showModal();
 
 // A refused request: signed out (the session ended) or an error message.
 async function secretRefused(res: Response) {
@@ -740,6 +759,7 @@ function askForPassword(ask: SecretAsk) {
   dialog.querySelectorAll<HTMLElement>("[data-unlock-pane]").forEach((pane) => (pane.hidden = pane.dataset.unlockPane !== "form"));
   const error = dialog.querySelector<HTMLElement>("[data-unlock-error]");
   if (error) error.hidden = true;
+  dialog.querySelector("input[name=password]")?.removeAttribute("aria-invalid");
   const what = ask.field === "recovery" ? "recovery codes" : "password";
   dialog.querySelector("[data-unlock-submit]")!.textContent = `${ask.kind === "copy" ? "Copy" : "Show"} ${what}`;
   dialog.showModal();
@@ -842,6 +862,8 @@ document.addEventListener("submit", (event) => {
   if (!dialog || !input || !ask) return;
   const unlocking = postForm("/documents/logins/unlock", { password: input.value, login_id: ask.loginId });
   input.value = "";
+  input.removeAttribute("aria-invalid");
+  if (error) error.hidden = true;
   // Copy has to begin inside this tap, so it waits on the unlock itself.
   if (ask.kind === "copy") copySecret(ask, unlocking);
   void unlocking.then(async (res) => {
@@ -864,6 +886,7 @@ document.addEventListener("submit", (event) => {
       error.textContent = (await res.text()) || "Couldn't check your password. Try again.";
       error.hidden = false;
     }
+    input.setAttribute("aria-invalid", "true");
     input.focus();
   });
 });
