@@ -70,6 +70,7 @@ Wrangler cannot manage DNS records; use the Cloudflare API, dashboard or the `cf
 - **Email.** Railway blocks outbound SMTP (ports 25/465/587) below the Pro plan; sends fail with `Network is unreachable`. Production therefore uses Resend's HTTPS API (`RESEND_API_KEY`), sending from `no-reply@rajgurung.me` (domain verified in Resend; DKIM/SPF records in Cloudflare). The `MAILER_*` variables must still exist for the app to boot, but are unused while `RESEND_API_KEY` is set.
 - **Cookies.** Production marks the session cookie `Secure`, so the site must be served over HTTPS (Railway domains are).
 - **Form posts** are rejected if their `Origin` is not `APP_URL`. If you add a custom domain, update `APP_URL`.
+- **Client IP.** Sign-in limits count failures per IP, read by Loco's `remote_ip` middleware from the rightmost `X-Forwarded-For` entry. Railway's docs only promise `X-Real-IP` ("for identifying client's remote IP") and say nothing about `X-Forwarded-For`. If Railway passes a client's own `X-Forwarded-For` through unchanged, switch `source` to `XRealIp` in `config/production.yaml`. Putting Cloudflare's proxy in front would change this again.
 
 ## Build and run the image locally
 
