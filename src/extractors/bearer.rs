@@ -60,7 +60,12 @@ async fn authenticate(
     else {
         return Ok(None);
     };
-    let Some(user) = users::Entity::find_by_id(row.user_id).one(&ctx.db).await? else {
+    // A locked account (too many wrong app passwords) is shut out until reset.
+    let Some(user) = users::Entity::find_by_id(row.user_id)
+        .one(&ctx.db)
+        .await?
+        .filter(|u| !u.is_locked())
+    else {
         return Ok(None);
     };
     let org = organisations::Model::find_by_id(&ctx.db, row.organisation_id).await?;

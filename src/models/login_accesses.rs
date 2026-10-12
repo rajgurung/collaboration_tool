@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use loco_rs::prelude::*;
 
 pub use super::_entities::login_accesses::{ActiveModel, Column, Entity, Model};
+use super::memberships;
 
 pub type LoginAccesses = Entity;
 
@@ -60,18 +61,30 @@ impl Model {
             .collect())
     }
 
-    /// Names exactly `user_ids` on the login. Callers check they are active
-    /// members of the organisation first.
+    /// Names exactly `user_ids` among the organisation's active members.
+    /// Callers check every id is an active member first.
+    ///
+    /// Rows for people who were removed stay: the "change these at the
+    /// source" list uses them to show what that person could see. They grant
+    /// nothing, because only active members get past `CurrentMember`, and a
+    /// removed person cannot rejoin (one organisation per user).
     ///
     /// # Errors
     /// On database errors.
     pub async fn replace<C: ConnectionTrait>(
         db: &C,
+        org_id: i64,
         login_id: i64,
         user_ids: &[i64],
     ) -> ModelResult<()> {
+        let active: Vec<i64> = memberships::Model::team(db, org_id)
+            .await?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
         Entity::delete_many()
             .filter(Column::LoginId.eq(login_id))
+            .filter(Column::UserId.is_in(active))
             .exec(db)
             .await?;
         if user_ids.is_empty() {

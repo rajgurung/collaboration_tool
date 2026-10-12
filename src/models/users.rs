@@ -457,12 +457,13 @@ impl Model {
 
     /// Locks the account after too many wrong app passwords inside a
     /// session, and signs the person out everywhere. Only a password reset
-    /// unlocks it. Returns false if it was already locked, so the owners are
-    /// told once per lock.
+    /// unlocks it. Their Claude tokens in the organisation are revoked too.
+    /// Returns false if it was already locked, so the owners are told once
+    /// per lock.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn lock_account(ctx: &AppContext, user_id: i64) -> ModelResult<bool> {
+    pub async fn lock_account(ctx: &AppContext, org_id: i64, user_id: i64) -> ModelResult<bool> {
         let txn = ctx.db.begin().await?;
         let locked = users::Entity::update_many()
             .col_expr(
@@ -476,6 +477,7 @@ impl Model {
             .rows_affected
             == 1;
         Self::increment_session_version(&txn, user_id).await?;
+        super::access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
         txn.commit().await?;
         Self::close_live_connections(ctx, user_id);
         Ok(locked)

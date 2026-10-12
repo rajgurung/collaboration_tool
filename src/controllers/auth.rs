@@ -235,10 +235,7 @@ async fn reset(
         Ok(user) => {
             auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
             auth_attempts::Model::clear_reauth(&ctx.db, &user.email).await?;
-            // The password is already changed; a failed email must not undo that.
-            if let Err(err) = tell_about_reset(&ctx, &user).await {
-                tracing::error!(error = %err, "could not send the password changed email");
-            }
+            tell_about_reset(&ctx, &user).await;
             format::redirect("/login?reset=1")
         }
         Err(err) => {
@@ -251,9 +248,18 @@ async fn reset(
 }
 
 /// Emails the person, and the owners too when the person can see login
-/// passwords: someone who took over their email could now see them.
-async fn tell_about_reset(ctx: &AppContext, user: &users::Model) -> Result<()> {
-    SecurityMailer::password_changed(ctx, user).await?;
+/// passwords: someone who took over their email could now see them. The
+/// password is already changed, so failures are logged, each on its own.
+async fn tell_about_reset(ctx: &AppContext, user: &users::Model) {
+    if let Err(err) = SecurityMailer::password_changed(ctx, user).await {
+        tracing::error!(error = %err, "could not send the password changed email");
+    }
+    if let Err(err) = tell_owners_about_reset(ctx, user).await {
+        tracing::error!(error = %err, "could not email owners about a password reset");
+    }
+}
+
+async fn tell_owners_about_reset(ctx: &AppContext, user: &users::Model) -> Result<()> {
     let Some(membership) = memberships::Model::find_for_user(&ctx.db, user.id)
         .await?
         .filter(memberships::Model::is_active)

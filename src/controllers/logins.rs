@@ -336,7 +336,7 @@ async fn lock(
     client: &Client,
     login: Option<(i64, &str)>,
 ) -> Result<Response> {
-    if users::Model::lock_account(ctx, member.user.id).await? {
+    if users::Model::lock_account(ctx, member.org.id, member.user.id).await? {
         login_events::Model::record(
             &ctx.db,
             client,
@@ -553,6 +553,10 @@ async fn copy(
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
     tell_owners(&ctx, &member, &login, name, true).await;
     Ok(response)
 }

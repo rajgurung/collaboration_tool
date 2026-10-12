@@ -307,7 +307,7 @@ impl Model {
         .set_tenant(org_id)?
         .insert(&txn)
         .await?;
-        login_accesses::Model::replace(&txn, login.id, &access).await?;
+        login_accesses::Model::replace(&txn, org_id, login.id, &access).await?;
         login
             .log(&txn, member, client, action::CREATE, None)
             .await?;
@@ -374,7 +374,7 @@ impl Model {
         login.notes = ActiveValue::Set(checked.notes);
         login.folder_id = ActiveValue::Set(folder_id);
         let login = login.update(&txn).await?;
-        login_accesses::Model::replace(&txn, login.id, &access).await?;
+        login_accesses::Model::replace(&txn, org_id, login.id, &access).await?;
         let detail = new_password.then(|| field::PASSWORD.to_string());
         login
             .log(&txn, member, client, action::EDIT, detail)
