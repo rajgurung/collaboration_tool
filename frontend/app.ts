@@ -409,6 +409,7 @@ document.addEventListener(
 // Documents: add a photo or a file to the open folder, one per request. Size
 // and type are checked here before sending, and again on the server.
 const MAX_UPLOAD = 25 * 1024 * 1024;
+const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
 const UPLOAD_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"];
 const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 const uploadForm = () => document.querySelector<HTMLFormElement>("form[data-upload]");
@@ -439,10 +440,16 @@ function progressRow(name: string): HTMLElement {
   row.dataset.uploadProgress = "";
   const tile = document.createElement("span");
   tile.className = "tile";
-  const label = document.createElement("span");
-  label.className = "tile-type";
-  label.textContent = (name.split(".").pop() ?? "").toUpperCase();
-  tile.append(label);
+  const ext = (name.split(".").pop() ?? "").toLowerCase();
+  const icon = document.querySelector<HTMLTemplateElement>("#image-icon-template")?.content.firstElementChild;
+  if (IMAGE_EXTENSIONS.includes(ext) && icon) {
+    tile.append(icon.cloneNode(true));
+  } else {
+    const label = document.createElement("span");
+    label.className = "tile-type";
+    label.textContent = ext.toUpperCase();
+    tile.append(label);
+  }
   const body = document.createElement("div");
   body.className = "min-w-0 flex-1";
   const title = document.createElement("p");
@@ -557,11 +564,19 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   const row = document.querySelector<HTMLElement>("[data-upload-progress]");
   const name = row?.querySelector(".name")?.textContent ?? "";
   row?.remove();
-  // A refusal comes back as its own error row; keep the file only to retry a failed send.
+  // A refusal comes back as its own error row.
   if (successful || xhr.status === 422) {
     elt.reset();
     return;
   }
-  const failed = uploadRow(name, "Stopped part way. Check your connection.", true);
+  // Status 0: the connection dropped. Keep the file so Try again can resend it.
+  const dropped = xhr.status === 0;
+  if (!dropped) elt.reset();
+  const message = dropped
+    ? "Stopped part way. Check your connection."
+    : xhr.status === 413
+      ? "Too big. The limit is 25 MB. Try saving a smaller copy."
+      : "Couldn't add it. Try again, or reload the page.";
+  const failed = uploadRow(name, message, dropped);
   if (failed) document.getElementById("uploads")?.prepend(failed);
 });

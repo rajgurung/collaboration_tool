@@ -5,22 +5,24 @@
     <p class="truncate-1 m-0 font-medium">{{ row.username }}{% if row.is_me %} <span class="text-muted">(you)</span>{% endif %}</p>
     <p class="meta truncate-1 m-0">{{ row.email }}</p>
   </div>
-  {% if not role_form and not row.can_remove %}<span class="pill capitalize">{{ row.role }}</span>{% endif %}
+  {% if not role_form %}<span class="pill capitalize">{{ row.role }}</span>{% endif %}
   {% if role_form or row.can_remove %}
   <div class="member-actions">
     {% if role_form %}
     <form method="post" action="/members/{{ row.id }}/role" hx-post="/members/{{ row.id }}/role" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
-      <select name="role" class="input min-h-9 w-auto py-1 text-sm" aria-label="Role for {{ row.username }}">
+      <select name="role" class="input min-h-11 w-auto py-1 text-sm" aria-label="Role for {{ row.username }}">
         <option value="member" {% if row.role == "member" %}selected{% endif %}>Member</option>
         <option value="admin" {% if row.role == "admin" %}selected{% endif %}>Admin</option>
       </select>
-      <button type="submit" class="btn btn-secondary">Save</button>
+      <button type="submit" class="btn btn-secondary min-h-11">Save</button>
     </form>
-    {% else %}
-    <span class="pill capitalize">{{ row.role }}</span>
     {% endif %}
     {% if row.can_remove %}
-    <button type="button" class="btn btn-danger" data-dialog-open="remove-{{ row.id }}">{{<icon name="user-minus" class="h-4 w-4"/>}}Remove</button>
+    {% if role_form %}
+    <button type="button" class="btn btn-danger min-h-11 w-11 px-0" data-dialog-open="remove-{{ row.id }}" aria-label="Remove {{ row.username }}" title="Remove {{ row.username }}">{{<icon name="user-minus" class="h-4 w-4"/>}}</button>
+    {% else %}
+    <button type="button" class="btn btn-danger min-h-11" data-dialog-open="remove-{{ row.id }}">{{<icon name="user-minus" class="h-4 w-4"/>}}Remove</button>
+    {% endif %}
     <dialog class="sheet" aria-labelledby="remove-{{ row.id }}">
       <div class="sheet-handle"></div>
       <div class="sheet-body flex flex-col gap-4">

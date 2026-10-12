@@ -22,6 +22,7 @@
           <div class="flex items-center gap-3">
             <span class="tile">{% if f.is_image %}{{<icon name="image" class="h-5 w-5"/>}}{% else %}<span class="tile-type">{{ f.label }}</span>{% endif %}</span>
             <div class="min-w-0 flex-1"><h2 id="file-{{ f.id }}-title" class="name m-0 break-words">{{ f.name }}</h2><p class="meta m-0">Added by {{ f.uploader }} · {{ f.added }} · {{ f.size }}</p></div>
+            <button type="button" class="icon-btn self-start" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button>
           </div>
           <div class="list" data-pane="menu">
             {% if f.opens_inline %}<a class="list-row" href="/documents/files/{{ f.id }}" target="_blank" rel="noopener">{{<icon name="external-link" class="h-5 w-5"/>}}<span class="flex-1">Open</span></a>{% endif %}

@@ -31,6 +31,7 @@
       hx-target="#files" hx-swap="innerHTML" data-upload>
   <input type="file" name="file" class="sr-only" tabindex="-1" aria-hidden="true">
 </form>
+<template id="image-icon-template">{{<icon name="image" class="h-5 w-5"/>}}</template>
 <template id="upload-error-template">{% set name = "" %}{% set message = "" %}{% include "documents/_upload_error.html" %}</template>
 
 <dialog class="sheet" aria-labelledby="add-title">
