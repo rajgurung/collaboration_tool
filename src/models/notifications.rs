@@ -228,6 +228,29 @@ impl Model {
             .await?)
     }
 
+    /// Marks everything not yet emailed to someone as emailed, so nothing is
+    /// emailed to them after they leave the organisation.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn stop_emails<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        Entity::update_many()
+            .col_expr(
+                Column::EmailedAt,
+                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+            )
+            .filter(Column::OrganisationId.eq(org_id))
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::EmailedAt.is_null())
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn mark_emailed<C: ConnectionTrait>(db: &C, ids: &[i64]) -> ModelResult<()> {

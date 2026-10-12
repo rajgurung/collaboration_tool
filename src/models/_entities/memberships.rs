@@ -21,6 +21,8 @@ pub struct Model {
     pub approved_by_id: Option<i64>,
     pub guide_dismissed_at: Option<DateTimeWithTimeZone>,
     pub welcomed_at: Option<DateTimeWithTimeZone>,
+    pub removed_at: Option<DateTimeWithTimeZone>,
+    pub removed_by_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -38,6 +40,14 @@ pub enum Relation {
         from = "Column::ApprovedById",
         to = "super::users::Column::Id",
         on_update = "NoAction",
+        on_delete = "SetNull"
+    )]
+    Users3,
+    #[sea_orm(
+        belongs_to = "super::users::Entity",
+        from = "Column::RemovedById",
+        to = "super::users::Column::Id",
+        on_update = "Cascade",
         on_delete = "SetNull"
     )]
     Users2,

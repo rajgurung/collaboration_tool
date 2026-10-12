@@ -90,6 +90,10 @@ pub async fn send_due(ctx: &AppContext) -> Result<usize> {
     let app_url = Settings::from_context(ctx)?.app_url;
     let mut sent = 0;
     for ((org_id, user_id), list) in by_person {
+        // Someone removed (or otherwise not active) gets nothing more.
+        if !memberships::Model::is_active_member(&ctx.db, org_id, user_id).await? {
+            continue;
+        }
         let (Some(user), Some(org)) = (
             users::Entity::find_by_id(user_id).one(&ctx.db).await?,
             organisations::Entity::find_by_id(org_id)

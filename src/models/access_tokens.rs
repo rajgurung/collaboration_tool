@@ -308,6 +308,35 @@ impl Model {
         Ok(())
     }
 
+    /// Revokes every token and unused code a person has in an organisation,
+    /// for when they are removed from it.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn revoke_all_for<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        let now = chrono::Utc::now();
+        Entity::update_many()
+            .col_expr(Column::RevokedAt, Expr::value(now))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
+            .filter(Column::OrganisationId.eq(org_id))
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::RevokedAt.is_null())
+            .exec(db)
+            .await?;
+        oauth_codes::Entity::update_many()
+            .col_expr(oauth_codes::Column::UsedAt, Expr::value(now))
+            .filter(oauth_codes::Column::OrganisationId.eq(org_id))
+            .filter(oauth_codes::Column::UserId.eq(user_id))
+            .filter(oauth_codes::Column::UsedAt.is_null())
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
     /// Revokes one of this person's own grants.
     ///
     /// # Errors

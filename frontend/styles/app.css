@@ -38,6 +38,7 @@
   --blocked-bg: #fce9e2;
   --done: #2f9e6b;
   --danger: #c2410c;
+  --on-danger: #ffffff;
   --shadow: 0 1px 2px rgba(23, 20, 15, 0.08);
   --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
   --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
@@ -75,6 +76,7 @@
     --blocked-bg: #3a2019;
     --done: #4cc38a;
     --danger: #ff8466;
+    --on-danger: #1b1300;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
     --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
@@ -109,6 +111,7 @@
   --blocked-bg: #3a2019;
   --done: #4cc38a;
   --danger: #ff8466;
+  --on-danger: #1b1300;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
   --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
@@ -156,6 +159,7 @@
   .btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
   .btn-secondary:hover { background: var(--chip); }
   .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--line); }
+  .btn-danger-solid { background: var(--danger); color: var(--on-danger); }
   .btn-lg { min-height: 48px; padding: 0 20px; font-size: 16px; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--text); flex-shrink: 0; }
@@ -174,6 +178,8 @@
   .meta { font-size: 13px; color: var(--muted); }
   .truncate-1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 15px; }
+  .bullets { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.55; display: flex; flex-direction: column; gap: 4px; }
+  .member-actions { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 48px; }
 
   /* Avatars */
   .avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
@@ -444,7 +450,8 @@
   /* Toasts */
   .toast-region { position: fixed; left: 16px; right: 16px; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 80; display: grid; gap: 8px; justify-items: center; pointer-events: none; }
   .toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
-  .toast-error { background: var(--danger); color: #fff; }
+  /* Dark mode's coral danger is light, so it takes dark text. */
+  .toast-error { background: var(--danger); color: var(--on-danger); }
   @media (min-width: 900px) { .toast-region { left: auto; right: 24px; bottom: 24px; justify-items: end; } }
 
   /* Getting started guide and welcome pop-up */

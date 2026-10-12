@@ -1,18 +1,42 @@
+{% set role_form = me.role == "owner" and row.role != "owner" and not me.acting %}
 <div class="list-row flex-wrap" data-member-row id="member-{{ row.id }}">
   {{<avatar name={row.username} color={row.color} size="md"/>}}
   <div class="min-w-0 flex-1">
     <p class="truncate-1 m-0 font-medium">{{ row.username }}{% if row.is_me %} <span class="text-muted">(you)</span>{% endif %}</p>
     <p class="meta truncate-1 m-0">{{ row.email }}</p>
   </div>
-  {% if me.role == "owner" and row.role != "owner" %}
-  <form method="post" action="/members/{{ row.id }}/role" hx-post="/members/{{ row.id }}/role" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
-    <select name="role" class="input min-h-9 w-auto py-1 text-sm" aria-label="Role for {{ row.username }}">
-      <option value="member" {% if row.role == "member" %}selected{% endif %}>Member</option>
-      <option value="admin" {% if row.role == "admin" %}selected{% endif %}>Admin</option>
-    </select>
-    <button type="submit" class="btn btn-secondary">Save</button>
-  </form>
-  {% else %}
-  <span class="pill capitalize">{{ row.role }}</span>
+  {% if not role_form and not row.can_remove %}<span class="pill capitalize">{{ row.role }}</span>{% endif %}
+  {% if role_form or row.can_remove %}
+  <div class="member-actions">
+    {% if role_form %}
+    <form method="post" action="/members/{{ row.id }}/role" hx-post="/members/{{ row.id }}/role" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
+      <select name="role" class="input min-h-9 w-auto py-1 text-sm" aria-label="Role for {{ row.username }}">
+        <option value="member" {% if row.role == "member" %}selected{% endif %}>Member</option>
+        <option value="admin" {% if row.role == "admin" %}selected{% endif %}>Admin</option>
+      </select>
+      <button type="submit" class="btn btn-secondary">Save</button>
+    </form>
+    {% else %}
+    <span class="pill capitalize">{{ row.role }}</span>
+    {% endif %}
+    {% if row.can_remove %}
+    <button type="button" class="btn btn-danger" data-dialog-open="remove-{{ row.id }}">{{<icon name="user-minus" class="h-4 w-4"/>}}Remove</button>
+    <dialog class="sheet" aria-labelledby="remove-{{ row.id }}">
+      <div class="sheet-handle"></div>
+      <div class="sheet-body flex flex-col gap-4">
+        <div class="flex items-center gap-3">{{<avatar name={row.username} color={row.color} size="lg"/>}}<h2 id="remove-{{ row.id }}" class="m-0 flex-1 text-[19px] font-bold">Remove {{ row.username }} from {{ org.name }}?</h2></div>
+        <ul class="bullets">
+          <li>They are signed out on every device straight away.</li>
+          <li>They can't open tasks, chat or documents any more.</li>
+          <li>Their Claude connections stop working.</li>
+        </ul>
+        <form method="post" action="/members/{{ row.id }}/remove" hx-post="/members/{{ row.id }}/remove" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-2">
+          <button type="submit" class="btn btn-lg btn-danger-solid w-full">Remove {{ row.username }}</button>
+          <button type="button" class="btn btn-lg btn-secondary w-full" data-dialog-close>Cancel</button>
+        </form>
+      </div>
+    </dialog>
+    {% endif %}
+  </div>
   {% endif %}
 </div>

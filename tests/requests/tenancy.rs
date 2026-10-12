@@ -196,6 +196,7 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/members/{}/approve", globex.pending.id), serde_json::json!({})),
             (format!("/members/{}/reject", globex.pending.id), serde_json::json!({})),
             (format!("/members/{}/role", globex.pending.id), serde_json::json!({ "role": "admin" })),
+            (format!("/members/{}/remove", globex.pending.id), serde_json::json!({})),
             (format!("/chat/{}/messages", globex.general.id), serde_json::json!({ "body": "hijacked" })),
             (format!("/chat/{}/messages", globex.group.id), serde_json::json!({ "body": "hijacked" })),
         ];
