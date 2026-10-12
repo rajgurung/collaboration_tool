@@ -250,9 +250,10 @@ struct Within {
 
 impl Within {
     fn from_query(query: &ListQuery) -> Self {
+        // One at a time: a project wins over a person.
         Self {
             project: query.project,
-            person: query.person,
+            person: query.person.filter(|_| query.project.is_none()),
         }
     }
 
@@ -592,7 +593,7 @@ async fn index(
             "name": v.name,
             "url": v.setup().url(),
             "is_default": v.is_default,
-            "current": v.setup() == current,
+            "current": filter != "done" && v.setup() == current,
         }))
         .collect::<Vec<_>>());
     data["setup_query"] = serde_json::json!(current.query());

@@ -38,7 +38,7 @@
               </span>
             </a>
             {% endfor %}
-            {% if column.key == "done" and lane.more_done %}<a href="/tasks?filter=done{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}" class="cell-more">All done tasks</a>{% endif %}
+            {% if column.key == "done" and lane.more_done %}<a href="/tasks?filter=done{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}{% if board.q %}&q={{ board.q }}{% endif %}" class="cell-more">All done tasks</a>{% endif %}
             <button type="button" class="cell-add" aria-label="Add a task to {{ column.label }}{% if lane.project_id %} in {{ lane.name }}{% endif %}"
                     hx-get="/tasks/new?status={{ column.key }}{% if lane.project_id %}&project_id={{ lane.project_id }}{% endif %}" hx-target="#task-dialog-body"
                     hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}</button>

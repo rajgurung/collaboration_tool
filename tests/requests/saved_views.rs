@@ -69,6 +69,13 @@ async fn a_saved_view_brings_its_setup_back() {
             page.contains(r#"class="view-chip view-chip-on""#),
             "the matching view is lit"
         );
+        // The Done view is not a saved setup, so nothing is lit there.
+        let done = request
+            .get("/tasks?view=board&scope=mine&group=person&filter=done")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await
+            .text();
+        assert!(!done.contains("view-chip-on"));
         let other = request
             .get("/tasks?scope=all")
             .add_header(alice.0, alice.1)

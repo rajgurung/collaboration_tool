@@ -53,6 +53,18 @@ fn hours_ago(hours: i64) -> DateTime<FixedOffset> {
     (Utc::now() - Duration::hours(hours)).into()
 }
 
+/// Noon on Wednesday of last week in London, clear of week edges and clock changes.
+fn last_week_in_london() -> DateTime<FixedOffset> {
+    let london = chrono_tz::Europe::London;
+    let monday = Utc::now()
+        .with_timezone(&london)
+        .date_naive()
+        .week(chrono::Weekday::Mon)
+        .first_day();
+    let wednesday = (monday - Duration::days(5)).and_hms_opt(12, 0, 0).unwrap();
+    wednesday.and_local_timezone(london).unwrap().fixed_offset()
+}
+
 #[tokio::test]
 #[serial]
 async fn done_at_follows_the_status_on_every_route() {
@@ -205,6 +217,13 @@ async fn the_board_shows_the_latest_five_done_per_lane() {
             assert!(body.contains(">87%<"), "{layout}");
         }
 
+        // A search on the board carries through to the Done view.
+        let searched = get("/tasks/board?group=project&q=launch").await;
+        assert!(searched.contains(&format!(
+            r#"href="/tasks?filter=done&project={}&q=launch""#,
+            launch.id
+        )));
+
         // A person's lane links to that person's done tasks.
         let by_person = get("/tasks/board?group=person").await;
         assert!(by_person.contains(&format!(r#"href="/tasks?filter=done&person={}""#, alice.id)));
@@ -228,7 +247,7 @@ async fn the_done_view_groups_by_week_and_month_in_the_orgs_zone() {
             "Week old",
             launch.id,
             "",
-            hours_ago(24 * 7),
+            last_week_in_london(),
         )
         .await;
         // 23:30 UTC on 31 August is already 1 September in London (BST).
@@ -292,6 +311,18 @@ async fn the_done_view_groups_by_week_and_month_in_the_orgs_zone() {
         let theirs = get(format!("/tasks/list?filter=done&project={}", mobile.id)).await;
         assert!(theirs.contains("Summer") && !theirs.contains("Fresh"));
         assert!(theirs.contains("done tasks for Mobile"));
+
+        // A project wins when both a project and a person are given.
+        let both = get(format!(
+            "/tasks/list?filter=done&project={}&person=1",
+            mobile.id
+        ))
+        .await;
+        assert!(both.contains("done tasks for Mobile"));
+        assert!(both.contains(&format!("project={}", mobile.id)) && !both.contains("person="));
+
+        // On desktop the Done view keeps its search box showing.
+        assert!(page.contains("min-[900px]:block"));
 
         // The same instant falls in August in New York.
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
