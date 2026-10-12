@@ -75,6 +75,9 @@ url = "2"
 infer = "0.19"
 # Already used by axum; the bytes of an upload.
 bytes = "1"
+# Already used by Loco's storage, which turns off its HTTP client. Without one,
+# every R2 request fails with "default HTTP transport is not installed".
+opendal = { version = "0.58", default-features = false, features = ["http-transport-reqwest"] }
 # Already used by url; encodes file names in Content-Disposition.
 percent-encoding = "2"
 
