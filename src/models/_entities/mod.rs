@@ -3,6 +3,7 @@
 pub mod prelude;
 
 pub mod access_tokens;
+pub mod auth_attempts;
 pub mod conversation_members;
 pub mod conversations;
 pub mod meeting_attendees;

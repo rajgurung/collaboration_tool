@@ -11,7 +11,10 @@ use crate::{
         },
     },
     mailers::auth::AuthMailer,
-    models::users,
+    models::{
+        auth_attempts::{self, kind},
+        users,
+    },
     views::forms::field_errors,
 };
 
@@ -76,31 +79,56 @@ async fn login_page(
 async fn login(
     ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
+    remote: RemoteIP,
     Form(form): Form<LoginForm>,
 ) -> Result<Response> {
+    let ip = client_ip(remote);
+    if auth_attempts::Model::login_locked(&ctx.db, &form.email, &ip).await? {
+        // Same work as a real check, so the refusal does not reveal anything.
+        let _ = hash::verify_password(&form.password, DUMMY_HASH);
+        return login_error(&v, &form, 429, TOO_MANY);
+    }
     let user = match users::Model::find_by_email(&ctx.db, &form.email).await {
         Ok(user) if user.verify_password(&form.password) => user,
-        Ok(_) => return login_failed(&v, &form),
+        Ok(user) => {
+            auth_attempts::Model::record(&ctx.db, kind::LOGIN, &form.email, Some(user.id), &ip)
+                .await?;
+            return login_error(&v, &form, 422, INCORRECT);
+        }
         Err(_) => {
             let _ = hash::verify_password(&form.password, DUMMY_HASH);
-            return login_failed(&v, &form);
+            auth_attempts::Model::record(&ctx.db, kind::LOGIN, &form.email, None, &ip).await?;
+            return login_error(&v, &form, 422, INCORRECT);
         }
     };
+    auth_attempts::Model::clear(&ctx.db, &user.email).await?;
     format::render()
         .cookies(&[session_cookie(&ctx, &user)?])?
         .redirect(safe_next(&form.next).unwrap_or("/"))
 }
 
-fn login_failed(v: &TeraView, form: &LoginForm) -> Result<Response> {
-    format::render().status(422).view(
+const INCORRECT: &str = "Email or password is incorrect.";
+const TOO_MANY: &str = "Too many failed sign-ins. Try again in 15 minutes, or reset your password.";
+
+fn login_error(v: &TeraView, form: &LoginForm, status: u16, message: &str) -> Result<Response> {
+    format::render().status(status).view(
         v,
         "auth/login.html",
         data!({
             "email": form.email,
             "next": safe_next(&form.next),
-            "error": "Email or password is incorrect.",
+            "error": message,
         }),
     )
+}
+
+/// The address limits are counted against. Requests without one (never
+/// expected behind Railway) share a single bucket.
+fn client_ip(remote: RemoteIP) -> String {
+    match remote {
+        RemoteIP::Forwarded(ip) | RemoteIP::Socket(ip) => ip.to_string(),
+        RemoteIP::None => "unknown".to_string(),
+    }
 }
 
 #[debug_handler]
@@ -135,21 +163,36 @@ async fn forgot_page(ViewEngine(v): ViewEngine<TeraView>) -> Result<Response> {
 }
 
 /// Always shows the same confirmation, so the form cannot be used to find out
-/// which emails have accounts.
+/// which emails have accounts, or that a limit was reached.
 #[debug_handler]
 async fn forgot(
     ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
+    remote: RemoteIP,
     Form(form): Form<ForgotForm>,
 ) -> Result<Response> {
-    if let Ok(user) = users::Model::find_by_email(&ctx.db, &form.email).await {
-        let user = user
-            .into_active_model()
-            .set_forgot_password_sent(&ctx.db)
-            .await?;
-        AuthMailer::forgot_password(&ctx, &user).await?;
+    let ip = client_ip(remote);
+    if auth_attempts::Model::forgot_allowed(&ctx.db, &form.email, &ip).await? {
+        let user = users::Model::find_by_email(&ctx.db, &form.email).await.ok();
+        auth_attempts::Model::record(
+            &ctx.db,
+            kind::FORGOT,
+            &form.email,
+            user.as_ref().map(|u| u.id),
+            &ip,
+        )
+        .await?;
+        if let Some(user) = user {
+            let user = user
+                .into_active_model()
+                .set_forgot_password_sent(&ctx.db)
+                .await?;
+            AuthMailer::forgot_password(&ctx, &user).await?;
+        } else {
+            tracing::debug!("password reset requested for unknown email");
+        }
     } else {
-        tracing::debug!("password reset requested for unknown email");
+        tracing::info!("password reset limit reached");
     }
     format::render().view(&v, "auth/forgot_sent.html", data!({}))
 }
@@ -189,6 +232,7 @@ async fn reset(
     {
         Ok(user) => {
             users::Model::bump_session_version(&ctx, user.id).await?;
+            auth_attempts::Model::clear(&ctx.db, &user.email).await?;
             format::redirect("/login?reset=1")
         }
         Err(err) => {

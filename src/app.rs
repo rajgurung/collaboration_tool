@@ -17,9 +17,9 @@ use std::path::Path;
 use crate::{
     controllers, initializers,
     models::_entities::{
-        access_tokens, conversation_members, conversations, meeting_attendees, meetings,
-        memberships, messages, oauth_clients, oauth_codes, organisations, projects, task_notes,
-        tasks as task_items, users,
+        access_tokens, auth_attempts, conversation_members, conversations, meeting_attendees,
+        meetings, memberships, messages, oauth_clients, oauth_codes, organisations, projects,
+        task_notes, tasks as task_items, users,
     },
     tasks,
     workers::downloader::DownloadWorker,
@@ -105,6 +105,7 @@ impl Hooks for App {
     }
     async fn truncate(ctx: &AppContext) -> Result<()> {
         // Children before parents so foreign keys never block the delete.
+        truncate_table(&ctx.db, auth_attempts::Entity).await?;
         truncate_table(&ctx.db, access_tokens::Entity).await?;
         truncate_table(&ctx.db, oauth_codes::Entity).await?;
         truncate_table(&ctx.db, oauth_clients::Entity).await?;
