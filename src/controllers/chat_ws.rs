@@ -20,7 +20,7 @@ use crate::{
     models::{
         conversation_members, conversations, memberships,
         messages::{self, MessageParams},
-        organisations,
+        organisations, users,
     },
     views::time,
 };
@@ -32,6 +32,8 @@ struct Session {
     hub: ChatHub,
     org_id: i64,
     user_id: i64,
+    /// The session version this socket was opened with.
+    session_version: i32,
     conversation_id: i64,
     conversation_kind: String,
 }
@@ -69,14 +71,38 @@ async fn connect(
         hub,
         org_id: member.org.id,
         user_id: member.user.id,
+        session_version: member.user.session_version,
         conversation_id: conversation.id,
         conversation_kind: conversation.kind,
     };
     Ok(ws.on_upgrade(move |socket| run(socket, session)))
 }
 
+/// Whether the socket's viewer may still follow the conversation: same
+/// session version, and still one of its members (removal takes them out).
+async fn still_allowed(session: &Session) -> bool {
+    let db = &session.ctx.db;
+    let current = users::Model::find_by_id(db, session.user_id)
+        .await
+        .is_ok_and(|u| u.session_version == session.session_version);
+    current
+        && conversations::Model::find_for_member(
+            db,
+            session.org_id,
+            session.conversation_id,
+            session.user_id,
+        )
+        .await
+        .is_ok()
+}
+
 async fn run(mut socket: WebSocket, session: Session) {
     let mut events = session.hub.subscribe();
+    // A sign-out between the checks in `connect` and subscribing would be missed.
+    if !still_allowed(&session).await {
+        let _ = socket.send(Message::Close(None)).await;
+        return;
+    }
     // Reader counts already sent, per message, so a late event cannot lower them.
     let mut sent_counts: HashMap<i64, usize> = HashMap::new();
     loop {
@@ -128,8 +154,12 @@ async fn run(mut socket: WebSocket, session: Session) {
                         Err(err) => tracing::error!(error = %err, "could not render read receipts"),
                     }
                 }
+                // Skipped events may include a sign-out. Close; the browser
+                // reconnects through the same checks and reloads the feed.
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, user_id = session.user_id, "chat socket fell behind");
+                    let _ = socket.send(Message::Close(None)).await;
+                    break;
                 }
                 Err(RecvError::Closed) => break,
             },

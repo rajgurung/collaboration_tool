@@ -446,10 +446,10 @@ fn events_for(
             match rx.recv().await {
                 Ok(NotifyEvent::Changed(id)) if id == me => return Some((notify(), rx)),
                 Ok(NotifyEvent::SignedOut(id)) if id == me => return None,
-                // Missed some: refresh anyway, the count is read fresh.
-                Err(RecvError::Lagged(_)) => return Some((notify(), rx)),
                 Ok(_) => {}
-                Err(RecvError::Closed) => return None,
+                // Missed events may include a sign-out: end the stream. The
+                // browser reconnects through the same checks.
+                Err(RecvError::Lagged(_) | RecvError::Closed) => return None,
             }
         }
     })
