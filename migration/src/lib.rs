@@ -30,6 +30,7 @@ mod m20261012_180045_auth_attempts;
 mod m20261012_181452_add_removed_to_memberships;
 mod m20261012_182629_folders;
 mod m20261012_182750_documents;
+mod m20261012_204623_add_done_at_to_tasks;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -64,6 +65,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_181452_add_removed_to_memberships::Migration),
             Box::new(m20261012_182629_folders::Migration),
             Box::new(m20261012_182750_documents::Migration),
+            Box::new(m20261012_204623_add_done_at_to_tasks::Migration),
             // inject-above (do not remove this comment)
         ]
     }

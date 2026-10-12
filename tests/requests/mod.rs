@@ -44,3 +44,4 @@ pub mod sessions;
 pub mod sign_in_limits;
 
 pub mod documents;
+pub mod done_tasks;

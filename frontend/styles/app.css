@@ -333,6 +333,7 @@
   @media (min-width: 900px) {
     .board-view { display: block; }
     .list-view { display: none; }
+    .list-view-done { display: block; max-width: 760px; }
   }
   .board-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 4px; }
   .board-search { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 999px; background: var(--chip); color: var(--muted); }
@@ -355,6 +356,8 @@
   .lane-cells { padding: 0 14px 14px; }
   .cell { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 72px; padding: 6px; margin: -6px; border-radius: 12px; transition: background 0.12s; }
   .cell.is-drop-target { background: color-mix(in srgb, var(--progress) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--progress) 45%, transparent); }
+  .cell-more { padding: 2px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  .cell-more:hover, .task-row-more:hover { color: var(--link); }
   .cell-add { display: grid; place-items: center; min-height: 32px; border: 1px dashed transparent; border-radius: 10px; background: transparent; color: var(--muted); opacity: 0; transition: opacity 0.12s; }
   .cell:hover .cell-add, .cell-add:focus-visible { opacity: 1; border-color: var(--line); }
   .cell:not(:has(.task-card)) .cell-add { opacity: 0.6; border-color: var(--line); }
@@ -395,6 +398,7 @@
   .lane-head[aria-expanded="false"] + .task-rows { display: none; }
   .task-row { min-height: 52px; padding: 8px 14px; font-size: 14px; color: var(--text); }
   .task-row + .task-row { border-top: 1px solid var(--line-soft); }
+  .task-row-more { display: block; padding: 10px 14px; border-top: 1px solid var(--line-soft); font-size: 13px; font-weight: 600; color: var(--muted); }
   .task-row:hover { background: var(--chip); }
   .task-row-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .task-row .due { font-size: 12.5px; }

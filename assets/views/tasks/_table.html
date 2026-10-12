@@ -38,6 +38,7 @@
         {% endif %}
       </a>
       {% endfor %}
+      {% if column.key == "done" and lane.more_done %}<a href="/tasks?filter=done{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}" class="task-row-more">All done tasks</a>{% endif %}
       {% endfor %}
     </div>
   </section>
