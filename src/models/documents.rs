@@ -9,7 +9,7 @@ use loco_rs::prelude::*;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 
 pub use super::_entities::documents::{ActiveModel, Column, Entity, Model};
-use super::folders;
+use super::{folders, visible_text};
 
 pub type Documents = Entity;
 
@@ -49,14 +49,6 @@ const TYPES: [(&str, &str, &str); 12] = [
 
 /// Types the browser shows in place. Everything else downloads.
 const INLINE: [&str; 4] = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-
-/// Invisible characters that can make a name read differently from what it
-/// is, such as a right-to-left override that shows "photo[RLO]gpj.exe" as
-/// "photoexe.jpg".
-const BIDI: [char; 12] = [
-    '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}',
-    '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
-];
 
 fn by_mime(mime: &str) -> Option<&'static (&'static str, &'static str, &'static str)> {
     TYPES.iter().find(|(m, _, _)| *m == mime)
@@ -99,11 +91,11 @@ pub fn sniff(bytes: &[u8], file_name: &str) -> Option<&'static str> {
     found.map(|(mime, _, _)| *mime)
 }
 
-/// Text safe to show as a file name: no control or direction characters,
-/// no slashes, trimmed.
+/// Text safe to show as a file name: no control or hidden characters, no
+/// slashes, trimmed.
 fn clean(text: &str) -> String {
-    text.chars()
-        .filter(|c| !c.is_control() && !BIDI.contains(c))
+    visible_text(text, false)
+        .chars()
         .map(|c| if c == '/' || c == '\\' { '-' } else { c })
         .collect::<String>()
         .trim()
@@ -323,6 +315,19 @@ impl Model {
     #[must_use]
     pub fn opens_inline(&self) -> bool {
         INLINE.contains(&self.content_type.as_str())
+    }
+
+    /// The `Content-Security-Policy` a file is sent with: nothing may load or
+    /// run, and nothing may frame it. Images are also sandboxed. PDFs are not,
+    /// so built-in PDF viewers keep working (Safari's is unverified under
+    /// `sandbox`); `default-src 'none'` still stops scripts and requests.
+    #[must_use]
+    pub fn content_security_policy(&self) -> &'static str {
+        if self.content_type == "application/pdf" {
+            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+        } else {
+            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'"
+        }
     }
 
     /// A `Content-Disposition` value (RFC 6266): a plain ASCII name for old

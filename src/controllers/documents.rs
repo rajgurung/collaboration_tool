@@ -417,9 +417,7 @@ async fn open_file(
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'",
-        ),
+        HeaderValue::from_static(file.content_security_policy()),
     );
     Ok(response)
 }

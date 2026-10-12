@@ -2,7 +2,7 @@ use loco_rs::schema::*;
 use sea_orm_migration::prelude::*;
 
 /// Document folders, one level deep. Every organisation starts with
-/// "Company" and "Logins"; existing ones get them here.
+/// "Company"; existing ones get it here.
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -25,9 +25,6 @@ impl MigrationTrait for Migration {
             r#"CREATE INDEX "idx-folders-created_by" ON folders (created_by_id);"#,
             "INSERT INTO folders (organisation_id, name, note, created_at, updated_at)
              SELECT id, 'Company', NULL, now(), now() FROM organisations;",
-            "INSERT INTO folders (organisation_id, name, note, created_at, updated_at)
-             SELECT id, 'Logins', 'Shared logins for the team. Never put passwords in notes.', now(), now()
-             FROM organisations;",
         ] {
             m.get_connection().execute_unprepared(sql).await?;
         }

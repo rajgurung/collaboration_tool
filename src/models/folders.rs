@@ -5,23 +5,19 @@ use std::collections::HashMap;
 use loco_rs::prelude::*;
 use sea_orm::{
     sea_query::{ExprTrait, Func},
-    SqlErr,
+    FromQueryResult, SqlErr,
 };
 use serde::Deserialize;
 
 pub use super::_entities::folders::{ActiveModel, Column, Entity, Model};
-use super::{documents, field_error};
+use super::{documents, field_error, visible_text};
 
 pub type Folders = Entity;
 
-/// The folders every organisation starts with, and their notes.
-pub const STARTERS: [(&str, Option<&str>); 2] = [
-    ("Company", None),
-    (
-        "Logins",
-        Some("Shared logins for the team. Never put passwords in notes."),
-    ),
-];
+/// The folders every organisation starts with, and their notes. A "Logins"
+/// folder comes with logins themselves, so its empty state never invites
+/// photos of passwords.
+pub const STARTERS: [(&str, Option<&str>); 1] = [("Company", None)];
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct FolderParams {
@@ -39,10 +35,18 @@ pub struct FolderParams {
 impl FolderParams {
     fn cleaned(&self) -> Self {
         Self {
-            name: self.name.trim().to_string(),
-            note: self.note.trim().to_string(),
+            name: visible_text(&self.name, false).trim().to_string(),
+            note: visible_text(&self.note, true).trim().to_string(),
         }
     }
+}
+
+/// File count and newest upload per folder, from one grouped query.
+#[derive(Debug, FromQueryResult)]
+struct Stats {
+    folder_id: i64,
+    files: i64,
+    latest: Option<DateTimeWithTimeZone>,
 }
 
 /// A folder with what is in it, for the folder list.
@@ -84,7 +88,7 @@ fn unique_name(err: DbErr) -> ModelError {
 }
 
 impl Model {
-    /// Adds "Company" and "Logins" to a new organisation.
+    /// Adds the starter folders to a new organisation.
     ///
     /// # Errors
     /// On database errors.
@@ -122,18 +126,31 @@ impl Model {
             .order_by_asc(Column::Id)
             .all(db)
             .await?;
-        let mut stats: HashMap<i64, (u64, DateTimeWithTimeZone)> = HashMap::new();
-        for file in documents::Entity::find().in_tenant(org_id).all(db).await? {
-            let entry = stats.entry(file.folder_id).or_insert((0, file.created_at));
-            entry.0 += 1;
-            entry.1 = std::cmp::max(entry.1, file.created_at);
-        }
+        let stats: HashMap<i64, Stats> = documents::Entity::find()
+            .in_tenant(org_id)
+            .select_only()
+            .column(documents::Column::FolderId)
+            .column_as(
+                Expr::expr(Func::count(Expr::col(documents::Column::Id))),
+                "files",
+            )
+            .column_as(
+                Expr::expr(Func::max(Expr::col(documents::Column::CreatedAt))),
+                "latest",
+            )
+            .group_by(documents::Column::FolderId)
+            .into_model::<Stats>()
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|s| (s.folder_id, s))
+            .collect();
         Ok(folders
             .into_iter()
             .map(|folder| {
-                let (files, updated_at) = stats
-                    .get(&folder.id)
-                    .map_or((0, None), |(n, at)| (*n, Some(*at)));
+                let (files, updated_at) = stats.get(&folder.id).map_or((0, None), |s| {
+                    (u64::try_from(s.files).unwrap_or(0), s.latest)
+                });
                 Summary {
                     folder,
                     files,

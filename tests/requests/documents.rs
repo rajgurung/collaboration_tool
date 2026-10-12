@@ -75,7 +75,7 @@ async fn only_file(ctx: &AppContext) -> documents::Model {
 
 #[tokio::test]
 #[serial]
-async fn new_organisations_start_with_company_and_logins() {
+async fn new_organisations_start_with_a_company_folder() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob, _, company) = acme(&request, &ctx).await;
         let folder = request
@@ -88,7 +88,8 @@ async fn new_organisations_start_with_company_and_logins() {
         let page = request.get("/documents").add_header(alice.0, alice.1).await;
         assert_eq!(page.status_code(), 200);
         let body = page.text();
-        assert!(body.contains("Company") && body.contains("Logins"));
+        assert!(body.contains("Company"));
+        assert!(!body.contains("Logins"), "logins come in a later change");
         assert!(body.contains("New folder"), "owners can add folders");
         assert_eq!(page.headers()["x-frame-options"], "DENY");
         assert_eq!(
@@ -179,6 +180,38 @@ async fn office_files_always_download() {
             .to_str()
             .unwrap()
             .starts_with("attachment;"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn pdfs_open_in_place_without_a_sandbox() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, _, _, company) = acme(&request, &ctx).await;
+        upload(&request, &alice, company.id, "Articles.pdf", PDF).await;
+        let file = only_file(&ctx).await;
+        let res = request
+            .get(&format!("/documents/files/{}", file.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await;
+        assert!(res.headers()["content-disposition"]
+            .to_str()
+            .unwrap()
+            .starts_with("inline;"));
+        assert_eq!(
+            res.headers()["content-security-policy"],
+            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+        );
+        assert_eq!(res.headers()["x-content-type-options"], "nosniff");
+
+        // The folder list counts it.
+        let list = request
+            .get("/documents")
+            .add_header(alice.0, alice.1)
+            .await
+            .text();
+        assert!(list.contains("1 file · Updated"), "{list}");
     })
     .await;
 }
@@ -344,6 +377,23 @@ async fn owners_and_admins_manage_folders_and_only_empty_ones_go() {
             format!("/documents/folders/{}", insurance.id).as_str()
         );
         assert_eq!(insurance.note.as_deref(), Some("Paper copies are in the blue box."));
+
+        // Hidden characters are stripped from names and notes; line breaks in notes stay.
+        let res = request
+            .post("/documents/folders")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .form(&serde_json::json!({ "name": "Tax\u{200B} and\u{202E} VAT\u{FEFF}", "note": "Line one\u{2028}\r\nLine two" }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let tax = folders::Model::list_for_org(&ctx.db, org.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.folder.name.starts_with("Tax"))
+            .unwrap()
+            .folder;
+        assert_eq!(tax.name, "Tax and VAT");
+        assert_eq!(tax.note.as_deref(), Some("Line one\nLine two"));
 
         let res = create(&alice, "insurance").await;
         assert_eq!(res.status_code(), 422);
