@@ -17,6 +17,7 @@ pub mod meetings;
 
 pub mod chat;
 pub mod chat_reactions;
+pub mod chat_threads;
 
 pub mod members;
 

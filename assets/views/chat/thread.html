@@ -1,0 +1,31 @@
+{% extends "layouts/app.html" %}
+{% block title %}Thread · {{ conversation.label }} · {{ org.name }}{% endblock title %}
+{% block main %}
+<div class="chat-layout">
+  <div class="chat-list-pane hidden min-[900px]:block">
+    {% include "chat/_list.html" %}
+  </div>
+  <section class="chat-screen" aria-label="Thread in {{ thread.back }}"
+           hx-ext="ws" ws-connect="/chat/{{ conversation.id }}/ws?thread={{ thread.parent_id }}" data-chat-feed-url="/chat/{{ conversation.id }}/threads/{{ thread.parent_id }}/feed">
+    <header class="chat-head">
+      {# Shown at every width: the list beside it is the conversation's, not the thread's. Escape follows it on desktop (frontend/app.ts). #}
+      <a href="/chat/{{ conversation.id }}#message-{{ thread.parent_id }}" class="icon-btn" data-thread-back aria-label="Back to {{ thread.back }}">{{<icon name="chevron-left" class="h-6 w-6"/>}}</a>
+      <div class="ml-1 min-w-0 flex-1">
+        <h1 class="truncate-1 m-0 text-[17px] font-semibold">Thread</h1>
+        <p class="meta m-0 truncate-1">{{ thread.subtitle }}</p>
+      </div>
+    </header>
+    <div id="chat-feed" class="chat-feed top" data-autoscroll aria-live="polite">
+      {% include "chat/_thread_feed.html" %}
+    </div>
+    <form class="composer" method="post" action="/chat/{{ conversation.id }}/threads/{{ thread.parent_id }}/replies" ws-send>
+      <label class="sr-only" for="composer-body">Reply</label>
+      <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}" autocomplete="off" placeholder="Reply in thread"{% if thread.focus %} autofocus{% endif %}></textarea>
+      <button type="submit" class="btn btn-primary h-11 w-11 p-0" aria-label="Send reply">{{<icon name="send" class="h-5 w-5"/>}}</button>
+    </form>
+  </section>
+</div>
+<dialog id="chat-dialog" class="sheet" aria-label="Chat"><div class="sheet-handle"></div><div id="chat-dialog-body" class="sheet-body"></div></dialog>
+{% endblock main %}
+{# A thread fills the phone screen, like a conversation. #}
+{% block tabbar %}{% endblock tabbar %}

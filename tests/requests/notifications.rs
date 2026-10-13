@@ -599,3 +599,314 @@ async fn unseen_mentions_are_emailed_once() {
     })
     .await;
 }
+
+/// Himalayan Ritual in Acme: raj owns it; shusma, kreepa and samir are
+/// approved. Returns their cookies and ids, in that order, and General.
+async fn team_of_four(
+    request: &loco_rs::TestServer,
+    ctx: &AppContext,
+) -> (Vec<(super::chat::Cookie, i64)>, conversations::Model) {
+    let raj = sign_up(request, "Acme", "raj", "raj@example.com").await;
+    let raj_id = user_id(ctx, "raj@example.com").await;
+    let mut people = vec![(raj.clone(), raj_id)];
+    for name in ["shusma", "kreepa", "samir"] {
+        people
+            .push(approved_member(request, ctx, &raj, name, &format!("{name}@example.com")).await);
+    }
+    let org = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap();
+    let general = conversations::Model::find_general(&ctx.db, org.id)
+        .await
+        .unwrap();
+    (people, general)
+}
+
+#[tokio::test]
+#[serial]
+async fn replies_tell_the_parents_author_and_earlier_repliers_once() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, general) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (shusma_c, shusma), (kreepa_c, kreepa), (samir_c, samir)] =
+            people.try_into().unwrap();
+        let parent = super::chat::post(
+            &request,
+            &ctx,
+            &shusma_c,
+            general.id,
+            "Supplier sent the new price list",
+        )
+        .await;
+        let reply =
+            |who, body| super::chat_threads::reply(&request, who, general.id, parent.id, body);
+
+        reply(&kreepa_c, "Bowls are up 8%").await;
+        assert_eq!(
+            inbox(&ctx, shusma).await,
+            vec![(
+                "reply".to_string(),
+                "replied to your message in #general\nBowls are up 8%".to_string()
+            )]
+        );
+        for nobody in [raj, kreepa, samir] {
+            assert!(inbox(&ctx, nobody).await.is_empty());
+        }
+
+        reply(&samir_c, "Fine by me").await;
+        assert_eq!(inbox(&ctx, shusma).await.len(), 2);
+        assert_eq!(
+            inbox(&ctx, shusma).await[1].1,
+            "replied to your message in #general\nFine by me"
+        );
+        assert_eq!(
+            inbox(&ctx, kreepa).await,
+            vec![(
+                "reply".to_string(),
+                "replied in a thread in #general\nFine by me".to_string()
+            )]
+        );
+        assert!(
+            inbox(&ctx, samir).await.is_empty(),
+            "not about his own reply"
+        );
+        assert!(inbox(&ctx, raj).await.is_empty(), "not in the thread");
+
+        // Shusma answers in her own thread: both repliers hear, she does not.
+        reply(&shusma_c, "Thanks both").await;
+        assert_eq!(inbox(&ctx, shusma).await.len(), 2);
+        assert_eq!(
+            inbox(&ctx, kreepa).await[1].1,
+            "replied in a thread in #general\nThanks both"
+        );
+        assert_eq!(
+            inbox(&ctx, samir).await,
+            vec![(
+                "reply".to_string(),
+                "replied in a thread in #general\nThanks both".to_string()
+            )]
+        );
+
+        // The bell shows the green reply icon and opens the thread.
+        let page = request
+            .get("/notifications")
+            .add_header(shusma_c.0.clone(), shusma_c.1.clone())
+            .await
+            .text();
+        assert!(page.contains("notice-kind notice-reply"), "{page}");
+        assert!(page.contains("<strong>kreepa</strong> replied to your message in #general"));
+        let notice = notifications::Entity::find()
+            .filter(notifications::Column::UserId.eq(shusma))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let open = request
+            .post(&format!("/notifications/{}/open", notice.id))
+            .add_header(shusma_c.0.clone(), shusma_c.1.clone())
+            .await;
+        assert_eq!(
+            open.headers()["location"],
+            format!("/chat/{}/threads/{}", general.id, parent.id).as_str()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_mention_in_a_reply_wins_over_the_reply_notice() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, general) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (shusma_c, shusma), (kreepa_c, kreepa), (samir_c, samir)] =
+            people.try_into().unwrap();
+        let parent = super::chat::post(&request, &ctx, &shusma_c, general.id, "Price list").await;
+        let reply =
+            |who, body| super::chat_threads::reply(&request, who, general.id, parent.id, body);
+        reply(&kreepa_c, "Looks fine").await;
+        let before = inbox(&ctx, shusma).await.len();
+
+        reply(&samir_c, "@shusma @raj can you check the bowls?").await;
+        let shusmas = inbox(&ctx, shusma).await;
+        assert_eq!(shusmas.len(), before + 1, "told once");
+        assert_eq!(
+            shusmas.last().unwrap(),
+            &(
+                "mention".to_string(),
+                "mentioned you in a thread in #general\n@shusma @raj can you check the bowls?"
+                    .to_string()
+            )
+        );
+        assert_eq!(inbox(&ctx, raj).await.len(), 1);
+        assert_eq!(inbox(&ctx, raj).await[0].0, "mention");
+        assert_eq!(
+            inbox(&ctx, kreepa).await,
+            vec![(
+                "reply".to_string(),
+                "replied in a thread in #general\n@shusma @raj can you check the bowls?"
+                    .to_string()
+            )]
+        );
+        assert!(inbox(&ctx, samir).await.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn everyone_in_a_reply_tells_each_member_once() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, general) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (shusma_c, shusma), (kreepa_c, kreepa), (samir_c, samir)] =
+            people.try_into().unwrap();
+        let parent = super::chat::post(&request, &ctx, &shusma_c, general.id, "Opening day").await;
+        super::chat_threads::reply(&request, &kreepa_c, general.id, parent.id, "Balloons?").await;
+        let shusma_before = inbox(&ctx, shusma).await.len();
+
+        super::chat_threads::reply(
+            &request,
+            &samir_c,
+            general.id,
+            parent.id,
+            "@everyone 9am start",
+        )
+        .await;
+        let everyone = "mentioned everyone in a thread in #general\n@everyone 9am start";
+        assert_eq!(
+            inbox(&ctx, raj).await,
+            vec![("mention".to_string(), everyone.to_string())]
+        );
+        assert_eq!(inbox(&ctx, shusma).await.len(), shusma_before + 1);
+        assert_eq!(inbox(&ctx, shusma).await.last().unwrap().1, everyone);
+        assert_eq!(
+            inbox(&ctx, kreepa).await,
+            vec![("mention".to_string(), everyone.to_string())]
+        );
+        assert!(
+            inbox(&ctx, samir).await.is_empty(),
+            "never the reply's author"
+        );
+    })
+    .await;
+}
+
+/// Tagging yourself in a reply is still a reminder, as in the channel, but
+/// the reply's author never gets a reply notice.
+#[tokio::test]
+#[serial]
+async fn mentioning_yourself_in_a_reply_is_a_reminder_only() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, general) = team_of_four(&request, &ctx).await;
+        let [_, (shusma_c, shusma), (kreepa_c, kreepa), _] = people.try_into().unwrap();
+        let parent = super::chat::post(&request, &ctx, &shusma_c, general.id, "Rota").await;
+        super::chat_threads::reply(
+            &request,
+            &kreepa_c,
+            general.id,
+            parent.id,
+            "I'll take Monday",
+        )
+        .await;
+        let before = inbox(&ctx, shusma).await.len();
+
+        // Shusma wrote the parent and has replied before, yet hears only her tag.
+        super::chat_threads::reply(
+            &request,
+            &shusma_c,
+            general.id,
+            parent.id,
+            "@shusma book the van",
+        )
+        .await;
+        let new: Vec<(String, String)> = inbox(&ctx, shusma).await.split_off(before);
+        assert_eq!(
+            new,
+            vec![(
+                "mention".to_string(),
+                "mentioned you in a thread in #general\n@shusma book the van".to_string()
+            )]
+        );
+        let page = request
+            .get("/notifications")
+            .add_header(shusma_c.0.clone(), shusma_c.1.clone())
+            .await
+            .text();
+        assert!(
+            page.contains("<strong>You</strong> mentioned yourself in a thread in #general"),
+            "{page}"
+        );
+        assert_eq!(inbox(&ctx, kreepa).await.len(), 1, "kreepa hears once");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn reply_notices_stay_inside_groups_and_dms() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _general) = team_of_four(&request, &ctx).await;
+        let [(raj_c, raj), (shusma_c, shusma), (_, kreepa), (samir_c, samir)] =
+            people.try_into().unwrap();
+        // A group of raj, shusma and samir. Samir starts a thread, then is removed.
+        request
+            .post("/chat/groups")
+            .add_header(raj_c.0.clone(), raj_c.1.clone())
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(format!("name=shop&member_ids={shusma}&member_ids={samir}").into())
+            .await;
+        let group = conversations::Entity::find()
+            .filter(conversations::Column::Kind.eq("group"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let parent =
+            super::chat::post(&request, &ctx, &samir_c, group.id, "Float for the till").await;
+        let samir_m = memberships::Entity::find()
+            .filter(memberships::Column::UserId.eq(samir))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        request
+            .post(&format!("/members/{}/remove", samir_m.id))
+            .add_header(raj_c.0.clone(), raj_c.1.clone())
+            .await;
+
+        super::chat_threads::reply(&request, &shusma_c, group.id, parent.id, "@kreepa £150?").await;
+        assert!(inbox(&ctx, kreepa).await.is_empty(), "not in the group");
+        assert!(inbox(&ctx, samir).await.is_empty(), "removed");
+        assert!(inbox(&ctx, raj).await.is_empty(), "not in the thread");
+
+        // A DM has no place in the wording.
+        request
+            .post("/chat/dms")
+            .add_header(raj_c.0.clone(), raj_c.1.clone())
+            .form(&serde_json::json!({ "user_id": shusma }))
+            .await;
+        let dm = conversations::Entity::find()
+            .filter(conversations::Column::Kind.eq("dm"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let contract = super::chat::post(&request, &ctx, &shusma_c, dm.id, "Sign by Friday?").await;
+        super::chat_threads::reply(&request, &raj_c, dm.id, contract.id, "Signed and scanned")
+            .await;
+        assert_eq!(
+            inbox(&ctx, shusma).await,
+            vec![(
+                "reply".to_string(),
+                "replied to your message\nSigned and scanned".to_string()
+            )]
+        );
+        super::chat_threads::reply(&request, &shusma_c, dm.id, contract.id, "@raj thanks").await;
+        assert_eq!(
+            inbox(&ctx, raj).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned you in a thread\n@raj thanks".to_string()
+            )]
+        );
+    })
+    .await;
+}

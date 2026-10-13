@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::controllers::chat::{MessageView, ReactionRow, Receipt};
+use crate::controllers::chat::{MessageView, ReactionRow, Receipt, ThreadLine};
 
 /// Enough buffered events for a burst; slower sockets skip ahead and the
 /// browser reloads the feed after reconnecting.
@@ -13,7 +13,8 @@ const CAPACITY: usize = 512;
 /// Something that happened in a conversation.
 #[derive(Debug, Clone)]
 pub enum ChatEvent {
-    /// A new message. `message.own` is false; each socket sets it for its own viewer.
+    /// A new top-level message. `message.own` is false; each socket sets it
+    /// for its own viewer.
     Message {
         conversation_id: i64,
         author_id: i64,
@@ -32,7 +33,19 @@ pub enum ChatEvent {
     Reactions {
         conversation_id: i64,
         message_id: i64,
+        /// The reacted message's parent, when it is a thread reply.
+        parent_id: Option<i64>,
         rows: Arc<Vec<ReactionRow>>,
+    },
+    /// A new thread reply. Main-feed sockets update the parent's reply line;
+    /// sockets on that thread append the reply. `message.own` is false, as
+    /// for `Message`.
+    Reply {
+        conversation_id: i64,
+        parent_id: i64,
+        author_id: i64,
+        message: Box<MessageView>,
+        line: Box<ThreadLine>,
     },
     /// The user's sessions were ended (sign out everywhere, password reset,
     /// removal). Their open sockets close.

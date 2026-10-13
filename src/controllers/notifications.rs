@@ -301,6 +301,102 @@ pub async fn message_sent(
     Ok(())
 }
 
+/// After a thread reply is saved: tells mentioned people who can see the
+/// conversation ("mentioned you in a thread"), everyone for `@everyone`, then
+/// the parent's author ("replied to your message") and earlier repliers
+/// ("replied in a thread"). Each person is told once, and the first of those
+/// wins. The reply's author gets no reply or `@everyone` notice, but tagging
+/// yourself is still a reminder, as in the channel.
+///
+/// # Errors
+/// On database errors.
+pub async fn reply_sent(
+    ctx: &AppContext,
+    org_id: i64,
+    conversation: &conversations::Model,
+    parent: &messages::Model,
+    reply: &messages::Model,
+) -> Result<()> {
+    let team = memberships::Model::team(&ctx.db, org_id).await?;
+    let members = conversation.member_ids(&ctx.db).await?;
+    // On the team and in the conversation, so removed people are never told.
+    let can_see = |id: &i64| members.contains(id) && team.iter().any(|(t, _)| t == id);
+    let author = reply.user_id;
+    let place = match (conversation.kind.as_str(), &conversation.name) {
+        (conversations::kind::DM, _) | (_, None) => String::new(),
+        (conversations::kind::CHANNEL, Some(name)) => format!(" in #{name}"),
+        (_, Some(name)) => format!(" in {name}"),
+    };
+    let quote = excerpt(&reply.body);
+    let link = format!("/chat/{}/threads/{}", conversation.id, parent.id);
+    let notice = |kind, headline: String| Notice {
+        kind,
+        body: format!("{headline}{place}\n{quote}"),
+        link: link.clone(),
+    };
+
+    let mentioned: Vec<i64> = notifications::mentioned_ids(&reply.body, &team)
+        .into_iter()
+        .filter(can_see)
+        .collect();
+    let mut told = send(
+        ctx,
+        org_id,
+        author,
+        &mentioned,
+        &notice(kind::MENTION, format!("{MENTIONED_YOU} in a thread")),
+    )
+    .await?;
+    let not_yet = |id: &i64, told: &[i64]| *id != author && can_see(id) && !told.contains(id);
+
+    if notifications::mentions_everyone(&reply.body) {
+        let rest: Vec<i64> = members
+            .iter()
+            .copied()
+            .filter(|id| not_yet(id, &told))
+            .collect();
+        told.extend(
+            send(
+                ctx,
+                org_id,
+                author,
+                &rest,
+                &notice(kind::MENTION, "mentioned everyone in a thread".to_string()),
+            )
+            .await?,
+        );
+    }
+    if not_yet(&parent.user_id, &told) {
+        told.extend(
+            send(
+                ctx,
+                org_id,
+                author,
+                &[parent.user_id],
+                &notice(kind::REPLY, "replied to your message".to_string()),
+            )
+            .await?,
+        );
+    }
+    let repliers: Vec<i64> = messages::Model::thread_stats(&ctx.db, org_id, &[parent.id])
+        .await?
+        .remove(&parent.id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.user_id)
+        .filter(|id| not_yet(id, &told))
+        .collect();
+    send(
+        ctx,
+        org_id,
+        author,
+        &repliers,
+        &notice(kind::REPLY, "replied in a thread".to_string()),
+    )
+    .await?;
+    Ok(())
+}
+
 #[debug_handler]
 async fn index(
     member: CurrentMember,

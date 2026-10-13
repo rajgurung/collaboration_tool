@@ -278,6 +278,7 @@ async fn reactions_go_live_and_notify_nobody() {
             conversation_id,
             message_id,
             rows,
+            ..
         } = events.try_recv().expect("the reaction is broadcast")
         else {
             panic!("expected a reactions event");
@@ -320,6 +321,7 @@ async fn a_socket_only_gets_reactions_for_its_conversation() {
     hub.publish(ChatEvent::Reactions {
         conversation_id: -1,
         message_id: 987_654,
+        parent_id: None,
         rows: std::sync::Arc::new(vec![collab::controllers::chat::ReactionRow {
             emoji: "👍".to_string(),
             user_id: alice.id,
@@ -442,7 +444,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
             sheet.contains(r#"aria-pressed="false" aria-label="React ✅""#),
             "{sheet}"
         );
-        assert!(!sheet.contains("Reply in thread"), "threads come later");
+        assert!(sheet.contains("Reply in thread"), "a top-level message");
 
         // Nobody has reacted: no "Reactions" list.
         let quiet = post(&request, &ctx, &alice, general.id, "Quiet one").await;

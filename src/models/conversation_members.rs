@@ -142,7 +142,8 @@ impl Model {
     }
 
     /// Unread message count per conversation for `user_id`. Messages they sent
-    /// do not count; before their first visit, counting starts when they joined.
+    /// do not count, nor do thread replies (the bell covers those); before
+    /// their first visit, counting starts when they joined.
     ///
     /// # Errors
     /// On database errors.
@@ -163,6 +164,7 @@ impl Model {
                 .in_tenant(org_id)
                 .filter(messages::Column::ConversationId.eq(m.conversation_id))
                 .filter(messages::Column::UserId.ne(user_id))
+                .filter(messages::Column::ParentId.is_null())
                 .filter(messages::Column::CreatedAt.gt(since))
                 .count(db)
                 .await?;

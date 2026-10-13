@@ -1,0 +1,4 @@
+{% set message = parent %}{% include "chat/_message.html" %}
+{% include "chat/_thread_count.html" %}
+<div class="thread-empty"><strong>No replies yet</strong>Your reply stays with this message.{% if notify %} {{ notify }} will get a notice.{% endif %}</div>
+{% for message in replies %}{% include "chat/_message.html" %}{% endfor %}

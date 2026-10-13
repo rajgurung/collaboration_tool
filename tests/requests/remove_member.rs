@@ -188,6 +188,29 @@ async fn removing_someone_locks_them_out_of_everything() {
             .await;
         assert_eq!(res.status_code(), 403);
         assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
+        // Nor open, reload or reply in a thread.
+        let thread = format!("/chat/{}/threads/{}", general.id, mention.id);
+        for path in [
+            thread.clone(),
+            format!("{thread}/feed"),
+            format!("/chat/{}/ws?thread={}", general.id, mention.id),
+        ] {
+            let res = request
+                .get(&path)
+                .add_header(carol.0.clone(), carol.1.clone())
+                .await;
+            assert_eq!(res.status_code(), 403, "GET {path}");
+        }
+        let res = request
+            .post(&format!("{thread}/replies"))
+            .add_header(carol.0.clone(), carol.1.clone())
+            .form(&serde_json::json!({ "body": "still here?" }))
+            .await;
+        assert_eq!(res.status_code(), 403);
+        assert_eq!(
+            messages::Entity::find().count(&ctx.db).await.unwrap(),
+            before
+        );
         let seats = conversation_members::Entity::find()
             .filter(conversation_members::Column::UserId.eq(carol_m.user_id))
             .count(&ctx.db)

@@ -163,9 +163,14 @@ fn renders_reactions_as_live_swaps() {
         "{html}"
     );
     assert!(html.contains(r#"id="tools-42""#), "{html}");
-    assert!(html.contains(
-        r#"role="toolbar" aria-label="Message actions" aria-live="off" hx-swap-oob="true""#
-    ));
+    // Only the six reactions are swapped, so Reply in thread stays put.
+    assert!(
+        html.contains(
+            r#"<span class="tool-picks" id="tools-42" aria-live="off" hx-swap-oob="true">"#
+        ),
+        "{html}"
+    );
+    assert!(!html.contains("Reply in thread"), "{html}");
     assert!(
         html.contains(r#"data-url="/chat/7/messages/42/reactions""#),
         "{html}"
@@ -214,4 +219,75 @@ fn the_action_sheet_escapes_the_message() {
         "{html}"
     );
     assert!(!html.contains("<i>bob</i>"), "{html}");
+}
+
+/// The live reply line swaps the parent's slot, so it is rendered with the
+/// parent's id, never the reply's.
+#[test]
+fn renders_the_reply_line_into_the_parents_slot() {
+    let engine = view_engine();
+    let face = |name: &str| serde_json::json!({ "id": 1, "username": name, "color": "#ffb454" });
+    let html = engine
+        .render(
+            "chat/_thread_link.html",
+            serde_json::json!({
+                "message": {
+                    "id": 481,
+                    "thread": {
+                        "url": "/chat/12/threads/481", "count": 128, "label": "128 replies",
+                        "last": "Yesterday",
+                        "faces": [face("raj"), face("<b>s</b>"), face("samir")], "more": 1,
+                    },
+                },
+                "oob": true,
+            }),
+        )
+        .expect("the reply line should render");
+    assert!(
+        html.contains(r#"id="thread-481" aria-live="off" hx-swap-oob="true""#),
+        "{html}"
+    );
+    assert!(html.contains(r#"href="/chat/12/threads/481""#), "{html}");
+    assert!(html.contains("<b>128 replies</b>"), "{html}");
+    assert!(html.contains("Yesterday"), "{html}");
+    assert!(
+        html.contains(r#"<span class="thread-more">+1</span>"#),
+        "{html}"
+    );
+    assert!(!html.contains("<b>s</b>"), "names are escaped: {html}");
+
+    // No replies: an empty slot, so `.thread-slot:empty` hides it and the
+    // first reply still has a target.
+    let empty = engine
+        .render(
+            "chat/_thread_link.html",
+            serde_json::json!({ "message": { "id": 481, "thread": null } }),
+        )
+        .expect("an empty slot should render");
+    assert!(
+        empty.contains(r#"<span class="thread-slot" id="thread-481" aria-live="off"></span>"#),
+        "{empty}"
+    );
+}
+
+#[test]
+fn renders_the_thread_count_as_a_live_swap() {
+    let engine = view_engine();
+    let html = engine
+        .render(
+            "chat/_thread_count.html",
+            serde_json::json!({ "count": 2, "count_label": "2 replies", "oob": true }),
+        )
+        .expect("the count should render");
+    assert!(
+        html.contains(r#"id="thread-count" aria-live="off" hx-swap-oob="true">2 replies</div>"#),
+        "{html}"
+    );
+    let none = engine
+        .render(
+            "chat/_thread_count.html",
+            serde_json::json!({ "count": 0, "count_label": "0 replies" }),
+        )
+        .expect("an empty count should render");
+    assert!(none.contains(r#"aria-live="off"></div>"#), "{none}");
 }

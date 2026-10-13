@@ -1,6 +1,8 @@
 //! Live chat. The browser opens `/chat/{id}/ws` with the HTMX ws extension,
 //! sends messages as JSON (`{"body": "...", "HEADERS": {...}}`) and receives
-//! rendered message HTML that HTMX appends to `#chat-feed`.
+//! rendered message HTML that HTMX appends to `#chat-feed`. A thread page
+//! opens `/chat/{id}/ws?thread={parent_id}`: what it sends are replies, and it
+//! receives only that thread's events.
 use std::{collections::HashMap, sync::Arc};
 
 use axum::{
@@ -8,10 +10,13 @@ use axum::{
     http::{header::ORIGIN, HeaderMap, StatusCode},
 };
 use loco_rs::prelude::*;
+use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    controllers::chat::{names, receipt, render_reactions, MessageView, ReactionRow},
+    controllers::chat::{
+        names, receipt, render_reactions, thread_line, MessageView, ReactionRow, ThreadLine,
+    },
     data::{
         chat_hub::{ChatEvent, ChatHub, ReceiptUpdate},
         settings::Settings,
@@ -36,16 +41,25 @@ struct Session {
     session_version: i32,
     conversation_id: i64,
     conversation_kind: String,
+    /// The thread's parent, on a thread page's socket.
+    thread_id: Option<i64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WsQuery {
+    thread: Option<i64>,
 }
 
 /// Checks everything before upgrading: signed in and approved (the extractor),
-/// a member of this conversation, and a same-site `Origin`.
+/// a member of this conversation, a thread that is in it, and a same-site
+/// `Origin`.
 #[debug_handler]
 async fn connect(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(view): ViewEngine<TeraView>,
     Path(id): Path<i64>,
+    Query(query): Query<WsQuery>,
     headers: HeaderMap,
     ws: std::result::Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Result<Response> {
@@ -60,6 +74,9 @@ async fn connect(
     }
     let conversation =
         conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    if let Some(parent_id) = query.thread {
+        messages::Model::find_thread_parent(&ctx.db, &conversation, parent_id).await?;
+    }
     let ws = ws.map_err(|_| Error::BadRequest("Expected a WebSocket upgrade.".to_string()))?;
     let hub = ctx
         .shared_store
@@ -74,6 +91,7 @@ async fn connect(
         session_version: member.user.session_version,
         conversation_id: conversation.id,
         conversation_kind: conversation.kind,
+        thread_id: query.thread,
     };
     Ok(ws.on_upgrade(move |socket| run(socket, session)))
 }
@@ -105,6 +123,8 @@ async fn run(mut socket: WebSocket, session: Session) {
     }
     // Reader counts already sent, per message, so a late event cannot lower them.
     let mut sent_counts: HashMap<i64, usize> = HashMap::new();
+    // Reply counts already sent, per thread, for the same reason.
+    let mut sent_replies: HashMap<i64, i64> = HashMap::new();
     loop {
         tokio::select! {
             incoming = socket.recv() => match incoming {
@@ -122,7 +142,7 @@ async fn run(mut socket: WebSocket, session: Session) {
                     break;
                 }
                 // The hub carries every organisation's events.
-                Ok(event) if !wants(&event, session.conversation_id) => {}
+                Ok(event) if !wants(&event, session.conversation_id, session.thread_id) => {}
                 Ok(ChatEvent::Message { author_id, message, .. }) => {
                     match render(&session, author_id, *message) {
                         Ok(html) => {
@@ -135,6 +155,18 @@ async fn run(mut socket: WebSocket, session: Session) {
                             }
                         }
                         Err(err) => tracing::error!(error = %err, "could not render chat message"),
+                    }
+                }
+                Ok(ChatEvent::Reply { parent_id, author_id, message, line, .. }) => {
+                    let grew = grows(&mut sent_replies, parent_id, line.count);
+                    match render_reply(&session, author_id, *message, &line, grew) {
+                        Ok(html) if html.is_empty() => {}
+                        Ok(html) => {
+                            if socket.send(Message::Text(html.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(err) => tracing::error!(error = %err, "could not render thread reply"),
                     }
                 }
                 Ok(ChatEvent::Reactions { message_id, rows, .. }) => {
@@ -202,8 +234,9 @@ async fn read_on_socket(session: &Session, author_id: i64) -> Result<()> {
     .await
 }
 
-/// Saves a message from this socket and broadcasts it. Membership is checked
-/// again on every send.
+/// Saves a message from this socket and broadcasts it: a reply on a thread's
+/// socket, else a message. Membership, and the thread, are checked again on
+/// every send. The parent comes from the session, never from the browser.
 async fn receive(session: &Session, text: &str) -> Result<()> {
     let body = serde_json::from_str::<serde_json::Value>(text)?
         .get("body")
@@ -218,9 +251,23 @@ async fn receive(session: &Session, text: &str) -> Result<()> {
         session.user_id,
     )
     .await?;
-    let message =
-        messages::Model::create(db, &conversation, session.user_id, &MessageParams { body })
-            .await?;
+    let params = MessageParams { body };
+    if let Some(parent_id) = session.thread_id {
+        let parent = messages::Model::find_thread_parent(db, &conversation, parent_id).await?;
+        let reply =
+            messages::Model::create_reply(db, &conversation, &parent, session.user_id, &params)
+                .await?;
+        publish_reply(&session.ctx, session.org_id, &parent, &reply).await?;
+        return super::notifications::reply_sent(
+            &session.ctx,
+            session.org_id,
+            &conversation,
+            &parent,
+            &reply,
+        )
+        .await;
+    }
+    let message = messages::Model::create(db, &conversation, session.user_id, &params).await?;
     publish(&session.ctx, session.org_id, &message).await?;
     super::notifications::message_sent(&session.ctx, session.org_id, &conversation, &message).await
 }
@@ -249,6 +296,46 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
     Ok(())
 }
 
+/// Announces a saved thread reply, with the parent's new reply line, to every
+/// socket following its conversation.
+///
+/// # Errors
+/// When the hub is missing or the thread cannot be read.
+pub async fn publish_reply(
+    ctx: &AppContext,
+    org_id: i64,
+    parent: &messages::Model,
+    reply: &messages::Model,
+) -> Result<()> {
+    let hub = ctx
+        .shared_store
+        .get::<ChatHub>()
+        .ok_or_else(|| Error::string("chat hub missing"))?;
+    let names = names(ctx, org_id).await?;
+    let tz = time::zone(
+        &organisations::Model::find_by_id(&ctx.db, org_id)
+            .await?
+            .timezone,
+    );
+    let stats = messages::Model::thread_stats(&ctx.db, org_id, &[parent.id]).await?;
+    let line = thread_line(
+        parent.conversation_id,
+        parent.id,
+        stats.get(&parent.id).map_or(&[], Vec::as_slice),
+        &names,
+        tz,
+    )
+    .ok_or_else(|| Error::string("a saved reply is missing from its thread"))?;
+    hub.publish(ChatEvent::Reply {
+        conversation_id: parent.conversation_id,
+        parent_id: parent.id,
+        author_id: reply.user_id,
+        message: Box::new(MessageView::new(reply, &names, 0, tz)),
+        line: Box::new(line),
+    });
+    Ok(())
+}
+
 /// Announces a message's reactions, read after a change, to every socket
 /// following its conversation.
 ///
@@ -265,6 +352,7 @@ pub fn publish_reactions(
         .publish(ChatEvent::Reactions {
             conversation_id: message.conversation_id,
             message_id: message.id,
+            parent_id: message.parent_id,
             rows,
         });
     Ok(())
@@ -324,12 +412,66 @@ fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result
         .render("chat/_message_oob.html", data!({ "message": message }))
 }
 
-/// Whether a socket following `conversation_id` should handle `event`. The
-/// hub is one broadcast for the whole process, so this check is what keeps
-/// another conversation's (or organisation's) HTML off this socket. Sign-outs
-/// are about a person, not a conversation, and are matched before this.
-fn wants(event: &ChatEvent, conversation_id: i64) -> bool {
-    match event {
+/// A reply for this socket's viewer. A main-feed socket swaps the parent's
+/// reply line; a thread socket appends the reply and updates the count. A
+/// count that did not `grow` is a late event, so its line or count is left
+/// out (the reply itself is still appended). Empty when nothing is left.
+fn render_reply(
+    session: &Session,
+    author_id: i64,
+    mut message: MessageView,
+    line: &ThreadLine,
+    grew: bool,
+) -> Result<String> {
+    let Some(parent_id) = message.parent_id else {
+        return Ok(String::new());
+    };
+    if session.thread_id.is_none() {
+        if !grew {
+            return Ok(String::new());
+        }
+        return session.view.render(
+            "chat/_thread_link.html",
+            data!({ "message": { "id": parent_id, "thread": line }, "oob": true }),
+        );
+    }
+    message.own = author_id == session.user_id;
+    message.read_receipts = false;
+    message.can_reply = false;
+    let mut html = session.view.render(
+        "chat/_message_oob.html",
+        data!({ "message": message, "in_thread": true }),
+    )?;
+    if grew {
+        html.push_str(&session.view.render(
+            "chat/_thread_count.html",
+            data!({ "count": line.count, "count_label": line.label, "oob": true }),
+        )?);
+    }
+    Ok(html)
+}
+
+/// Whether `count` replies is at least what this socket last showed for the
+/// thread, recording it if so. Replies only grow, so a lower count is a reply
+/// event that arrived out of order.
+fn grows(sent: &mut HashMap<i64, i64>, parent_id: i64, count: i64) -> bool {
+    let last = sent.entry(parent_id).or_insert(0);
+    if count < *last {
+        return false;
+    }
+    *last = count;
+    true
+}
+
+/// Whether a socket should handle `event`. The socket follows
+/// `conversation_id`, and with `thread_id` set only that thread. The hub is one
+/// broadcast for the whole process, so the conversation check, made first for
+/// every event, is what keeps another conversation's (or organisation's) HTML
+/// off this socket. Main-feed sockets take only main-feed events; a thread
+/// socket takes only its own thread's. Sign-outs are about a person, not a
+/// conversation, and are matched before this.
+fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> bool {
+    let id = match event {
         ChatEvent::Message {
             conversation_id: id,
             ..
@@ -341,8 +483,34 @@ fn wants(event: &ChatEvent, conversation_id: i64) -> bool {
         | ChatEvent::Reactions {
             conversation_id: id,
             ..
-        } => *id == conversation_id,
-        ChatEvent::SignedOut { .. } => false,
+        }
+        | ChatEvent::Reply {
+            conversation_id: id,
+            ..
+        } => *id,
+        ChatEvent::SignedOut { .. } => return false,
+    };
+    if id != conversation_id {
+        return false;
+    }
+    match (event, thread_id) {
+        (ChatEvent::Message { .. } | ChatEvent::Read { .. }, None) => true,
+        (ChatEvent::Message { .. } | ChatEvent::Read { .. }, Some(_)) => false,
+        // The parent's reply line in the main feed; the reply in its thread.
+        (ChatEvent::Reply { .. }, None) => true,
+        (ChatEvent::Reply { parent_id, .. }, Some(thread)) => *parent_id == thread,
+        // A reaction on a reply belongs in its thread; one on a top-level
+        // message in the main feed, and also on that message's thread page.
+        (ChatEvent::Reactions { parent_id, .. }, None) => parent_id.is_none(),
+        (
+            ChatEvent::Reactions {
+                message_id,
+                parent_id,
+                ..
+            },
+            Some(thread),
+        ) => *message_id == thread || *parent_id == Some(thread),
+        (ChatEvent::SignedOut { .. }, _) => false,
     }
 }
 
@@ -472,70 +640,154 @@ mod tests {
         assert_eq!(not_older(vec![&both], &mut sent).len(), 1);
     }
 
-    fn message_event(conversation_id: i64) -> ChatEvent {
-        let message = messages::Model {
+    fn message(id: i64, conversation_id: i64, parent_id: Option<i64>) -> messages::Model {
+        messages::Model {
             created_at: chrono::Utc::now().into(),
             updated_at: chrono::Utc::now().into(),
-            id: 10,
+            id,
             body: "hi".to_string(),
             organisation_id: 1,
             conversation_id,
             user_id: 1,
-        };
+            parent_id,
+        }
+    }
+
+    fn view(message: &messages::Model) -> Box<MessageView> {
+        Box::new(MessageView::new(
+            message,
+            &HashMap::new(),
+            1,
+            chrono_tz::UTC,
+        ))
+    }
+
+    fn message_event(conversation_id: i64) -> ChatEvent {
         ChatEvent::Message {
             conversation_id,
             author_id: 1,
-            message: Box::new(MessageView::new(
-                &message,
-                &HashMap::new(),
-                1,
-                chrono_tz::UTC,
-            )),
+            message: view(&message(10, conversation_id, None)),
+        }
+    }
+
+    fn read_event(conversation_id: i64) -> ChatEvent {
+        ChatEvent::Read {
+            conversation_id,
+            receipts: Arc::new(Vec::new()),
+        }
+    }
+
+    fn reactions_event(conversation_id: i64, message_id: i64, parent_id: Option<i64>) -> ChatEvent {
+        ChatEvent::Reactions {
+            conversation_id,
+            message_id,
+            parent_id,
+            rows: Arc::new(Vec::new()),
+        }
+    }
+
+    fn reply_event(conversation_id: i64, parent_id: i64) -> ChatEvent {
+        ChatEvent::Reply {
+            conversation_id,
+            parent_id,
+            author_id: 1,
+            message: view(&message(11, conversation_id, Some(parent_id))),
+            line: Box::new(ThreadLine {
+                url: String::new(),
+                count: 1,
+                label: "1 reply".to_string(),
+                last: "10:00".to_string(),
+                faces: Vec::new(),
+                more: 0,
+            }),
+        }
+    }
+
+    /// Every event type, on the conversation the socket follows.
+    fn every_event(conversation_id: i64) -> Vec<(&'static str, ChatEvent)> {
+        vec![
+            ("message", message_event(conversation_id)),
+            ("read", read_event(conversation_id)),
+            (
+                "reactions on a top-level message",
+                reactions_event(conversation_id, 10, None),
+            ),
+            (
+                "reactions on a reply",
+                reactions_event(conversation_id, 11, Some(10)),
+            ),
+            ("reply", reply_event(conversation_id, 10)),
+        ]
+    }
+
+    #[test]
+    fn another_conversation_is_never_wanted() {
+        // Conversation 8 may belong to another organisation.
+        for (name, event) in every_event(8) {
+            assert!(!wants(&event, 7, None), "main feed: {name}");
+            assert!(!wants(&event, 7, Some(10)), "thread: {name}");
         }
     }
 
     #[test]
-    fn sockets_only_take_events_for_their_conversation() {
-        let reactions = |conversation_id| ChatEvent::Reactions {
-            conversation_id,
-            message_id: 10,
-            rows: Arc::new(Vec::new()),
-        };
-        let read = |conversation_id| ChatEvent::Read {
-            conversation_id,
-            receipts: Arc::new(Vec::new()),
-        };
-        assert!(wants(&message_event(7), 7));
-        assert!(wants(&reactions(7), 7));
-        assert!(wants(&read(7), 7));
-        // Another conversation, which may belong to another organisation.
-        assert!(!wants(&message_event(8), 7), "message");
-        assert!(!wants(&reactions(8), 7), "reactions");
-        assert!(!wants(&read(8), 7), "read");
+    fn main_feed_sockets_take_only_main_feed_events() {
+        assert!(wants(&message_event(7), 7, None));
+        assert!(wants(&read_event(7), 7, None));
+        assert!(wants(&reactions_event(7, 10, None), 7, None));
+        assert!(
+            wants(&reply_event(7, 10), 7, None),
+            "updates the reply line"
+        );
+        assert!(
+            !wants(&reactions_event(7, 11, Some(10)), 7, None),
+            "a reply's reactions"
+        );
         // Sign-outs are matched on the person before this check.
-        assert!(!wants(&ChatEvent::SignedOut { user_id: 1 }, 7));
+        assert!(!wants(&ChatEvent::SignedOut { user_id: 1 }, 7, None));
+    }
+
+    #[test]
+    fn thread_sockets_take_only_their_own_threads_events() {
+        let thread = Some(10);
+        assert!(wants(&reply_event(7, 10), 7, thread));
+        assert!(
+            wants(&reactions_event(7, 10, None), 7, thread),
+            "the parent's reactions"
+        );
+        assert!(
+            wants(&reactions_event(7, 11, Some(10)), 7, thread),
+            "a reply's reactions"
+        );
+        assert!(!wants(&reply_event(7, 20), 7, thread), "another thread");
+        assert!(
+            !wants(&reactions_event(7, 20, None), 7, thread),
+            "another top-level message"
+        );
+        assert!(
+            !wants(&reactions_event(7, 21, Some(20)), 7, thread),
+            "another thread's reply"
+        );
+        assert!(!wants(&message_event(7), 7, thread), "main-feed message");
+        assert!(!wants(&read_event(7), 7, thread), "receipts");
+        assert!(!wants(&ChatEvent::SignedOut { user_id: 1 }, 7, thread));
+    }
+
+    #[test]
+    fn late_reply_events_never_lower_a_count() {
+        let mut sent = HashMap::new();
+        assert!(grows(&mut sent, 10, 2));
+        assert!(!grows(&mut sent, 10, 1), "a late event");
+        assert!(grows(&mut sent, 10, 2), "the same count again");
+        assert!(grows(&mut sent, 10, 3));
+        assert!(grows(&mut sent, 20, 1), "counted per thread");
     }
 
     #[test]
     fn new_messages_carry_no_receipts() {
-        let message = messages::Model {
-            created_at: chrono::Utc::now().into(),
-            updated_at: chrono::Utc::now().into(),
-            id: 10,
-            body: "hi".to_string(),
-            organisation_id: 1,
-            conversation_id: 7,
-            user_id: 1,
-        };
         let event = ChatEvent::Message {
             conversation_id: 7,
             author_id: 1,
-            message: Box::new(MessageView::new(
-                &message,
-                &HashMap::new(),
-                1,
-                chrono_tz::UTC,
-            )),
+            message: view(&message(10, 7, None)),
         };
         assert!(receipts_for(&event, 7, 1).is_empty());
     }

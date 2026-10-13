@@ -1,0 +1,2 @@
+{# The divider under a thread's parent: "3 replies". Empty, and hidden, until the first reply. #}
+<div class="thread-divider" id="thread-count" aria-live="off"{% if oob | default(value=false) %} hx-swap-oob="true"{% endif %}>{% if count > 0 %}{{ count_label }}{% endif %}</div>
