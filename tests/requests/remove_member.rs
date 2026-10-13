@@ -5,7 +5,7 @@ use collab::{
     data::notify_hub::{NotifyEvent, NotifyHub},
     models::{
         access_tokens, conversation_members, conversations, memberships, messages, notifications,
-        organisations, users,
+        organisations, reactions, users,
     },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
@@ -163,6 +163,31 @@ async fn removing_someone_locks_them_out_of_everything() {
             messages::Entity::find().count(&ctx.db).await.unwrap(),
             before
         );
+        // Nor react, or see who reacted.
+        let mention = messages::Entity::find()
+            .filter(messages::Column::Body.eq("@carol can you check?"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let res = request
+            .post(&format!(
+                "/chat/{}/messages/{}/reactions",
+                general.id, mention.id
+            ))
+            .add_header(carol.0.clone(), carol.1.clone())
+            .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
+            .await;
+        assert_eq!(res.status_code(), 403);
+        let res = request
+            .get(&format!(
+                "/chat/{}/messages/{}/actions",
+                general.id, mention.id
+            ))
+            .add_header(carol.0.clone(), carol.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 403);
+        assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         let seats = conversation_members::Entity::find()
             .filter(conversation_members::Column::UserId.eq(carol_m.user_id))
             .count(&ctx.db)

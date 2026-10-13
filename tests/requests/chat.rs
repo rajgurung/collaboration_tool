@@ -13,10 +13,10 @@ use serial_test::serial;
 
 use super::prepare_data::{join, sign_up};
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+pub(super) type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
 
 /// Signs up Acme (alice) and gets bob approved; returns both cookies.
-async fn acme_with_bob(
+pub(super) async fn acme_with_bob(
     request: &TestServer,
     ctx: &AppContext,
 ) -> (
@@ -36,7 +36,7 @@ async fn acme_with_bob(
     (alice, bob)
 }
 
-async fn general(ctx: &AppContext) -> conversations::Model {
+pub(super) async fn general(ctx: &AppContext) -> conversations::Model {
     let org = organisations::Model::find_by_slug(&ctx.db, "acme")
         .await
         .unwrap();
@@ -416,7 +416,7 @@ async fn legacy_chat_links_redirect() {
     .await;
 }
 
-async fn approve(ctx: &AppContext, email: &str) -> users::Model {
+pub(super) async fn approve(ctx: &AppContext, email: &str) -> users::Model {
     let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
     let membership = memberships::Model::find_for_user(&ctx.db, user.id)
         .await
@@ -426,14 +426,14 @@ async fn approve(ctx: &AppContext, email: &str) -> users::Model {
     user
 }
 
-async fn user_id(ctx: &AppContext, email: &str) -> i64 {
+pub(super) async fn user_id(ctx: &AppContext, email: &str) -> i64 {
     users::Model::find_by_email(&ctx.db, email)
         .await
         .unwrap()
         .id
 }
 
-async fn acme_id(ctx: &AppContext) -> i64 {
+pub(super) async fn acme_id(ctx: &AppContext) -> i64 {
     organisations::Model::find_by_slug(&ctx.db, "acme")
         .await
         .unwrap()
@@ -458,7 +458,7 @@ async fn group_of_three(request: &TestServer, ctx: &AppContext) -> (conversation
     (group, carol)
 }
 
-async fn post(
+pub(super) async fn post(
     request: &TestServer,
     ctx: &AppContext,
     who: &Cookie,

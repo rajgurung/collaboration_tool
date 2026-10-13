@@ -23,7 +23,8 @@ use crate::{
     models::_entities::{
         access_tokens, auth_attempts, conversation_members, conversations, documents, folders,
         login_accesses, logins, meeting_attendees, meetings, memberships, messages, oauth_clients,
-        oauth_codes, org_keys, organisations, projects, task_notes, tasks as task_items, users,
+        oauth_codes, org_keys, organisations, projects, reactions, task_notes, tasks as task_items,
+        users,
     },
     tasks,
     workers::downloader::DownloadWorker,
@@ -172,6 +173,7 @@ impl Hooks for App {
         truncate_table(&ctx.db, access_tokens::Entity).await?;
         truncate_table(&ctx.db, oauth_codes::Entity).await?;
         truncate_table(&ctx.db, oauth_clients::Entity).await?;
+        truncate_table(&ctx.db, reactions::Entity).await?;
         truncate_table(&ctx.db, messages::Entity).await?;
         truncate_table(&ctx.db, conversation_members::Entity).await?;
         truncate_table(&ctx.db, conversations::Entity).await?;

@@ -411,11 +411,54 @@
   .chat-head { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: env(safe-area-inset-top) 8px 0 4px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
   .chat-feed { flex: 1; overflow-y: auto; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 2px; }
   .chat-feed > :first-child { margin-top: auto; }
-  .msg { display: flex; align-items: flex-end; gap: 8px; }
+  /* Two rows: the avatar sits level with the bubble, and reactions get the
+     full width underneath, so all six fit at 390px. */
+  .msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: end; border-radius: 12px; }
   .msg + .msg-start, .msg-start + .msg-start { margin-top: 12px; }
-  .msg-own { justify-content: flex-end; }
-  .msg-body { max-width: 78%; display: flex; flex-direction: column; gap: 2px; }
+  .msg > .msg-av { grid-column: 1; grid-row: 1; display: inline-flex; }
+  .msg > .msg-body { grid-column: 2; grid-row: 1; justify-self: start; }
+  .msg > .msg-extra { grid-column: 2; grid-row: 2; min-width: 0; }
+  .msg-own { grid-template-columns: minmax(0, 1fr); }
+  .msg-own > .msg-body, .msg-own > .msg-extra { grid-column: 1; justify-self: end; }
+  .msg-body { position: relative; max-width: 86%; display: flex; flex-direction: column; gap: 2px; }
   .msg-own .msg-body { align-items: flex-end; }
+  .bubble { cursor: pointer; }
+  .bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-weight: 400; line-height: 1; }
+  /* Reactions: 32px chips, with a 44px tap area from the row's padding. */
+  .reacts { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0; }
+  .reacts:empty { display: none; }
+  .msg-own .reacts { justify-content: flex-end; }
+  .react-wrap { position: relative; display: inline-flex; }
+  .react { position: relative; display: inline-flex; align-items: center; gap: 3px; height: 32px; padding: 0 8px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+  .react::after { content: ""; position: absolute; inset: -6px -3px; }
+  .react .emoji { font-size: 16px; }
+  .react.mine { background: var(--active-bg); border-color: var(--accent); }
+  /* Who reacted: shown on hover or focus on devices that hover (see utilities). */
+  .react-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; display: none; flex-direction: column; gap: 6px; min-width: 150px; max-width: 220px; box-sizing: border-box; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); color: var(--text); font-size: 13px; font-weight: 500; }
+  .msg-own .react-pop { left: auto; right: 0; }
+  .react-pop-head { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+  /* Desktop toolbar above the bubble. It grows toward the open side of the
+     pane: right for others' messages, left for your own. */
+  .msg-tools { position: absolute; left: 0; top: -34px; z-index: 5; display: none; align-items: center; gap: 2px; padding: 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lift); }
+  .msg-own .msg-tools { left: auto; right: 0; }
+  .chat-feed > .msg:first-child .msg-tools { top: auto; bottom: -40px; }
+  .msg-tools button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 9px; background: none; font-size: 19px; cursor: pointer; }
+  .msg-tools button:hover { background: var(--chip); }
+  .msg-tools button.mine { background: var(--active-bg); }
+  /* The action sheet. */
+  .msg-actions { display: flex; flex-direction: column; gap: 14px; }
+  .quote { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; background: var(--lane); border: 1px solid var(--line-soft); }
+  .quote-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+  .quote-head .meta { font-weight: 500; }
+  .quote p { margin: 0; font-size: 14px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pick { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+  .pick button { display: grid; place-items: center; height: 52px; border: 0; border-radius: 14px; background: var(--chip); font-size: 26px; cursor: pointer; }
+  .pick button.mine { background: var(--active-bg); box-shadow: inset 0 0 0 2px var(--accent); }
+  .who-row { min-height: 48px; }
+  .who-row > .emoji { width: 28px; font-size: 22px; text-align: center; }
+  .who-row .names { flex: 1; min-width: 0; font-size: 15px; }
+  .who-row .receipt-stack > * { box-shadow: 0 0 0 2px var(--surface); }
   .bubble { padding: 8px 12px; border-radius: 18px 18px 18px 6px; background: var(--surface); border: 1px solid var(--line); font-size: 15px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg-own .bubble { border-radius: 18px 18px 6px 18px; background: var(--own-bubble); color: var(--own-text); border-color: transparent; }
   .msg-name { margin-left: 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -443,6 +486,9 @@
   .chat-empty { margin: auto; padding: 24px; text-align: center; color: var(--muted); }
   .chat-feed:has(.msg) .chat-empty { display: none; }
   @media (min-width: 900px) {
+    .chat-feed { padding-left: 24px; padding-right: 24px; }
+    .msg { padding: 2px 8px; margin-left: -8px; margin-right: -8px; }
+    .msg-body { max-width: 70%; }
     .chat-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100dvh; }
     .chat-layout .chat-list-pane { border-right: 1px solid var(--line); overflow-y: auto; }
     .chat-screen { height: 100dvh; }
@@ -836,5 +882,14 @@
     .msg-receipt:hover .receipt-pop, .msg-receipt:focus-within .receipt-pop { display: flex; }
     /* Bridges the gap above the receipt so the mouse can reach the list. */
     .msg-receipt:has(.receipt-pop)::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 8px; }
+    .react-wrap:hover .react-pop, .react-wrap:focus-within .react-pop { display: flex; }
+    /* Bridges the gap so the pointer can reach the list. */
+    .react-wrap:has(.react-pop)::before { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 8px; }
+    .msg:hover .msg-tools, .msg:focus-within .msg-tools { display: flex; }
+    .react:hover { background: var(--chip); }
+    .react.mine:hover { background: var(--active-bg); }
+  }
+  @media (hover: hover) and (min-width: 900px) {
+    .msg:hover { background: color-mix(in srgb, var(--chip) 55%, transparent); }
   }
 }

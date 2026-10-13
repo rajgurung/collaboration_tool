@@ -105,6 +105,25 @@ impl Model {
         Ok(latest)
     }
 
+    /// A message in this conversation and its organisation. Every route that
+    /// takes a message id goes through this, after checking membership.
+    ///
+    /// # Errors
+    /// `EntityNotFound` for an id in another conversation or organisation.
+    pub async fn find_in_conversation<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        id: i64,
+    ) -> ModelResult<Self> {
+        Entity::find()
+            .in_tenant(conversation.organisation_id)
+            .filter(Column::Id.eq(id))
+            .filter(Column::ConversationId.eq(conversation.id))
+            .one(db)
+            .await?
+            .ok_or(ModelError::EntityNotFound)
+    }
+
     /// Saves a message. The caller must already know the sender is a member.
     ///
     /// # Errors

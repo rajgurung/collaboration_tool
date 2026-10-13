@@ -11,9 +11,10 @@ use crate::{
     models::{
         conversation_members::{self, ReadMark},
         conversations::{self, kind, GroupParams},
-        memberships,
+        field_error, memberships,
         messages::{self, MessageParams},
         notifications::{mention_parts, Part, EVERYONE},
+        reactions::{self, EMOJI},
     },
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
@@ -38,6 +39,15 @@ struct UnreadQuery {
 #[derive(Debug, Deserialize)]
 struct DmForm {
     user_id: i64,
+}
+
+/// The state the client wants: `on` is "1" to add `emoji`, "0" to remove it.
+#[derive(Debug, Default, Deserialize)]
+struct ReactionForm {
+    #[serde(default)]
+    emoji: String,
+    #[serde(default)]
+    on: String,
 }
 
 /// One row in the conversation list.
@@ -72,6 +82,136 @@ pub struct Receipt {
     pub more: usize,
 }
 
+/// One person's reaction, with the name the team knows them by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReactionRow {
+    pub emoji: String,
+    pub user_id: i64,
+    pub username: String,
+}
+
+/// Someone who reacted, as the viewer sees them: `name` is "You" for the
+/// viewer, and the avatar still uses their username.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Reactor {
+    pub name: String,
+    pub username: String,
+    pub color: &'static str,
+}
+
+/// One emoji under a message, with its count and who chose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReactionChip {
+    pub emoji: String,
+    pub count: usize,
+    /// The viewer is one of them.
+    pub mine: bool,
+    /// "You" first, then others in the order they reacted.
+    pub people: Vec<Reactor>,
+    /// `people` as one line, for the sheet.
+    pub names: String,
+    /// The chip's screen-reader label, such as "👍 3, you reacted".
+    pub label: String,
+}
+
+/// One of the six choices on the toolbar and in the sheet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Pick {
+    pub emoji: &'static str,
+    pub mine: bool,
+}
+
+/// Reactions grouped into chips for one viewer, in the fixed [`EMOJI`] order
+/// so chips never move around.
+#[must_use]
+pub fn chips(rows: &[ReactionRow], viewer_id: i64) -> Vec<ReactionChip> {
+    EMOJI
+        .iter()
+        .filter_map(|emoji| {
+            let of: Vec<&ReactionRow> = rows.iter().filter(|r| r.emoji == *emoji).collect();
+            if of.is_empty() {
+                return None;
+            }
+            let reactor = |r: &ReactionRow, name: &str| Reactor {
+                name: name.to_string(),
+                color: avatar_color(&r.username),
+                username: r.username.clone(),
+            };
+            let mut people: Vec<Reactor> = of
+                .iter()
+                .filter(|r| r.user_id == viewer_id)
+                .map(|r| reactor(r, "You"))
+                .collect();
+            let mine = !people.is_empty();
+            people.extend(
+                of.iter()
+                    .filter(|r| r.user_id != viewer_id)
+                    .map(|r| reactor(r, &r.username)),
+            );
+            let count = of.len();
+            Some(ReactionChip {
+                emoji: (*emoji).to_string(),
+                count,
+                mine,
+                names: people
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                people,
+                label: if mine {
+                    format!("{emoji} {count}, you reacted")
+                } else {
+                    format!("{emoji} {count}")
+                },
+            })
+        })
+        .collect()
+}
+
+/// The six choices, marking the ones the viewer has already made.
+#[must_use]
+pub fn picks(chips: &[ReactionChip]) -> Vec<Pick> {
+    EMOJI
+        .iter()
+        .map(|emoji| Pick {
+            emoji,
+            mine: chips.iter().any(|c| c.mine && c.emoji == *emoji),
+        })
+        .collect()
+}
+
+/// Reaction rows for the given messages, keyed by message id. People no
+/// longer on the team show as "Former member"; their reactions still count.
+///
+/// # Errors
+/// On database errors.
+pub async fn reaction_rows(
+    ctx: &AppContext,
+    org_id: i64,
+    message_ids: &[i64],
+    names: &HashMap<i64, String>,
+) -> Result<HashMap<i64, Vec<ReactionRow>>> {
+    Ok(reactions::Model::for_messages(&ctx.db, org_id, message_ids)
+        .await?
+        .into_iter()
+        .map(|(id, list)| {
+            let rows = list
+                .into_iter()
+                .map(|r| ReactionRow {
+                    username: names
+                        .get(&r.user_id)
+                        .cloned()
+                        .unwrap_or_else(|| FORMER_MEMBER.to_string()),
+                    emoji: r.emoji,
+                    user_id: r.user_id,
+                })
+                .collect();
+            (id, rows)
+        })
+        .collect())
+}
+
 /// One rendered chat message. `own` decides the bubble style for the viewer;
 /// `start` and `show_time` group consecutive messages from the same person.
 /// `read_receipts` is set on the viewer's own messages, so the page has a slot
@@ -79,6 +219,7 @@ pub struct Receipt {
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageView {
     pub id: i64,
+    pub conversation_id: i64,
     pub author_id: i64,
     pub author: String,
     pub color: &'static str,
@@ -91,6 +232,9 @@ pub struct MessageView {
     pub show_time: bool,
     pub read_receipts: bool,
     pub receipt: Option<Receipt>,
+    pub reactions: Vec<ReactionChip>,
+    /// The six choices for the hover toolbar and the sheet.
+    pub picks: Vec<Pick>,
 }
 
 impl MessageView {
@@ -107,6 +251,7 @@ impl MessageView {
             .unwrap_or_else(|| FORMER_MEMBER.to_string());
         Self {
             id: message.id,
+            conversation_id: message.conversation_id,
             author_id: message.user_id,
             color: avatar_color(&author),
             author,
@@ -128,7 +273,15 @@ impl MessageView {
             show_time: true,
             read_receipts: false,
             receipt: None,
+            reactions: Vec::new(),
+            picks: picks(&[]),
         }
+    }
+
+    /// Fills in the reactions as `viewer_id` sees them.
+    pub fn set_reactions(&mut self, rows: &[ReactionRow], viewer_id: i64) {
+        self.reactions = chips(rows, viewer_id);
+        self.picks = picks(&self.reactions);
     }
 }
 
@@ -185,11 +338,12 @@ pub fn receipt(
 }
 
 /// Marks where each run of messages from one person starts and ends, and adds
-/// receipts to the viewer's own messages.
+/// receipts to the viewer's own messages and reactions to every message.
 fn grouped(
     conversation: &conversations::Model,
     list: &[messages::Model],
     marks: &[ReadMark],
+    reactions: &HashMap<i64, Vec<ReactionRow>>,
     names: &HashMap<i64, String>,
     viewer_id: i64,
     tz: Tz,
@@ -198,6 +352,9 @@ fn grouped(
         .iter()
         .map(|m| {
             let mut view = MessageView::new(m, names, viewer_id, tz);
+            if let Some(rows) = reactions.get(&m.id) {
+                view.set_reactions(rows, viewer_id);
+            }
             if view.own {
                 view.read_receipts = true;
                 view.receipt = receipt(&conversation.kind, m.user_id, m.created_at, marks, names);
@@ -346,10 +503,13 @@ async fn show(
             username,
         })
         .collect();
+    let list = messages::Model::recent(&ctx.db, &conversation).await?;
+    let ids: Vec<i64> = list.iter().map(|m| m.id).collect();
     let feed = grouped(
         &conversation,
-        &messages::Model::recent(&ctx.db, &conversation).await?,
+        &list,
         &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
+        &reaction_rows(&ctx, member.org.id, &ids, &names).await?,
         &names,
         me,
         member.tz(),
@@ -475,15 +635,103 @@ async fn feed(
     )
     .await?;
     let names = names(&ctx, member.org.id).await?;
+    let list = messages::Model::recent(&ctx.db, &conversation).await?;
+    let ids: Vec<i64> = list.iter().map(|m| m.id).collect();
     let feed = grouped(
         &conversation,
-        &messages::Model::recent(&ctx.db, &conversation).await?,
+        &list,
         &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
+        &reaction_rows(&ctx, member.org.id, &ids, &names).await?,
         &names,
         member.user.id,
         member.tz(),
     );
     format::render().view(&v, "chat/_feed.html", data!({ "messages": feed }))
+}
+
+/// Adds or removes the viewer's reaction, tells every open socket, and returns
+/// the message's chips and toolbar as the viewer now sees them.
+#[debug_handler]
+async fn react(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path((id, message_id)): Path<(i64, i64)>,
+    Form(form): Form<ReactionForm>,
+) -> Result<Response> {
+    let me = member.user.id;
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, me).await?;
+    let message = messages::Model::find_in_conversation(&ctx.db, &conversation, message_id).await?;
+    let result = match form.on.as_str() {
+        "1" | "0" => {
+            reactions::Model::set(&ctx.db, &message, me, &form.emoji, form.on == "1").await
+        }
+        _ => Err(field_error("on", "Couldn't change your reaction.")),
+    };
+    if let Err(err) = result {
+        let errors = field_errors(&err).ok_or(err)?;
+        let text = errors.values().next().cloned().unwrap_or_default();
+        return format::render()
+            .status(422)
+            .header("HX-Reswap", "none")
+            .header("HX-Trigger", toast("error", &text))
+            .empty();
+    }
+    let rows = super::chat_ws::publish_reactions(&ctx, member.org.id, &message).await?;
+    format::html(&render_reactions(
+        &v,
+        conversation.id,
+        message.id,
+        &rows,
+        me,
+    )?)
+}
+
+/// A message's chips and hover toolbar for one viewer, as out-of-band swaps of
+/// `#reacts-{id}` and `#tools-{id}`.
+///
+/// # Errors
+/// When the template fails to render.
+pub fn render_reactions(
+    v: &TeraView,
+    conversation_id: i64,
+    message_id: i64,
+    rows: &[ReactionRow],
+    viewer_id: i64,
+) -> Result<String> {
+    let reactions = chips(rows, viewer_id);
+    v.render(
+        "chat/_reactions_update.html",
+        data!({
+            "message": {
+                "id": message_id,
+                "conversation_id": conversation_id,
+                "picks": picks(&reactions),
+                "reactions": reactions,
+            },
+            "oob": true,
+        }),
+    )
+}
+
+/// The message's action sheet: which message, the six reactions and who reacted.
+#[debug_handler]
+async fn actions(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path((id, message_id)): Path<(i64, i64)>,
+) -> Result<Response> {
+    let me = member.user.id;
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, me).await?;
+    let message = messages::Model::find_in_conversation(&ctx.db, &conversation, message_id).await?;
+    let names = names(&ctx, member.org.id).await?;
+    let rows = reaction_rows(&ctx, member.org.id, &[message.id], &names).await?;
+    let mut view = MessageView::new(&message, &names, me, member.tz());
+    view.set_reactions(rows.get(&message.id).map_or(&[], Vec::as_slice), me);
+    format::render().view(&v, "chat/_actions.html", data!({ "message": view }))
 }
 
 async fn team_except_me(ctx: &AppContext, member: &CurrentMember) -> Result<Vec<Person>> {
@@ -569,6 +817,8 @@ pub fn routes() -> Routes {
         .add("/chat/{id}", get(show))
         .add("/chat/{id}/messages", post(send))
         .add("/chat/{id}/feed", get(feed))
+        .add("/chat/{id}/messages/{message_id}/reactions", post(react))
+        .add("/chat/{id}/messages/{message_id}/actions", get(actions))
 }
 
 #[cfg(test)]
@@ -673,6 +923,53 @@ mod tests {
         // Everyone else has left the group.
         let marks = [(1, Some(at(9))), (99, Some(at(9)))];
         assert_eq!(receipt(kind::GROUP, 1, at(5), &marks, &team()), None);
+    }
+
+    fn row(emoji: &str, user_id: i64, username: &str) -> ReactionRow {
+        ReactionRow {
+            emoji: emoji.to_string(),
+            user_id,
+            username: username.to_string(),
+        }
+    }
+
+    #[test]
+    fn chips_keep_the_fixed_order_and_put_you_first() {
+        // Reacted out of order: ✅, then 👍 by bob, carol and alice.
+        let rows = [
+            row("✅", 2, "bob"),
+            row("👍", 2, "bob"),
+            row("👍", 3, "carol"),
+            row("👍", 1, "alice"),
+        ];
+        let chips = chips(&rows, 1);
+        let order: Vec<&str> = chips.iter().map(|c| c.emoji.as_str()).collect();
+        assert_eq!(order, vec!["👍", "✅"]);
+        assert_eq!(chips[0].count, 3);
+        assert!(chips[0].mine);
+        assert_eq!(chips[0].names, "You, bob, carol");
+        assert_eq!(
+            chips[0].people[0].username, "alice",
+            "the avatar is still alice's"
+        );
+        assert_eq!(chips[0].label, "👍 3, you reacted");
+        assert!(!chips[1].mine);
+        assert_eq!(chips[1].label, "✅ 1");
+
+        // Bob sees the same chips with himself first.
+        let bobs = super::chips(&rows, 2);
+        assert_eq!(bobs[0].names, "You, carol, alice");
+        assert!(bobs[1].mine);
+    }
+
+    #[test]
+    fn picks_mark_only_your_own_reactions() {
+        let rows = [row("❤️", 2, "bob"), row("🎉", 1, "alice")];
+        let picks = picks(&chips(&rows, 1));
+        assert_eq!(picks.len(), 6);
+        let mine: Vec<&str> = picks.iter().filter(|p| p.mine).map(|p| p.emoji).collect();
+        assert_eq!(mine, vec!["🎉"]);
+        assert!(super::picks(&[]).iter().all(|p| !p.mine));
     }
 
     #[test]

@@ -49,6 +49,8 @@ pub enum Relation {
     OrgKeys,
     #[sea_orm(has_many = "super::projects::Entity")]
     Projects,
+    #[sea_orm(has_many = "super::reactions::Entity")]
+    Reactions,
     #[sea_orm(has_many = "super::saved_views::Entity")]
     SavedViews,
     #[sea_orm(has_many = "super::task_assignees::Entity")]
@@ -154,6 +156,12 @@ impl Related<super::org_keys::Entity> for Entity {
 impl Related<super::projects::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Projects.def()
+    }
+}
+
+impl Related<super::reactions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Reactions.def()
     }
 }
 

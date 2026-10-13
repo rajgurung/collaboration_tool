@@ -134,3 +134,56 @@ fn renders_read_receipts_as_live_swaps() {
         "{unread}"
     );
 }
+
+#[test]
+fn renders_reactions_as_live_swaps() {
+    let engine = view_engine();
+    let reactor = |name: &str, username: &str| serde_json::json!({ "name": name, "username": username, "color": "#ffb454" });
+    let pick = |emoji: &str, mine: bool| serde_json::json!({ "emoji": emoji, "mine": mine });
+    let html = engine
+        .render(
+            "chat/_reactions_update.html",
+            serde_json::json!({
+                "message": {
+                    "id": 42,
+                    "conversation_id": 7,
+                    "reactions": [{
+                        "emoji": "👍", "count": 2, "mine": true,
+                        "people": [reactor("You", "alice"), reactor("bob", "bob")],
+                        "names": "You, bob", "label": "👍 2, you reacted",
+                    }],
+                    "picks": [pick("👍", true), pick("❤️", false)],
+                },
+                "oob": true,
+            }),
+        )
+        .expect("reactions should render");
+    assert!(
+        html.contains(r#"id="reacts-42" hx-swap-oob="true""#),
+        "{html}"
+    );
+    assert!(html.contains(r#"id="tools-42""#), "{html}");
+    assert!(html.contains(r#"role="toolbar" aria-label="Message actions" hx-swap-oob="true""#));
+    assert!(
+        html.contains(r#"data-url="/chat/7/messages/42/reactions""#),
+        "{html}"
+    );
+    assert!(html.contains(r#"class="react mine""#), "{html}");
+    assert!(html.contains(r#"aria-label="👍 2, you reacted""#), "{html}");
+    assert!(html.contains(r#"title="Remove your 👍""#), "{html}");
+    assert!(html.contains(r#"title="React ❤️""#), "{html}");
+    // The avatar is alice's; the row says "You".
+    assert!(html.contains(r#"<span>You</span>"#), "{html}");
+
+    let empty = engine
+        .render(
+            "chat/_reactions.html",
+            serde_json::json!({ "message": { "id": 42, "conversation_id": 7, "reactions": [] } }),
+        )
+        .expect("an empty slot should render");
+    // Nothing inside, not even a space, so `.reacts:empty` hides it.
+    assert!(
+        empty.contains(r#"<div class="reacts" id="reacts-42"></div>"#),
+        "{empty}"
+    );
+}

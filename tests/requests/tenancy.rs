@@ -6,7 +6,7 @@ use collab::{
     app::App,
     models::{
         conversations, documents, folders, meetings, memberships, messages, organisations,
-        projects, task_notes, tasks, users,
+        projects, reactions, task_notes, tasks, users,
     },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
@@ -24,6 +24,7 @@ struct Globex {
     project: projects::Model,
     task: tasks::Model,
     general: conversations::Model,
+    message: messages::Model,
     group: conversations::Model,
     folder: folders::Model,
     file: documents::Model,
@@ -101,7 +102,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
     let general = conversations::Model::find_general(&ctx.db, org.id)
         .await
         .unwrap();
-    messages::Model::create(
+    let message = messages::Model::create(
         &ctx.db,
         &general,
         owner.id,
@@ -150,6 +151,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
         project,
         task,
         general,
+        message,
         group,
     }
 }
@@ -205,6 +207,7 @@ async fn org_a_cannot_reach_org_b() {
             format!("/chat/{}/feed", globex.general.id),
             format!("/chat/{}/feed", globex.group.id),
             format!("/chat/{}/ws", globex.general.id),
+            format!("/chat/{}/messages/{}/actions", globex.general.id, globex.message.id),
             format!("/documents/folders/{}", globex.folder.id),
             format!("/documents/files/{}", globex.file.id),
             format!("/documents/files/{}?download=1", globex.file.id),
@@ -231,6 +234,7 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/documents/files/{}/delete", globex.file.id), serde_json::json!({})),
             (format!("/chat/{}/messages", globex.general.id), serde_json::json!({ "body": "hijacked" })),
             (format!("/chat/{}/messages", globex.group.id), serde_json::json!({ "body": "hijacked" })),
+            (format!("/chat/{}/messages/{}/reactions", globex.general.id, globex.message.id), serde_json::json!({ "emoji": "👍", "on": "1" })),
         ];
         for (path, form) in &posts {
             let res = request.post(path).add_header(a.0.clone(), a.1.clone()).form(form).await;
@@ -277,6 +281,7 @@ async fn org_a_cannot_reach_org_b() {
         assert_eq!((pending.status.as_str(), pending.role.as_str()), ("pending", "member"));
         assert_eq!(task_notes::Entity::find().count(&ctx.db).await.unwrap(), 1);
         assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(meetings::Entity::find().count(&ctx.db).await.unwrap(), 1);
         assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
         assert_eq!(projects::Entity::find().count(&ctx.db).await.unwrap(), 2);

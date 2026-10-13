@@ -1,0 +1,17 @@
+{# A message's action sheet: which message, the six reactions, and who reacted. #}
+<div class="msg-actions">
+  <h2 class="sr-only">Message actions</h2>
+  <div class="quote">
+    <div class="quote-head">{{<avatar name={message.author} color={message.color} size="xs" label={false}/>}}<span>{% if message.own %}You{% else %}{{ message.author }}{% endif %}</span><span class="meta">{{ message.at }}</span></div>
+    <p>{{ message.body }}</p>
+  </div>
+  <div class="pick" role="group" aria-label="React">{% for p in message.picks %}<button type="button"{% if p.mine %} class="mine"{% endif %} data-react data-emoji="{{ p.emoji }}" data-message="{{ message.id }}" data-url="/chat/{{ message.conversation_id }}/messages/{{ message.id }}/reactions" aria-pressed="{% if p.mine %}true{% else %}false{% endif %}" aria-label="{% if p.mine %}Remove your {{ p.emoji }}{% else %}React {{ p.emoji }}{% endif %}"><span class="emoji">{{ p.emoji }}</span></button>{% endfor %}</div>
+  {% if message.reactions | length > 0 %}
+  <p class="section-label m-0">Reactions</p>
+  <div class="list">
+    {% for chip in message.reactions %}
+    <div class="list-row who-row"><span class="emoji" aria-hidden="true">{{ chip.emoji }}</span><span class="sr-only">{{ chip.emoji }}:</span><span class="names truncate-1">{{ chip.names }}</span><span class="receipt-stack">{% for p in chip.people %}{% if loop.index <= 3 %}{{<avatar name={p.username} color={p.color} size="xs" label={false}/>}}{% endif %}{% endfor %}{% if chip.people | length > 3 %}<span class="receipt-more">+{{ chip.people | length - 3 }}</span>{% endif %}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

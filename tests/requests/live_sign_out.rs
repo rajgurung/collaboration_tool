@@ -15,11 +15,11 @@ use loco_rs::testing::request::boot_test;
 use serial_test::serial;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
-const WAIT: Duration = Duration::from_secs(5);
+pub(super) const WAIT: Duration = Duration::from_secs(5);
 
 /// A real server with Acme's owner signed in and her General chat socket open
 /// and listening.
-async fn open_general_socket() -> (
+pub(super) async fn open_general_socket() -> (
     loco_rs::app::AppContext,
     SocketAddr,
     String,
