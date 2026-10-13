@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::controllers::chat::{MessageView, Receipt};
+use crate::controllers::chat::{MessageView, ReactionRow, Receipt};
 
 /// Enough buffered events for a burst; slower sockets skip ahead and the
 /// browser reloads the feed after reconnecting.
@@ -25,6 +25,14 @@ pub enum ChatEvent {
     Read {
         conversation_id: i64,
         receipts: Arc<Vec<ReceiptUpdate>>,
+    },
+    /// Someone added or removed a reaction. Carries the message's full set,
+    /// read after the change, so each socket renders it for its own viewer
+    /// without a query. The last event wins.
+    Reactions {
+        conversation_id: i64,
+        message_id: i64,
+        rows: Arc<Vec<ReactionRow>>,
     },
     /// The user's sessions were ended (sign out everywhere, password reset,
     /// removal). Their open sockets close.

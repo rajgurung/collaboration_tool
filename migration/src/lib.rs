@@ -37,6 +37,7 @@ mod m20261012_203441_login_accesses;
 mod m20261012_203616_login_events;
 mod m20261012_203901_logins_starter_folder;
 mod m20261012_204623_add_done_at_to_tasks;
+mod m20261013_140537_reactions;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -78,6 +79,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_203616_login_events::Migration),
             Box::new(m20261012_203901_logins_starter_folder::Migration),
             Box::new(m20261012_204623_add_done_at_to_tasks::Migration),
+            Box::new(m20261013_140537_reactions::Migration),
             // inject-above (do not remove this comment)
         ]
     }

@@ -39,3 +39,5 @@ mod logins;
 mod login_accesses;
 
 mod login_events;
+
+mod reactions;

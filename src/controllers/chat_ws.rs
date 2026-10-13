@@ -11,7 +11,7 @@ use loco_rs::prelude::*;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    controllers::chat::{names, receipt, MessageView},
+    controllers::chat::{names, receipt, render_reactions, MessageView, ReactionRow},
     data::{
         chat_hub::{ChatEvent, ChatHub, ReceiptUpdate},
         settings::Settings,
@@ -121,9 +121,9 @@ async fn run(mut socket: WebSocket, session: Session) {
                     let _ = socket.send(Message::Close(None)).await;
                     break;
                 }
-                Ok(ChatEvent::Message { conversation_id, author_id, message })
-                    if conversation_id == session.conversation_id =>
-                {
+                // The hub carries every organisation's events.
+                Ok(event) if !wants(&event, session.conversation_id) => {}
+                Ok(ChatEvent::Message { author_id, message, .. }) => {
                     match render(&session, author_id, *message) {
                         Ok(html) => {
                             if socket.send(Message::Text(html.into())).await.is_err() {
@@ -137,7 +137,17 @@ async fn run(mut socket: WebSocket, session: Session) {
                         Err(err) => tracing::error!(error = %err, "could not render chat message"),
                     }
                 }
-                Ok(event) => {
+                Ok(ChatEvent::Reactions { message_id, rows, .. }) => {
+                    match render_reactions(&session.view, session.conversation_id, message_id, &rows, session.user_id) {
+                        Ok(html) => {
+                            if socket.send(Message::Text(html.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(err) => tracing::error!(error = %err, "could not render reactions"),
+                    }
+                }
+                Ok(event @ ChatEvent::Read { .. }) => {
                     let updates = not_older(
                         receipts_for(&event, session.conversation_id, session.user_id),
                         &mut sent_counts,
@@ -154,6 +164,8 @@ async fn run(mut socket: WebSocket, session: Session) {
                         Err(err) => tracing::error!(error = %err, "could not render read receipts"),
                     }
                 }
+                // Someone else signed out.
+                Ok(ChatEvent::SignedOut { .. }) => {}
                 // Skipped events may include a sign-out. Close; the browser
                 // reconnects through the same checks and reloads the feed.
                 Err(RecvError::Lagged(skipped)) => {
@@ -237,6 +249,27 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
     Ok(())
 }
 
+/// Announces a message's reactions, read after a change, to every socket
+/// following its conversation.
+///
+/// # Errors
+/// When the hub is missing.
+pub fn publish_reactions(
+    ctx: &AppContext,
+    message: &messages::Model,
+    rows: Arc<Vec<ReactionRow>>,
+) -> Result<()> {
+    ctx.shared_store
+        .get::<ChatHub>()
+        .ok_or_else(|| Error::string("chat hub missing"))?
+        .publish(ChatEvent::Reactions {
+            conversation_id: message.conversation_id,
+            message_id: message.id,
+            rows,
+        });
+    Ok(())
+}
+
 /// Marks a conversation read for `reader_id` and tells the authors of the
 /// messages that read covered who has now read them.
 ///
@@ -289,6 +322,28 @@ fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result
     session
         .view
         .render("chat/_message_oob.html", data!({ "message": message }))
+}
+
+/// Whether a socket following `conversation_id` should handle `event`. The
+/// hub is one broadcast for the whole process, so this check is what keeps
+/// another conversation's (or organisation's) HTML off this socket. Sign-outs
+/// are about a person, not a conversation, and are matched before this.
+fn wants(event: &ChatEvent, conversation_id: i64) -> bool {
+    match event {
+        ChatEvent::Message {
+            conversation_id: id,
+            ..
+        }
+        | ChatEvent::Read {
+            conversation_id: id,
+            ..
+        }
+        | ChatEvent::Reactions {
+            conversation_id: id,
+            ..
+        } => *id == conversation_id,
+        ChatEvent::SignedOut { .. } => false,
+    }
 }
 
 /// The receipt updates in `event` that belong on this viewer's screen: only
@@ -415,6 +470,50 @@ mod tests {
 
         // The same count again is still sent.
         assert_eq!(not_older(vec![&both], &mut sent).len(), 1);
+    }
+
+    fn message_event(conversation_id: i64) -> ChatEvent {
+        let message = messages::Model {
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+            id: 10,
+            body: "hi".to_string(),
+            organisation_id: 1,
+            conversation_id,
+            user_id: 1,
+        };
+        ChatEvent::Message {
+            conversation_id,
+            author_id: 1,
+            message: Box::new(MessageView::new(
+                &message,
+                &HashMap::new(),
+                1,
+                chrono_tz::UTC,
+            )),
+        }
+    }
+
+    #[test]
+    fn sockets_only_take_events_for_their_conversation() {
+        let reactions = |conversation_id| ChatEvent::Reactions {
+            conversation_id,
+            message_id: 10,
+            rows: Arc::new(Vec::new()),
+        };
+        let read = |conversation_id| ChatEvent::Read {
+            conversation_id,
+            receipts: Arc::new(Vec::new()),
+        };
+        assert!(wants(&message_event(7), 7));
+        assert!(wants(&reactions(7), 7));
+        assert!(wants(&read(7), 7));
+        // Another conversation, which may belong to another organisation.
+        assert!(!wants(&message_event(8), 7), "message");
+        assert!(!wants(&reactions(8), 7), "reactions");
+        assert!(!wants(&read(8), 7), "read");
+        // Sign-outs are matched on the person before this check.
+        assert!(!wants(&ChatEvent::SignedOut { user_id: 1 }, 7));
     }
 
     #[test]

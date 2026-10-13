@@ -88,6 +88,172 @@ document.body.addEventListener("htmx:wsOpen", (event) => {
   if (url) void htmx.ajax("GET", url, { target: "#chat-feed", swap: "innerHTML" });
 });
 
+// Chat message actions: a tap, click, Enter or Space on a bubble opens its
+// sheet (react, who reacted). Taps on a chip, receipt, link or button do their
+// own thing, and a tap that ends a text selection leaves the selection alone.
+function openActions(bubble: HTMLElement) {
+  const url = bubble.dataset.actionsUrl;
+  const dialog = document.querySelector<HTMLDialogElement>("#chat-dialog");
+  const body = dialog?.querySelector<HTMLElement>("#chat-dialog-body");
+  if (!url || !dialog || !body) return;
+  const failed = () => showToast({ kind: "error", message: "Couldn't open that message. Check your connection and try again." });
+  fetch(url, { headers: { "HX-Request": "true" }, credentials: "same-origin" })
+    .then(async (res) => {
+      if (!res.ok || res.redirected) return failed();
+      // The server escapes the message; this is its own fragment.
+      body.innerHTML = await res.text();
+      dialog.showModal();
+    })
+    .catch(failed);
+}
+// A mouse click waits a moment, so a double or triple click selects text
+// instead of opening the sheet. Taps open straight away.
+let lastPointer = "";
+let pendingOpen: number | undefined;
+document.addEventListener("pointerdown", (event) => (lastPointer = event.pointerType), true);
+function selectingIn(bubble: Element) {
+  const selection = getSelection();
+  return !!selection && !selection.isCollapsed && bubble.contains(selection.anchorNode);
+}
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const bubble = target?.closest<HTMLElement>(".bubble[data-actions-url]");
+  if (!bubble || target?.closest("a, button, .react, .thread-link, .msg-receipt")) return;
+  window.clearTimeout(pendingOpen);
+  if (event.detail > 1 || selectingIn(bubble)) return;
+  if (lastPointer !== "mouse") return openActions(bubble);
+  pendingOpen = window.setTimeout(() => {
+    if (!selectingIn(bubble)) openActions(bubble);
+  }, 250);
+});
+document.addEventListener("keydown", (event) => {
+  const bubble = event.target;
+  if (!(bubble instanceof HTMLElement) || !bubble.matches(".bubble[data-actions-url]")) return;
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  openActions(bubble);
+});
+
+// Reactions: a chip, a toolbar button or a sheet button sets your reaction. The
+// change shows at once; the server's answer then replaces the chips. The order
+// matches `reactions::EMOJI`, so a new chip lands where the server puts it.
+const REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "✅"];
+const reacting = new Set<string>();
+
+function chipFor(messageId: string, emoji: string) {
+  const row = document.getElementById(`reacts-${messageId}`);
+  return Array.from(row?.querySelectorAll<HTMLButtonElement>(".react") ?? []).find((b) => b.dataset.emoji === emoji);
+}
+
+// Shows whether you reacted with `emoji`, adjusting only your own part: the
+// count moves by one, a new chip is added, or a chip that reaches 0 goes. Does
+// nothing when the page already shows that (say, after a live update).
+function showMine(messageId: string, emoji: string, url: string, mine: boolean) {
+  const row = document.getElementById(`reacts-${messageId}`);
+  const chip = chipFor(messageId, emoji);
+  if (!row || (chip?.classList.contains("mine") ?? false) === mine) return;
+  if (chip) {
+    const count = chip.querySelector(".react-count");
+    const next = Number(count?.textContent ?? "0") + (mine ? 1 : -1);
+    if (next <= 0) {
+      chip.closest(".react-wrap")?.remove();
+    } else {
+      if (count) count.textContent = String(next);
+      chip.classList.toggle("mine", mine);
+      chip.setAttribute("aria-pressed", String(mine));
+      chip.setAttribute("aria-label", `${emoji} ${next}${mine ? ", you reacted" : ""}`);
+    }
+  } else if (mine) {
+    const wrap = document.createElement("span");
+    wrap.className = "react-wrap";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "react mine";
+    Object.assign(button.dataset, { react: "", emoji, message: messageId, url });
+    button.setAttribute("aria-pressed", "true");
+    button.setAttribute("aria-label", `${emoji} 1, you reacted`);
+    const face = document.createElement("span");
+    face.className = "emoji";
+    face.textContent = emoji;
+    const count = document.createElement("span");
+    count.className = "react-count";
+    count.textContent = "1";
+    button.append(face, count);
+    wrap.append(button);
+    const after = Array.from(row.querySelectorAll<HTMLElement>(".react")).find(
+      (b) => REACTIONS.indexOf(b.dataset.emoji ?? "") > REACTIONS.indexOf(emoji),
+    );
+    row.insertBefore(wrap, after?.closest(".react-wrap") ?? null);
+  }
+  const tool = Array.from(document.querySelectorAll<HTMLElement>(`#tools-${messageId} [data-react]`)).find((b) => b.dataset.emoji === emoji);
+  tool?.classList.toggle("mine", mine);
+  tool?.setAttribute("aria-pressed", String(mine));
+}
+
+// The reaction button that has focus, so a swap that replaces it can put focus back.
+type FocusedReaction = { holder: string; emoji: string } | null;
+function focusedReaction(): FocusedReaction {
+  const el = document.activeElement;
+  const holder = el?.closest<HTMLElement>(".reacts, .msg-tools");
+  return holder && el instanceof HTMLElement && el.dataset.emoji ? { holder: holder.id, emoji: el.dataset.emoji } : null;
+}
+// Only when the swap dropped focus to the page, never taking it from elsewhere.
+function restoreFocus(was: FocusedReaction) {
+  if (!was || document.activeElement !== document.body) return;
+  const holder = document.getElementById(was.holder);
+  const button = Array.from(holder?.querySelectorAll<HTMLElement>("[data-emoji]") ?? []).find((b) => b.dataset.emoji === was.emoji);
+  if (!holder || !button) return;
+  // The new toolbar only shows once something in its message has focus, so show it to focus it.
+  holder.style.display = "flex";
+  button.focus();
+  holder.style.removeProperty("display");
+}
+
+// Replaces each top-level element of `html` with the page's element of the same id.
+function swapById(html: string) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  Array.from(template.content.children).forEach((el) => {
+    const was = focusedReaction();
+    if (el.id) document.getElementById(el.id)?.replaceWith(el);
+    restoreFocus(was);
+  });
+}
+
+// Live reaction swaps from the socket keep focus the same way.
+let focusBeforeMessage: FocusedReaction = null;
+document.body.addEventListener("htmx:wsBeforeMessage", () => (focusBeforeMessage = focusedReaction()));
+document.body.addEventListener("htmx:wsAfterMessage", () => restoreFocus(focusBeforeMessage));
+
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLElement>("[data-react]");
+  const { message, emoji, url } = button?.dataset ?? {};
+  if (!button || !message || !emoji || !url) return;
+  button.closest("dialog")?.close();
+  // One request at a time per reaction; a tap meanwhile is ignored.
+  const key = `${message} ${emoji}`;
+  if (reacting.has(key)) return;
+  reacting.add(key);
+  // Send the state wanted, not a toggle, so a retried request changes nothing.
+  const on = !(chipFor(message, emoji)?.classList.contains("mine") ?? false);
+  showMine(message, emoji, url, on);
+  fetch(url, {
+    method: "POST",
+    headers: { "HX-Request": "true" },
+    body: new URLSearchParams({ emoji, on: on ? "1" : "0" }),
+    credentials: "same-origin",
+  })
+    .then(async (res) => {
+      if (!res.ok || res.redirected) throw new Error(`status ${res.status}`);
+      swapById(await res.text());
+    })
+    .catch(() => {
+      showMine(message, emoji, url, !on);
+      showToast({ kind: "error", message: `Couldn't ${on ? "add" : "remove"} your reaction. Check your connection and try again.` });
+    })
+    .finally(() => reacting.delete(key));
+});
+
 // Search-as-you-type for lists: <input data-filter="#list"> hides rows whose
 // data-filter-text does not contain the query.
 document.addEventListener("input", (event) => {

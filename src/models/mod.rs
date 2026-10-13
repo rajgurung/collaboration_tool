@@ -7,6 +7,7 @@ pub mod memberships;
 pub mod messages;
 pub mod organisations;
 pub mod projects;
+pub mod reactions;
 pub mod task_notes;
 pub mod tasks;
 pub mod users;

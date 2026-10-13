@@ -19,6 +19,7 @@ pub use super::oauth_codes::Entity as OauthCodes;
 pub use super::org_keys::Entity as OrgKeys;
 pub use super::organisations::Entity as Organisations;
 pub use super::projects::Entity as Projects;
+pub use super::reactions::Entity as Reactions;
 pub use super::saved_views::Entity as SavedViews;
 pub use super::task_assignees::Entity as TaskAssignees;
 pub use super::task_notes::Entity as TaskNotes;
