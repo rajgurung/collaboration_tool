@@ -742,6 +742,7 @@
   .lp-doc-body { display: grid; flex: 1; gap: 2px; min-width: 0; }
   .lp-doc-name { overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
   .lp-doc-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 13px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+  .lp-doc-meta-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .lp-av-xs { width: 16px; height: 16px; font-size: 8px; }
   .lp-doc-more { display: grid; place-items: center; flex: none; width: 32px; height: 32px; color: var(--muted); }
   .lp-doc-more svg { width: 18px; height: 18px; }
