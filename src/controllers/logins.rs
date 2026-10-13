@@ -380,6 +380,9 @@ async fn unlock(
     if !member.via_session {
         return Err(forbidden("Passwords can only be shown in the app."));
     }
+    // The login only labels the activity row. Any error finding it (missing id,
+    // another org's id, a database error) must not skip the password check
+    // below, so the attempt is still checked and logged, just without a login.
     let login = match form.login_id {
         Some(id) => logins::Model::find_in_org(&ctx.db, member.org.id, id)
             .await
