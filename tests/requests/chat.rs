@@ -275,7 +275,7 @@ async fn websocket_checks_run_before_the_upgrade() {
         assert_eq!(
             request
                 .get(&path)
-                .add_header(gina.0, gina.1)
+                .add_header(gina.0.clone(), gina.1.clone())
                 .await
                 .status_code(),
             404
@@ -288,6 +288,23 @@ async fn websocket_checks_run_before_the_upgrade() {
             .add_header("Origin", "https://evil.example")
             .await;
         assert_eq!(evil.status_code(), 403);
+
+        // A thread socket checks the thread too: it must be a top-level
+        // message in this conversation.
+        let parent = post(&request, &ctx, &alice, general.id, "Top").await;
+        let gina_thread = request
+            .get(&format!("{path}?thread={}", parent.id))
+            .add_header(gina.0.clone(), gina.1.clone())
+            .await;
+        assert_eq!(gina_thread.status_code(), 404);
+        for (thread, status) in [(parent.id.to_string(), 400), ("987654".to_string(), 404)] {
+            let res = request
+                .get(&format!("{path}?thread={thread}"))
+                .add_header(alice.0.clone(), alice.1.clone())
+                .add_header("Origin", "http://localhost:5150")
+                .await;
+            assert_eq!(res.status_code(), status, "thread {thread}");
+        }
 
         // Alice passes every check; without upgrade headers the request is just not a WebSocket.
         let plain = request

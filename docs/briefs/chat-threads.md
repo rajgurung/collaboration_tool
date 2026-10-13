@@ -119,8 +119,8 @@ none here.
 - Shusma posts "Supplier sent the new price list" in #general. Kreepa taps it,
   chooses Reply in thread, and answers. #general shows "1 reply · 10:42" under
   Shusma's message, and no new message at the bottom.
-- Shusma gets a bell notice "Kreepa replied in a thread in #general". Tapping
-  it opens the thread on her phone.
+- Shusma gets a bell notice "Kreepa replied to your message in #general".
+  Tapping it opens the thread on her phone.
 - Samir replies too. Shusma and Kreepa are each told once. Samir is not told
   about his own reply.
 - Raj has #general open on his phone. The count changes to "2 replies" without

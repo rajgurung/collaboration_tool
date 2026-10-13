@@ -57,11 +57,17 @@ document.addEventListener("keydown", (event) => {
   if (target.value.trim()) target.form?.requestSubmit();
 });
 
-// Keep feeds marked data-autoscroll pinned to the newest message.
+// Keep feeds marked data-autoscroll pinned to the newest message. Coming back
+// from a thread (#message-N) shows that message instead; one no longer in the
+// feed (older than what it shows) falls back to the end.
 function scrollToEnd(el: Element) {
   el.scrollTop = el.scrollHeight;
 }
-document.querySelectorAll("[data-autoscroll]").forEach(scrollToEnd);
+document.querySelectorAll("[data-autoscroll]").forEach((feed) => {
+  const target = /^#message-\d+$/.test(location.hash) ? feed.querySelector(location.hash) : null;
+  if (target) target.scrollIntoView({ block: "center" });
+  else scrollToEnd(feed);
+});
 document.body.addEventListener("htmx:afterSwap", (event) => {
   const target = (event as CustomEvent<{ target: Element }>).detail.target;
   const feed = target.closest("[data-autoscroll]") ?? target.querySelector("[data-autoscroll]");
@@ -194,7 +200,7 @@ function showMine(messageId: string, emoji: string, url: string, mine: boolean) 
 type FocusedReaction = { holder: string; emoji: string } | null;
 function focusedReaction(): FocusedReaction {
   const el = document.activeElement;
-  const holder = el?.closest<HTMLElement>(".reacts, .msg-tools");
+  const holder = el?.closest<HTMLElement>(".reacts, .tool-picks");
   return holder && el instanceof HTMLElement && el.dataset.emoji ? { holder: holder.id, emoji: el.dataset.emoji } : null;
 }
 // Only when the swap dropped focus to the page, never taking it from elsewhere.
@@ -203,10 +209,11 @@ function restoreFocus(was: FocusedReaction) {
   const holder = document.getElementById(was.holder);
   const button = Array.from(holder?.querySelectorAll<HTMLElement>("[data-emoji]") ?? []).find((b) => b.dataset.emoji === was.emoji);
   if (!holder || !button) return;
-  // The new toolbar only shows once something in its message has focus, so show it to focus it.
-  holder.style.display = "flex";
+  // The toolbar only shows once something in its message has focus, so show it to focus it.
+  const shown = holder.closest<HTMLElement>(".msg-tools") ?? holder;
+  shown.style.display = "flex";
   button.focus();
-  holder.style.removeProperty("display");
+  shown.style.removeProperty("display");
 }
 
 // Replaces each top-level element of `html` with the page's element of the same id.
@@ -252,6 +259,18 @@ document.addEventListener("click", (event) => {
       showToast({ kind: "error", message: `Couldn't ${on ? "add" : "remove"} your reaction. Check your connection and try again.` });
     })
     .finally(() => reacting.delete(key));
+});
+
+// Escape on a thread goes back to its conversation, on desktop. Not while
+// typing (a field with text), with a sheet open, or with the mention menu
+// open, which handles Escape itself before this runs.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+  const back = document.querySelector<HTMLAnchorElement>("[data-thread-back]");
+  if (!back || document.querySelector("dialog[open]") || !matchMedia("(min-width: 900px)").matches) return;
+  const field = document.activeElement;
+  if ((field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement) && field.value !== "") return;
+  location.href = back.href;
 });
 
 // Search-as-you-type for lists: <input data-filter="#list"> hides rows whose

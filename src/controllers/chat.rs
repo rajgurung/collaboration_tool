@@ -12,7 +12,7 @@ use crate::{
         conversation_members::{self, ReadMark},
         conversations::{self, kind, GroupParams},
         field_error, memberships,
-        messages::{self, MessageParams},
+        messages::{self, MessageParams, ReplierStat},
         notifications::{mention_parts, Part, EVERYONE},
         reactions::{self, EMOJI},
     },
@@ -34,6 +34,19 @@ struct LegacyQuery {
 #[derive(Debug, Default, Deserialize)]
 struct UnreadQuery {
     style: Option<String>,
+}
+
+/// `?reply=1` opens a thread with the composer focused.
+#[derive(Debug, Default, Deserialize)]
+struct ThreadQuery {
+    reply: Option<String>,
+}
+
+/// `?thread=1` when the sheet is opened from a thread page, where there is
+/// no "Reply in thread".
+#[derive(Debug, Default, Deserialize)]
+struct ActionsQuery {
+    thread: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +74,9 @@ pub struct ListItem {
     pub time: String,
     pub unread: u64,
 }
+
+/// How many faces a thread's reply line shows before "+N".
+const THREAD_FACES: usize = 3;
 
 /// How many reader avatars a group receipt shows before "+N".
 const RECEIPT_AVATARS: usize = 3;
@@ -212,6 +228,73 @@ pub async fn reaction_rows(
         .collect())
 }
 
+/// "3 replies · 14:05" under a message that has a thread. The same for every
+/// viewer, so a live update can carry it as is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ThreadLine {
+    pub url: String,
+    pub count: i64,
+    /// "1 reply" or "N replies".
+    pub label: String,
+    /// When the last reply was sent.
+    pub last: String,
+    /// Who replied, in the order they first replied.
+    pub faces: Vec<Person>,
+    /// Repliers beyond `faces`.
+    pub more: usize,
+}
+
+/// A thread's own page.
+#[must_use]
+pub fn thread_url(conversation_id: i64, parent_id: i64) -> String {
+    format!("/chat/{conversation_id}/threads/{parent_id}")
+}
+
+fn replies_label(count: i64) -> String {
+    if count == 1 {
+        "1 reply".to_string()
+    } else {
+        format!("{count} replies")
+    }
+}
+
+/// The reply line for a parent, from its [`ReplierStat`]s (in first-reply
+/// order). `None` when nobody has replied.
+#[must_use]
+pub fn thread_line(
+    conversation_id: i64,
+    parent_id: i64,
+    stats: &[ReplierStat],
+    names: &HashMap<i64, String>,
+    tz: Tz,
+) -> Option<ThreadLine> {
+    let last = stats.iter().map(|s| s.last_at).max()?;
+    let count = stats.iter().map(|s| s.replies).sum();
+    let faces: Vec<Person> = stats
+        .iter()
+        .take(THREAD_FACES)
+        .map(|s| {
+            let username = names
+                .get(&s.user_id)
+                .cloned()
+                .unwrap_or_else(|| FORMER_MEMBER.to_string());
+            Person {
+                id: s.user_id,
+                color: avatar_color(&username),
+                username,
+            }
+        })
+        .collect();
+    Some(ThreadLine {
+        url: thread_url(conversation_id, parent_id),
+        count,
+        label: replies_label(count),
+        last: reply_when(&last, tz),
+        more: stats.len() - faces.len(),
+        faces,
+    })
+}
+
 /// One rendered chat message. `own` decides the bubble style for the viewer;
 /// `start` and `show_time` group consecutive messages from the same person.
 /// `read_receipts` is set on the viewer's own messages, so the page has a slot
@@ -235,6 +318,12 @@ pub struct MessageView {
     pub reactions: Vec<ReactionChip>,
     /// The six choices for the hover toolbar and the sheet.
     pub picks: Vec<Pick>,
+    /// Set on a thread reply.
+    pub parent_id: Option<i64>,
+    /// The reply line, on a main-feed message that has replies.
+    pub thread: Option<ThreadLine>,
+    /// Offers "Reply in thread": top-level messages in the main feed only.
+    pub can_reply: bool,
 }
 
 impl MessageView {
@@ -275,6 +364,9 @@ impl MessageView {
             receipt: None,
             reactions: Vec::new(),
             picks: picks(&[]),
+            parent_id: message.parent_id,
+            thread: None,
+            can_reply: message.parent_id.is_none(),
         }
     }
 
@@ -337,13 +429,16 @@ pub fn receipt(
     })
 }
 
-/// Marks where each run of messages from one person starts and ends, and adds
-/// receipts to the viewer's own messages and reactions to every message.
+/// The main feed: marks where each run of messages from one person starts
+/// and ends, and adds receipts to the viewer's own messages, reactions to
+/// every message and reply lines to those with threads.
+#[allow(clippy::too_many_arguments)]
 fn grouped(
     conversation: &conversations::Model,
     list: &[messages::Model],
     marks: &[ReadMark],
     reactions: &HashMap<i64, Vec<ReactionRow>>,
+    threads: &HashMap<i64, Vec<ReplierStat>>,
     names: &HashMap<i64, String>,
     viewer_id: i64,
     tz: Tz,
@@ -355,6 +450,9 @@ fn grouped(
             if let Some(rows) = reactions.get(&m.id) {
                 view.set_reactions(rows, viewer_id);
             }
+            if let Some(stats) = threads.get(&m.id) {
+                view.thread = thread_line(conversation.id, m.id, stats, names, tz);
+            }
             if view.own {
                 view.read_receipts = true;
                 view.receipt = receipt(&conversation.kind, m.user_id, m.created_at, marks, names);
@@ -362,13 +460,18 @@ fn grouped(
             view
         })
         .collect();
+    mark_runs(&mut views);
+    views
+}
+
+/// Marks where each run of messages from one person starts and ends.
+fn mark_runs(views: &mut [MessageView]) {
     for i in 0..views.len() {
         let same_as_prev = i > 0 && views[i - 1].author_id == views[i].author_id;
         let same_as_next = i + 1 < views.len() && views[i + 1].author_id == views[i].author_id;
         views[i].start = !same_as_prev;
         views[i].show_time = !same_as_next;
     }
-    views
 }
 
 /// Usernames of approved members, keyed by user id.
@@ -394,6 +497,17 @@ fn label(
             .unwrap_or_else(|| FORMER_MEMBER.to_string())
     } else {
         conversation.name.clone().unwrap_or_default()
+    }
+}
+
+/// Like [`when`], with "Yesterday" for the day before. For a thread's last
+/// reply; the chat list keeps [`when`].
+fn reply_when(at: &DateTime<FixedOffset>, tz: Tz) -> String {
+    let day = time::local(*at, tz).date_naive();
+    if day.succ_opt() == Some(time::today(tz)) {
+        "Yesterday".to_string()
+    } else {
+        when(at, tz)
     }
 }
 
@@ -494,37 +608,10 @@ async fn show(
     let names = names(&ctx, member.org.id).await?;
     let items = list_items(&ctx, &member, &names).await?;
     let members = conversation.member_ids(&ctx.db).await?;
-    let people: Vec<Person> = members
-        .iter()
-        .filter_map(|id| names.get(id).map(|n| (*id, n.clone())))
-        .map(|(id, username)| Person {
-            id,
-            color: avatar_color(&username),
-            username,
-        })
-        .collect();
-    let list = messages::Model::recent(&ctx.db, &conversation).await?;
-    let ids: Vec<i64> = list.iter().map(|m| m.id).collect();
-    let feed = grouped(
-        &conversation,
-        &list,
-        &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
-        &reaction_rows(&ctx, member.org.id, &ids, &names).await?,
-        &names,
-        me,
-        member.tz(),
-    );
+    let people = people(&members, &names);
+    let feed = main_feed(&ctx, &member, &conversation, &names).await?;
     let label = label(&conversation, &members, &names, me);
-    let mut mention_names = super::tasks::mention_names(
-        &people
-            .iter()
-            .map(|p| (p.id, p.username.clone()))
-            .collect::<Vec<_>>(),
-        me,
-    );
-    if conversation.kind != kind::DM {
-        mention_names = format!("{EVERYONE},{mention_names}");
-    }
+    let mention_names = mention_names(&conversation, &people, me);
     format::render().view(
         &v,
         "chat/show.html",
@@ -544,6 +631,57 @@ async fn show(
             }),
         ),
     )
+}
+
+/// A conversation's approved members, for avatars and @mentions.
+fn people(members: &[i64], names: &HashMap<i64, String>) -> Vec<Person> {
+    members
+        .iter()
+        .filter_map(|id| names.get(id).map(|n| (*id, n.clone())))
+        .map(|(id, username)| Person {
+            id,
+            color: avatar_color(&username),
+            username,
+        })
+        .collect()
+}
+
+/// Who the composer offers after "@": everyone else, and `everyone` outside DMs.
+fn mention_names(conversation: &conversations::Model, people: &[Person], me: i64) -> String {
+    let names = super::tasks::mention_names(
+        &people
+            .iter()
+            .map(|p| (p.id, p.username.clone()))
+            .collect::<Vec<_>>(),
+        me,
+    );
+    if conversation.kind == kind::DM {
+        names
+    } else {
+        format!("{EVERYONE},{names}")
+    }
+}
+
+/// The main feed as the viewer sees it: three queries (messages, reactions,
+/// threads) whatever the number of messages, plus the read marks.
+async fn main_feed(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    conversation: &conversations::Model,
+    names: &HashMap<i64, String>,
+) -> Result<Vec<MessageView>> {
+    let list = messages::Model::recent(&ctx.db, conversation).await?;
+    let ids: Vec<i64> = list.iter().map(|m| m.id).collect();
+    Ok(grouped(
+        conversation,
+        &list,
+        &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
+        &reaction_rows(ctx, member.org.id, &ids, names).await?,
+        &messages::Model::thread_stats(&ctx.db, member.org.id, &ids).await?,
+        names,
+        member.user.id,
+        member.tz(),
+    ))
 }
 
 /// Total unread across the viewer's conversations, as a badge (or nothing).
@@ -635,17 +773,7 @@ async fn feed(
     )
     .await?;
     let names = names(&ctx, member.org.id).await?;
-    let list = messages::Model::recent(&ctx.db, &conversation).await?;
-    let ids: Vec<i64> = list.iter().map(|m| m.id).collect();
-    let feed = grouped(
-        &conversation,
-        &list,
-        &conversation_members::Model::read_marks(&ctx.db, member.org.id, conversation.id).await?,
-        &reaction_rows(&ctx, member.org.id, &ids, &names).await?,
-        &names,
-        member.user.id,
-        member.tz(),
-    );
+    let feed = main_feed(&ctx, &member, &conversation, &names).await?;
     format::render().view(&v, "chat/_feed.html", data!({ "messages": feed }))
 }
 
@@ -726,13 +854,15 @@ pub fn render_reactions(
     )
 }
 
-/// The message's action sheet: which message, the six reactions and who reacted.
+/// The message's action sheet: which message, the six reactions, who reacted
+/// and, for a top-level message outside its thread, "Reply in thread".
 #[debug_handler]
 async fn actions(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     Path((id, message_id)): Path<(i64, i64)>,
+    Query(query): Query<ActionsQuery>,
 ) -> Result<Response> {
     let me = member.user.id;
     let conversation =
@@ -742,7 +872,183 @@ async fn actions(
     let rows = reaction_rows(&ctx, member.org.id, &[message.id], &names).await?;
     let mut view = MessageView::new(&message, &names, me, member.tz());
     view.set_reactions(rows.get(&message.id).map_or(&[], Vec::as_slice), me);
+    view.can_reply = view.can_reply && query.thread.is_none();
+    if view.can_reply {
+        let stats = messages::Model::thread_stats(&ctx.db, member.org.id, &[message.id]).await?;
+        view.thread = stats
+            .get(&message.id)
+            .and_then(|s| thread_line(conversation.id, message.id, s, &names, member.tz()));
+    }
     format::render().view(&v, "chat/_actions.html", data!({ "message": view }))
+}
+
+/// A thread's parent and replies as its page shows them: no reply line, no
+/// "Reply in thread" and no read receipts, which threads do not have.
+async fn thread_feed_data(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    parent: &messages::Model,
+    names: &HashMap<i64, String>,
+) -> Result<serde_json::Value> {
+    let me = member.user.id;
+    let tz = member.tz();
+    let replies = messages::Model::replies(&ctx.db, parent).await?;
+    let ids: Vec<i64> = std::iter::once(parent.id)
+        .chain(replies.iter().map(|m| m.id))
+        .collect();
+    let reactions = reaction_rows(ctx, member.org.id, &ids, names).await?;
+    let view = |m: &messages::Model| {
+        let mut view = MessageView::new(m, names, me, tz);
+        view.can_reply = false;
+        if let Some(rows) = reactions.get(&m.id) {
+            view.set_reactions(rows, me);
+        }
+        view
+    };
+    let mut reply_views: Vec<MessageView> = replies.iter().map(view).collect();
+    mark_runs(&mut reply_views);
+    // The true total: the page shows only the latest replies.
+    let count: i64 = messages::Model::thread_stats(&ctx.db, member.org.id, &[parent.id])
+        .await?
+        .get(&parent.id)
+        .map_or(0, |stats| stats.iter().map(|s| s.replies).sum());
+    // Who the empty thread says will be told: the parent's author, if that
+    // is someone else still on the team.
+    let notify = (parent.user_id != me)
+        .then(|| names.get(&parent.user_id).cloned())
+        .flatten();
+    Ok(serde_json::json!({
+        "parent": view(parent),
+        "replies": reply_views,
+        "count": count,
+        "count_label": replies_label(count),
+        "notify": notify,
+        "in_thread": true,
+    }))
+}
+
+/// The conversation and the thread's parent, both checked for this viewer.
+async fn find_thread(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    id: i64,
+    message_id: i64,
+) -> ModelResult<(conversations::Model, messages::Model)> {
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    let parent = messages::Model::find_thread_parent(&ctx.db, &conversation, message_id).await?;
+    Ok((conversation, parent))
+}
+
+/// A thread's page: the parent, its replies and a composer. Does not mark the
+/// conversation read; replies are not part of the unread count. A missing
+/// thread and one the viewer cannot see get the same 404 page, so it never
+/// confirms that a private conversation exists.
+#[debug_handler]
+async fn thread(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path((id, message_id)): Path<(i64, i64)>,
+    Query(query): Query<ThreadQuery>,
+) -> Result<Response> {
+    let me = member.user.id;
+    let found = find_thread(&ctx, &member, id, message_id).await;
+    let names = names(&ctx, member.org.id).await?;
+    let items = list_items(&ctx, &member, &names).await?;
+    let (conversation, parent) = match found {
+        Ok(found) => found,
+        Err(ModelError::EntityNotFound) => {
+            return format::render().status(404).view(
+                &v,
+                "chat/thread_missing.html",
+                member.page("chat", data!({ "items": items })),
+            );
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let members = conversation.member_ids(&ctx.db).await?;
+    let people = people(&members, &names);
+    let label = label(&conversation, &members, &names, me);
+    let (subtitle, back) = match conversation.kind.as_str() {
+        kind::DM => (format!("With {label}"), label.clone()),
+        kind::CHANNEL => (format!("# {label}"), format!("#{label}")),
+        _ => (label.clone(), label.clone()),
+    };
+    let mut page = thread_feed_data(&ctx, &member, &parent, &names).await?;
+    page["items"] = serde_json::json!(items);
+    page["conversation"] = serde_json::json!({
+        "id": conversation.id,
+        "kind": conversation.kind,
+        "label": label,
+        "mention_names": mention_names(&conversation, &people, me),
+    });
+    page["thread"] = serde_json::json!({
+        "parent_id": parent.id,
+        "subtitle": subtitle,
+        "back": back,
+        "focus": query.reply.as_deref() == Some("1"),
+    });
+    format::render().view(&v, "chat/thread.html", member.page("chat", page))
+}
+
+/// The thread's parent and replies on their own, for reloading after a reconnect.
+#[debug_handler]
+async fn thread_feed(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path((id, message_id)): Path<(i64, i64)>,
+) -> Result<Response> {
+    let (_, parent) = find_thread(&ctx, &member, id, message_id).await?;
+    let names = names(&ctx, member.org.id).await?;
+    let data = thread_feed_data(&ctx, &member, &parent, &names).await?;
+    format::render().view(&v, "chat/_thread_feed.html", data)
+}
+
+/// Plain HTTP reply in a thread, used when the live connection is not available.
+#[debug_handler]
+async fn reply(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
+    Path((id, message_id)): Path<(i64, i64)>,
+    Form(params): Form<MessageParams>,
+) -> Result<Response> {
+    let (conversation, parent) = find_thread(&ctx, &member, id, message_id).await?;
+    let result =
+        messages::Model::create_reply(&ctx.db, &conversation, &parent, member.user.id, &params)
+            .await;
+    if let Ok(reply) = &result {
+        super::chat_ws::publish_reply(&ctx, member.org.id, &parent, reply).await?;
+        super::notifications::reply_sent(&ctx, member.org.id, &conversation, &parent, reply)
+            .await?;
+    }
+    match result {
+        Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(
+            &headers,
+            &thread_url(conversation.id, parent.id),
+        )),
+        Ok(reply) => {
+            let names = names(&ctx, member.org.id).await?;
+            let view = MessageView::new(&reply, &names, member.user.id, member.tz());
+            format::render().view(
+                &v,
+                "chat/_message.html",
+                data!({ "message": view, "in_thread": true }),
+            )
+        }
+        Err(err) => {
+            let errors = field_errors(&err).ok_or(err)?;
+            let message = errors.values().next().cloned().unwrap_or_default();
+            format::render()
+                .status(422)
+                .header("HX-Reswap", "none")
+                .header("HX-Trigger", toast("error", &message))
+                .empty()
+        }
+    }
 }
 
 async fn team_except_me(ctx: &AppContext, member: &CurrentMember) -> Result<Vec<Person>> {
@@ -830,6 +1136,9 @@ pub fn routes() -> Routes {
         .add("/chat/{id}/feed", get(feed))
         .add("/chat/{id}/messages/{message_id}/reactions", post(react))
         .add("/chat/{id}/messages/{message_id}/actions", get(actions))
+        .add("/chat/{id}/threads/{message_id}", get(thread))
+        .add("/chat/{id}/threads/{message_id}/feed", get(thread_feed))
+        .add("/chat/{id}/threads/{message_id}/replies", post(reply))
 }
 
 #[cfg(test)]
@@ -981,6 +1290,60 @@ mod tests {
         let mine: Vec<&str> = picks.iter().filter(|p| p.mine).map(|p| p.emoji).collect();
         assert_eq!(mine, vec!["🎉"]);
         assert!(super::picks(&[]).iter().all(|p| !p.mine));
+    }
+
+    fn stat(user_id: i64, replies: i64, first: u32, last: u32) -> ReplierStat {
+        ReplierStat {
+            parent_id: 9,
+            user_id,
+            replies,
+            first_at: at(first),
+            last_at: at(last),
+        }
+    }
+
+    #[test]
+    fn reply_lines_count_every_reply_and_show_three_faces() {
+        // In first-reply order: bob, alice, someone who left, carol.
+        let stats = [
+            stat(2, 3, 1, 20),
+            stat(1, 1, 2, 2),
+            stat(99, 1, 3, 3),
+            stat(3, 2, 4, 30),
+        ];
+        let line = thread_line(7, 9, &stats, &team(), chrono_tz::UTC).unwrap();
+        assert_eq!(line.url, "/chat/7/threads/9");
+        assert_eq!(line.count, 7);
+        assert_eq!(line.label, "7 replies");
+        assert_eq!(names(&line.faces), vec!["bob", "alice", "Former member"]);
+        assert_eq!(line.more, 1);
+        assert_eq!(
+            line.last,
+            reply_when(&at(30), chrono_tz::UTC),
+            "the latest reply"
+        );
+
+        let one = thread_line(7, 9, &[stat(2, 1, 1, 1)], &team(), chrono_tz::UTC).unwrap();
+        assert_eq!(one.label, "1 reply");
+        assert_eq!(one.more, 0);
+        assert_eq!(thread_line(7, 9, &[], &team(), chrono_tz::UTC), None);
+    }
+
+    #[test]
+    fn reply_times_say_yesterday() {
+        let now = Utc::now();
+        let today: DateTime<FixedOffset> = now.into();
+        assert_eq!(
+            reply_when(&today, chrono_tz::UTC),
+            today.format("%H:%M").to_string()
+        );
+        let yesterday: DateTime<FixedOffset> = (now - chrono::Duration::days(1)).into();
+        assert_eq!(reply_when(&yesterday, chrono_tz::UTC), "Yesterday");
+        let older: DateTime<FixedOffset> = (now - chrono::Duration::days(3)).into();
+        assert_eq!(
+            reply_when(&older, chrono_tz::UTC),
+            when(&older, chrono_tz::UTC)
+        );
     }
 
     #[test]

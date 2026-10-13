@@ -4,10 +4,10 @@
   {% endif %}
   <div class="msg-body">
     {% if message.start and not message.own %}<span class="msg-name">{{ message.author }}</span>{% endif %}
-    {# Tap, click, Enter or Space opens the message's action sheet (frontend/app.ts). #}
-    <div class="bubble" tabindex="0" data-actions-url="/chat/{{ message.conversation_id }}/messages/{{ message.id }}/actions">{% for p in message.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</div>
+    {# Tap, click, Enter or Space opens the message's action sheet (frontend/app.ts). A thread page has no "Reply in thread". #}
+    <div class="bubble" tabindex="0" data-actions-url="/chat/{{ message.conversation_id }}/messages/{{ message.id }}/actions{% if in_thread | default(value=false) %}?thread=1{% endif %}">{% for p in message.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</div>
     {% if message.show_time or message.read_receipts %}<div class="msg-meta">{% if message.show_time %}<span class="msg-time">{{ message.at }}</span>{% endif %}{% if message.read_receipts %}{% include "chat/_receipt.html" %}{% endif %}</div>{% endif %}
     {% include "chat/_tools.html" %}
   </div>
-  <div class="msg-extra">{% include "chat/_reactions.html" %}</div>
+  <div class="msg-extra">{% include "chat/_reactions.html" %}{% include "chat/_thread_link.html" %}</div>
 </div>

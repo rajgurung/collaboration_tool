@@ -1,0 +1,26 @@
+{% extends "layouts/app.html" %}
+{% block title %}Thread · {{ org.name }}{% endblock title %}
+{% block main %}
+{# The same page whether the thread is gone or the viewer cannot see it, so it never confirms that a private conversation exists. #}
+<div class="chat-layout">
+  <div class="chat-list-pane hidden min-[900px]:block">
+    {% include "chat/_list.html" %}
+  </div>
+  <section class="chat-screen" aria-label="Thread">
+    <header class="chat-head">
+      <a href="/chat" class="icon-btn" aria-label="Back to chats">{{<icon name="chevron-left" class="h-6 w-6"/>}}</a>
+      <div class="ml-1 min-w-0 flex-1"><h1 class="truncate-1 m-0 text-[17px] font-semibold">Thread</h1></div>
+    </header>
+    <div class="chat-feed">
+      <div class="center-state">
+        {{<icon name="messages-square" class="h-9 w-9"/>}}
+        <h2>This thread isn't available</h2>
+        <p>The message it started from may have been removed, or you may no longer be in this conversation.</p>
+        <a href="/chat" class="btn btn-secondary">Go to Chat</a>
+      </div>
+    </div>
+  </section>
+</div>
+<dialog id="chat-dialog" class="sheet" aria-label="Chat"><div class="sheet-handle"></div><div id="chat-dialog-body" class="sheet-body"></div></dialog>
+{% endblock main %}
+{% block tabbar %}{% endblock tabbar %}

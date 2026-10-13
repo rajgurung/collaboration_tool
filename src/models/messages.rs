@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use loco_rs::prelude::*;
+use sea_orm::FromQueryResult;
 use serde::Deserialize;
 
 pub use super::_entities::messages::{ActiveModel, Column, Entity, Model};
@@ -8,8 +9,19 @@ use super::{conversation_members::ReadSpan, conversations};
 
 pub type Messages = Entity;
 
-/// How many messages a conversation shows when it is opened.
+/// How many messages a conversation (or a thread) shows when it is opened.
 pub const HISTORY_LIMIT: u64 = 200;
+
+/// One person's replies in one thread: how many, and when the first and the
+/// last were sent.
+#[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
+pub struct ReplierStat {
+    pub parent_id: i64,
+    pub user_id: i64,
+    pub replies: i64,
+    pub first_at: DateTimeWithTimeZone,
+    pub last_at: DateTimeWithTimeZone,
+}
 
 #[derive(Debug, Deserialize, Validate)]
 pub struct MessageParams {
@@ -34,7 +46,8 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
-    /// The latest messages in a conversation, oldest first.
+    /// The latest messages in a conversation, oldest first. Thread replies
+    /// are not part of the main feed.
     ///
     /// # Errors
     /// On database errors.
@@ -45,6 +58,7 @@ impl Model {
         let mut latest = Entity::find()
             .in_tenant(conversation.organisation_id)
             .filter(Column::ConversationId.eq(conversation.id))
+            .filter(Column::ParentId.is_null())
             .order_by_desc(Column::CreatedAt)
             .order_by_desc(Column::Id)
             .limit(HISTORY_LIMIT)
@@ -55,7 +69,7 @@ impl Model {
     }
 
     /// Messages from other people that a read just covered, newest first and
-    /// capped at what a conversation shows.
+    /// capped at what a conversation shows. Thread replies carry no receipts.
     ///
     /// # Errors
     /// On database errors.
@@ -70,6 +84,7 @@ impl Model {
             .in_tenant(org_id)
             .filter(Column::ConversationId.eq(conversation_id))
             .filter(Column::UserId.ne(reader_id))
+            .filter(Column::ParentId.is_null())
             .filter(Column::CreatedAt.lte(span.to));
         if let Some(from) = span.from {
             query = query.filter(Column::CreatedAt.gt(from));
@@ -82,7 +97,8 @@ impl Model {
             .await?)
     }
 
-    /// The newest message in each of the given conversations.
+    /// The newest top-level message in each of the given conversations, for
+    /// the chat list. A thread reply never shows there.
     ///
     /// # Errors
     /// On database errors.
@@ -95,6 +111,7 @@ impl Model {
         for message in Entity::find()
             .in_tenant(org_id)
             .filter(Column::ConversationId.is_in(conversation_ids.iter().copied()))
+            .filter(Column::ParentId.is_null())
             .order_by_desc(Column::CreatedAt)
             .order_by_desc(Column::Id)
             .all(db)
@@ -124,6 +141,27 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
+    /// A top-level message in this conversation and its organisation, which
+    /// a thread can hang from. A reply's id is not a thread.
+    ///
+    /// # Errors
+    /// `EntityNotFound` for a reply, or an id in another conversation or
+    /// organisation.
+    pub async fn find_thread_parent<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        id: i64,
+    ) -> ModelResult<Self> {
+        Entity::find()
+            .in_tenant(conversation.organisation_id)
+            .filter(Column::Id.eq(id))
+            .filter(Column::ConversationId.eq(conversation.id))
+            .filter(Column::ParentId.is_null())
+            .one(db)
+            .await?
+            .ok_or(ModelError::EntityNotFound)
+    }
+
     /// Saves a message. The caller must already know the sender is a member.
     ///
     /// # Errors
@@ -134,17 +172,106 @@ impl Model {
         user_id: i64,
         params: &MessageParams,
     ) -> ModelResult<Self> {
+        Self::insert(db, conversation, None, user_id, params).await
+    }
+
+    /// Saves a reply in `parent`'s thread. Threads are one level deep, and the
+    /// parent must be in this conversation and organisation. The caller must
+    /// already know the sender is a member.
+    ///
+    /// # Errors
+    /// `EntityNotFound` for a parent that is a reply or belongs elsewhere,
+    /// validation errors, or database errors.
+    pub async fn create_reply<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        parent: &Self,
+        user_id: i64,
+        params: &MessageParams,
+    ) -> ModelResult<Self> {
+        if parent.conversation_id != conversation.id
+            || parent.organisation_id != conversation.organisation_id
+            || parent.parent_id.is_some()
+        {
+            return Err(ModelError::EntityNotFound);
+        }
+        Self::insert(db, conversation, Some(parent.id), user_id, params).await
+    }
+
+    async fn insert<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        parent_id: Option<i64>,
+        user_id: i64,
+        params: &MessageParams,
+    ) -> ModelResult<Self> {
         let body = params.body.trim().to_string();
         ValidatorTrait::validate(&MessageParams { body: body.clone() })?;
         Ok(ActiveModel {
             body: ActiveValue::Set(body),
             conversation_id: ActiveValue::Set(conversation.id),
             user_id: ActiveValue::Set(user_id),
+            parent_id: ActiveValue::Set(parent_id),
             ..Default::default()
         }
         .set_tenant(conversation.organisation_id)?
         .insert(db)
         .await?)
+    }
+
+    /// The latest replies in a thread, oldest first.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn replies<C: ConnectionTrait>(db: &C, parent: &Self) -> ModelResult<Vec<Self>> {
+        let mut latest = Entity::find()
+            .in_tenant(parent.organisation_id)
+            .filter(Column::ParentId.eq(parent.id))
+            .order_by_desc(Column::CreatedAt)
+            .order_by_desc(Column::Id)
+            .limit(HISTORY_LIMIT)
+            .all(db)
+            .await?;
+        latest.reverse();
+        Ok(latest)
+    }
+
+    /// Who replied in each of these threads, in the order they first replied.
+    /// One grouped query, so a feed never asks per message. Threads with no
+    /// replies are missing from the map.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn thread_stats<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        parent_ids: &[i64],
+    ) -> ModelResult<HashMap<i64, Vec<ReplierStat>>> {
+        let mut stats: HashMap<i64, Vec<ReplierStat>> = HashMap::new();
+        if parent_ids.is_empty() {
+            return Ok(stats);
+        }
+        let rows = Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::ParentId.is_in(parent_ids.iter().copied()))
+            .select_only()
+            .column(Column::ParentId)
+            .column(Column::UserId)
+            .column_as(Column::Id.count(), "replies")
+            .column_as(Column::CreatedAt.min(), "first_at")
+            .column_as(Column::CreatedAt.max(), "last_at")
+            .group_by(Column::ParentId)
+            .group_by(Column::UserId)
+            .into_model::<ReplierStat>()
+            .all(db)
+            .await?;
+        for row in rows {
+            stats.entry(row.parent_id).or_default().push(row);
+        }
+        for list in stats.values_mut() {
+            list.sort_by_key(|s| (s.first_at, s.user_id));
+        }
+        Ok(stats)
     }
 }
 

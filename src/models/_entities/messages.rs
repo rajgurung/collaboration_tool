@@ -15,6 +15,7 @@ pub struct Model {
     pub organisation_id: i64,
     pub conversation_id: i64,
     pub user_id: i64,
+    pub parent_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -27,6 +28,14 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Conversations,
+    #[sea_orm(
+        belongs_to = "Entity",
+        from = "Column::ParentId",
+        to = "Column::Id",
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    SelfRef,
     #[sea_orm(
         belongs_to = "super::organisations::Entity",
         from = "Column::OrganisationId",

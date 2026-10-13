@@ -417,9 +417,10 @@
   .msg + .msg-start, .msg-start + .msg-start { margin-top: 12px; }
   .msg > .msg-av { grid-column: 1; grid-row: 1; display: inline-flex; }
   .msg > .msg-body { grid-column: 2; grid-row: 1; justify-self: start; }
-  .msg > .msg-extra { grid-column: 2; grid-row: 2; min-width: 0; }
+  .msg > .msg-extra { grid-column: 2; grid-row: 2; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
   .msg-own { grid-template-columns: minmax(0, 1fr); }
   .msg-own > .msg-body, .msg-own > .msg-extra { grid-column: 1; justify-self: end; }
+  .msg-own > .msg-extra { align-items: flex-end; }
   .msg-body { position: relative; max-width: 86%; display: flex; flex-direction: column; gap: 2px; }
   .msg-own .msg-body { align-items: flex-end; }
   .bubble { cursor: pointer; }
@@ -447,6 +448,34 @@
   .msg-tools button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 9px; background: none; font-size: 19px; cursor: pointer; }
   .msg-tools button:hover { background: var(--chip); }
   .msg-tools button.mine { background: var(--active-bg); }
+  /* The six reactions sit in their own span so a live swap leaves Reply in thread alone. */
+  .tool-picks { display: contents; }
+  .msg-tools-sep { width: 1px; height: 24px; margin: 0 4px; background: var(--line); }
+  .msg-tools-reply { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-radius: 9px; color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .msg-tools-reply:hover { background: var(--chip); }
+  /* "3 replies · 14:05": 44px tall, so it is easy to tap. */
+  .thread-slot { display: flex; max-width: 100%; }
+  .thread-slot:empty { display: none; }
+  .thread-link { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; box-sizing: border-box; padding: 0 8px 0 6px; margin-top: -4px; border-radius: 12px; color: var(--text); font-size: 13px; white-space: nowrap; }
+  .thread-link b { color: var(--link); font-weight: 700; }
+  .thread-link svg, .thread-time { color: var(--muted); }
+  .thread-link:hover { background: var(--chip); }
+  .thread-stack { display: inline-flex; align-items: center; }
+  .thread-stack > * { box-shadow: 0 0 0 2px var(--bg); }
+  .thread-stack > * + * { margin-left: -4px; }
+  .thread-more { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; box-sizing: border-box; border-radius: 999px; background: var(--chip); color: var(--text); font-size: 10px; font-weight: 700; }
+  /* The thread page: short threads start under the parent, not at the bottom. */
+  .chat-feed.top > :first-child { margin-top: 0; }
+  .thread-divider { display: flex; align-items: center; gap: 10px; margin: 10px 4px 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+  .thread-divider::before, .thread-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .thread-divider:empty { display: none; }
+  .thread-empty { margin: 16px 8px 0; padding: 20px 16px; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted); font-size: 14px; text-align: center; }
+  .thread-empty strong { display: block; margin-bottom: 2px; color: var(--text); font-size: 15px; }
+  /* The first live reply lands after it. */
+  .thread-empty:has(~ .msg) { display: none; }
+  .center-state { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; color: var(--muted); text-align: center; }
+  .center-state h2 { margin: 6px 0 0; color: var(--text); font-size: 17px; font-weight: 700; }
+  .center-state p { margin: 0 0 8px; max-width: 280px; font-size: 14px; }
   /* The action sheet. */
   .msg-actions { display: flex; flex-direction: column; gap: 14px; }
   .quote { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; background: var(--lane); border: 1px solid var(--line-soft); }
@@ -456,6 +485,8 @@
   .pick { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
   .pick button { display: grid; place-items: center; height: 52px; border: 0; border-radius: 14px; background: var(--chip); font-size: 26px; cursor: pointer; }
   .pick button.mine { background: var(--active-bg); box-shadow: inset 0 0 0 2px var(--accent); }
+  .action-row { color: var(--text); font-size: 16px; font-weight: 600; }
+  .action-row:hover { background: var(--chip); }
   .who-row { min-height: 48px; }
   .who-row > .emoji { width: 28px; font-size: 22px; text-align: center; }
   .who-row .names { flex: 1; min-width: 0; font-size: 15px; }
@@ -621,7 +652,7 @@
   .notice-kind { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface); color: var(--muted); }
   .notice-mention { color: var(--progress); }
   .notice-assigned, .notice-owner { color: var(--accent); }
-  .notice-note { color: var(--done); }
+  .notice-note, .notice-reply { color: var(--done); }
   .notice-project { color: var(--blocked); }
   .notice-dot { flex-shrink: 0; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .mention { padding: 0 2px; border-radius: 4px; font-weight: 600; color: var(--progress); background: color-mix(in srgb, var(--progress) 12%, transparent); }

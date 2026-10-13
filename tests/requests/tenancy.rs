@@ -208,6 +208,9 @@ async fn org_a_cannot_reach_org_b() {
             format!("/chat/{}/feed", globex.group.id),
             format!("/chat/{}/ws", globex.general.id),
             format!("/chat/{}/messages/{}/actions", globex.general.id, globex.message.id),
+            format!("/chat/{}/threads/{}", globex.general.id, globex.message.id),
+            format!("/chat/{}/threads/{}/feed", globex.general.id, globex.message.id),
+            format!("/chat/{}/ws?thread={}", globex.general.id, globex.message.id),
             format!("/documents/folders/{}", globex.folder.id),
             format!("/documents/files/{}", globex.file.id),
             format!("/documents/files/{}?download=1", globex.file.id),
@@ -215,6 +218,7 @@ async fn org_a_cannot_reach_org_b() {
         for path in &gets {
             let res = request.get(path).add_header(a.0.clone(), a.1.clone()).await;
             assert_eq!(res.status_code(), 404, "GET {path}");
+            assert!(!res.text().contains(SECRET), "GET {path} leaks Globex data");
         }
         let posts = [
             (format!("/roadmap/projects/{}", globex.project.id), serde_json::json!({
@@ -235,6 +239,7 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/chat/{}/messages", globex.general.id), serde_json::json!({ "body": "hijacked" })),
             (format!("/chat/{}/messages", globex.group.id), serde_json::json!({ "body": "hijacked" })),
             (format!("/chat/{}/messages/{}/reactions", globex.general.id, globex.message.id), serde_json::json!({ "emoji": "👍", "on": "1" })),
+            (format!("/chat/{}/threads/{}/replies", globex.general.id, globex.message.id), serde_json::json!({ "body": "hijacked" })),
         ];
         for (path, form) in &posts {
             let res = request.post(path).add_header(a.0.clone(), a.1.clone()).form(form).await;

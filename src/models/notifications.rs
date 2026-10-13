@@ -14,6 +14,8 @@ pub mod kind {
     pub const NOTE: &str = "note";
     pub const OWNER: &str = "owner";
     pub const PROJECT: &str = "project";
+    /// Someone replied in a thread you started or replied in.
+    pub const REPLY: &str = "reply";
 }
 
 /// One notification to send: the same text and link for every recipient.
