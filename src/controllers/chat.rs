@@ -678,7 +678,18 @@ async fn react(
             .header("HX-Trigger", toast("error", &text))
             .empty();
     }
-    let rows = super::chat_ws::publish_reactions(&ctx, member.org.id, &message).await?;
+    let names = names(&ctx, member.org.id).await?;
+    let rows = std::sync::Arc::new(
+        reaction_rows(&ctx, member.org.id, &[message.id], &names)
+            .await?
+            .remove(&message.id)
+            .unwrap_or_default(),
+    );
+    // The change is saved, so answer with it even if the broadcast fails;
+    // other screens catch up on their next reload.
+    if let Err(err) = super::chat_ws::publish_reactions(&ctx, &message, rows.clone()) {
+        tracing::error!(error = %err, message_id = message.id, "could not broadcast reactions");
+    }
     format::html(&render_reactions(
         &v,
         conversation.id,

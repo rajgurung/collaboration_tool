@@ -159,11 +159,13 @@ fn renders_reactions_as_live_swaps() {
         )
         .expect("reactions should render");
     assert!(
-        html.contains(r#"id="reacts-42" hx-swap-oob="true""#),
+        html.contains(r#"id="reacts-42" aria-live="off" hx-swap-oob="true""#),
         "{html}"
     );
     assert!(html.contains(r#"id="tools-42""#), "{html}");
-    assert!(html.contains(r#"role="toolbar" aria-label="Message actions" hx-swap-oob="true""#));
+    assert!(html.contains(
+        r#"role="toolbar" aria-label="Message actions" aria-live="off" hx-swap-oob="true""#
+    ));
     assert!(
         html.contains(r#"data-url="/chat/7/messages/42/reactions""#),
         "{html}"
@@ -183,7 +185,33 @@ fn renders_reactions_as_live_swaps() {
         .expect("an empty slot should render");
     // Nothing inside, not even a space, so `.reacts:empty` hides it.
     assert!(
-        empty.contains(r#"<div class="reacts" id="reacts-42"></div>"#),
+        empty.contains(r#"<div class="reacts" id="reacts-42" aria-live="off"></div>"#),
         "{empty}"
     );
+}
+
+#[test]
+fn the_action_sheet_escapes_the_message() {
+    let pick = |emoji: &str| serde_json::json!({ "emoji": emoji, "mine": false });
+    let html = view_engine()
+        .render(
+            "chat/_actions.html",
+            serde_json::json!({
+                "message": {
+                    "id": 42, "conversation_id": 7, "author": "<i>bob</i>", "color": "#ffb454",
+                    "at": "10:31", "own": false, "body": "<b>x</b> & <script>alert(1)</script>",
+                    "reactions": [], "picks": [pick("👍")],
+                },
+            }),
+        )
+        .expect("the sheet should render");
+    assert!(
+        html.contains("&lt;b&gt;x&lt;/b&gt; &amp; &lt;script&gt;"),
+        "{html}"
+    );
+    assert!(
+        !html.contains("<b>x</b>") && !html.contains("<script>"),
+        "{html}"
+    );
+    assert!(!html.contains("<i>bob</i>"), "{html}");
 }

@@ -11,9 +11,7 @@ use loco_rs::prelude::*;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
-    controllers::chat::{
-        names, reaction_rows, receipt, render_reactions, MessageView, ReactionRow,
-    },
+    controllers::chat::{names, receipt, render_reactions, MessageView, ReactionRow},
     data::{
         chat_hub::{ChatEvent, ChatHub, ReceiptUpdate},
         settings::Settings,
@@ -252,32 +250,24 @@ pub async fn publish(ctx: &AppContext, org_id: i64, message: &messages::Model) -
 }
 
 /// Announces a message's reactions, read after a change, to every socket
-/// following its conversation. Returns them for the caller's own response.
+/// following its conversation.
 ///
 /// # Errors
-/// When the hub is missing, or on database errors.
-pub async fn publish_reactions(
+/// When the hub is missing.
+pub fn publish_reactions(
     ctx: &AppContext,
-    org_id: i64,
     message: &messages::Model,
-) -> Result<Arc<Vec<ReactionRow>>> {
-    let hub = ctx
-        .shared_store
+    rows: Arc<Vec<ReactionRow>>,
+) -> Result<()> {
+    ctx.shared_store
         .get::<ChatHub>()
-        .ok_or_else(|| Error::string("chat hub missing"))?;
-    let names = names(ctx, org_id).await?;
-    let rows = Arc::new(
-        reaction_rows(ctx, org_id, &[message.id], &names)
-            .await?
-            .remove(&message.id)
-            .unwrap_or_default(),
-    );
-    hub.publish(ChatEvent::Reactions {
-        conversation_id: message.conversation_id,
-        message_id: message.id,
-        rows: rows.clone(),
-    });
-    Ok(rows)
+        .ok_or_else(|| Error::string("chat hub missing"))?
+        .publish(ChatEvent::Reactions {
+            conversation_id: message.conversation_id,
+            message_id: message.id,
+            rows,
+        });
+    Ok(())
 }
 
 /// Marks a conversation read for `reader_id` and tells the authors of the

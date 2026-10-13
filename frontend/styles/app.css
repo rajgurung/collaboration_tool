@@ -435,7 +435,8 @@
   .react .emoji { font-size: 16px; }
   .react.mine { background: var(--active-bg); border-color: var(--accent); }
   /* Who reacted: shown on hover or focus on devices that hover (see utilities). */
-  .react-pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 20; display: none; flex-direction: column; gap: 6px; min-width: 150px; max-width: 220px; box-sizing: border-box; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); color: var(--text); font-size: 13px; font-weight: 500; }
+  /* Opens upward, like .receipt-pop, so the last message's list is not cut off. */
+  .react-pop { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; display: none; flex-direction: column; gap: 6px; min-width: 150px; max-width: 220px; box-sizing: border-box; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lift); color: var(--text); font-size: 13px; font-weight: 500; }
   .msg-own .react-pop { left: auto; right: 0; }
   .react-pop-head { display: flex; align-items: center; gap: 6px; font-weight: 700; }
   /* Desktop toolbar above the bubble. It grows toward the open side of the
@@ -884,8 +885,12 @@
     .msg-receipt:has(.receipt-pop)::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 8px; }
     .react-wrap:hover .react-pop, .react-wrap:focus-within .react-pop { display: flex; }
     /* Bridges the gap so the pointer can reach the list. */
-    .react-wrap:has(.react-pop)::before { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 8px; }
-    .msg:hover .msg-tools, .msg:focus-within .msg-tools { display: flex; }
+    .react-wrap:has(.react-pop)::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 8px; }
+    /* Focus inside the message shows it, unless that focus came from a mouse
+       click (a closed dialog also hands focus back that way), so it never stays
+       open behind the pointer. `:has(:focus-visible)` alone hides it for a
+       moment as Tab leaves the bubble, and the browser then skips it. */
+    .msg:hover .msg-tools, .msg:focus-within:not(:has(:focus:not(:focus-visible))) .msg-tools { display: flex; }
     .react:hover { background: var(--chip); }
     .react.mine:hover { background: var(--active-bg); }
   }

@@ -83,7 +83,7 @@ async fn setting_a_reaction_is_safe_to_repeat() {
             let html = res.text();
             assert!(
                 html.contains(&format!(
-                    r#"<div class="reacts" id="reacts-{}" hx-swap-oob="true"></div>"#,
+                    r#"<div class="reacts" id="reacts-{}" aria-live="off" hx-swap-oob="true"></div>"#,
                     message.id
                 )),
                 "{html}"
@@ -349,7 +349,10 @@ async fn a_socket_only_gets_reactions_for_its_conversation() {
         "{html}"
     );
     assert!(
-        html.contains(&format!(r#"id="reacts-{}" hx-swap-oob="true""#, hello.id)),
+        html.contains(&format!(
+            r#"id="reacts-{}" aria-live="off" hx-swap-oob="true""#,
+            hello.id
+        )),
         "{html}"
     );
     assert!(html.contains(r#"aria-label="🎉 1, you reacted""#), "{html}");

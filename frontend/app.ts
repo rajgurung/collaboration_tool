@@ -106,13 +106,25 @@ function openActions(bubble: HTMLElement) {
     })
     .catch(failed);
 }
+// A mouse click waits a moment, so a double or triple click selects text
+// instead of opening the sheet. Taps open straight away.
+let lastPointer = "";
+let pendingOpen: number | undefined;
+document.addEventListener("pointerdown", (event) => (lastPointer = event.pointerType), true);
+function selectingIn(bubble: Element) {
+  const selection = getSelection();
+  return !!selection && !selection.isCollapsed && bubble.contains(selection.anchorNode);
+}
 document.addEventListener("click", (event) => {
   const target = event.target as Element | null;
   const bubble = target?.closest<HTMLElement>(".bubble[data-actions-url]");
   if (!bubble || target?.closest("a, button, .react, .thread-link, .msg-receipt")) return;
-  const selection = getSelection();
-  if (selection && !selection.isCollapsed && bubble.contains(selection.anchorNode)) return;
-  openActions(bubble);
+  window.clearTimeout(pendingOpen);
+  if (event.detail > 1 || selectingIn(bubble)) return;
+  if (lastPointer !== "mouse") return openActions(bubble);
+  pendingOpen = window.setTimeout(() => {
+    if (!selectingIn(bubble)) openActions(bubble);
+  }, 250);
 });
 document.addEventListener("keydown", (event) => {
   const bubble = event.target;
@@ -178,14 +190,40 @@ function showMine(messageId: string, emoji: string, url: string, mine: boolean) 
   tool?.setAttribute("aria-pressed", String(mine));
 }
 
+// The reaction button that has focus, so a swap that replaces it can put focus back.
+type FocusedReaction = { holder: string; emoji: string } | null;
+function focusedReaction(): FocusedReaction {
+  const el = document.activeElement;
+  const holder = el?.closest<HTMLElement>(".reacts, .msg-tools");
+  return holder && el instanceof HTMLElement && el.dataset.emoji ? { holder: holder.id, emoji: el.dataset.emoji } : null;
+}
+// Only when the swap dropped focus to the page, never taking it from elsewhere.
+function restoreFocus(was: FocusedReaction) {
+  if (!was || document.activeElement !== document.body) return;
+  const holder = document.getElementById(was.holder);
+  const button = Array.from(holder?.querySelectorAll<HTMLElement>("[data-emoji]") ?? []).find((b) => b.dataset.emoji === was.emoji);
+  if (!holder || !button) return;
+  // The new toolbar only shows once something in its message has focus, so show it to focus it.
+  holder.style.display = "flex";
+  button.focus();
+  holder.style.removeProperty("display");
+}
+
 // Replaces each top-level element of `html` with the page's element of the same id.
 function swapById(html: string) {
   const template = document.createElement("template");
   template.innerHTML = html;
   Array.from(template.content.children).forEach((el) => {
+    const was = focusedReaction();
     if (el.id) document.getElementById(el.id)?.replaceWith(el);
+    restoreFocus(was);
   });
 }
+
+// Live reaction swaps from the socket keep focus the same way.
+let focusBeforeMessage: FocusedReaction = null;
+document.body.addEventListener("htmx:wsBeforeMessage", () => (focusBeforeMessage = focusedReaction()));
+document.body.addEventListener("htmx:wsAfterMessage", () => restoreFocus(focusBeforeMessage));
 
 document.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLElement>("[data-react]");
