@@ -79,7 +79,7 @@ fn renders_read_receipts_as_live_swaps() {
                     "shown": readers[..3],
                     "more": 2,
                     "all": true,
-                } },
+                }, "own": true },
                 "oob": true,
             }),
         )
@@ -118,19 +118,37 @@ fn renders_read_receipts_as_live_swaps() {
     );
     assert!(read.contains(r#"aria-expanded="false""#), "{read}");
 
+    // Someone who did not write it gets the same faces, and no tick: their
+    // page has none to swap.
+    let theirs = engine
+        .render(
+            "chat/_receipt.html",
+            serde_json::json!({
+                "message": { "id": 42, "receipt": {
+                    "dm": false, "text": "Read by bob", "readers": [person("bob")],
+                    "shown": [person("bob")], "more": 0, "all": false,
+                }, "own": false },
+                "oob": true,
+            }),
+        )
+        .expect("receipt should render");
+    assert!(theirs.contains(r#"aria-label="Read by bob""#), "{theirs}");
+    assert!(!theirs.contains("tick"), "{theirs}");
+
     let dm = engine
         .render(
             "chat/_receipt.html",
             serde_json::json!({ "message": { "id": 43, "receipt": {
                 "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0, "all": true,
-            } }, "oob": true }),
+            }, "own": true }, "oob": true }),
         )
         .expect("a DM receipt should render");
-    // DMs: no faces, only the tick.
+    // DMs: no faces; "Read" under the message, and the tick.
     assert!(
-        dm.contains(r#"<span class="msg-receipt" id="receipt-43" hx-swap-oob="true"></span>"#),
+        dm.contains(r#"<span class="msg-receipt" id="receipt-43" hx-swap-oob="true"><span class="msg-receipt-dm">"#),
         "{dm}"
     );
+    assert!(dm.contains("Read</span></span>"), "{dm}");
     assert!(
         dm.contains(r#"class="tick tick-read" id="tick-43""#),
         "{dm}"
@@ -324,8 +342,8 @@ fn renders_the_thread_count_as_a_live_swap() {
 }
 
 /// Every live swap target keeps a home: the time, tick and thread footer sit
-/// inside the bubble; your chips and reader faces share a row after it; then
-/// the toolbar.
+/// inside the bubble; chips and reader faces share a row after it; then the
+/// toolbar.
 #[test]
 fn renders_a_message_as_one_block() {
     let engine = view_engine();
@@ -376,16 +394,35 @@ fn renders_a_message_as_one_block() {
     );
     assert!(!html.contains("msg-time"), "{html}");
 
+    // Someone else's message in a group: the same row of chips and faces,
+    // but no tick.
     let others = engine
-        .render("chat/_message.html", message(false, false))
+        .render("chat/_message.html", message(false, true))
         .expect("someone else's message should render");
     assert!(
         others.contains(r#"<span class="stamp">09:31</span>"#),
         "{others}"
     );
-    assert!(!others.contains(r#"id="receipt-"#), "{others}");
     assert!(!others.contains("stamp-pad-tick"), "{others}");
-    assert!(!others.contains("msg-foot"), "{others}");
+    assert!(!others.contains(r#"id="tick-"#), "{others}");
+    let at = |needle: &str| {
+        others
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}: {others}"))
+    };
+    let (foot, reacts, receipt) = (
+        at(r#"class="msg-foot""#),
+        at(r#"id="reacts-42""#),
+        at(r#"id="receipt-42""#),
+    );
+    assert!(foot < reacts && reacts < receipt, "{others}");
+
+    // Someone else's message in a DM: chips only.
+    let dm = engine
+        .render("chat/_message.html", message(false, false))
+        .expect("someone else's DM should render");
+    assert!(!dm.contains(r#"id="receipt-"#), "{dm}");
+    assert!(!dm.contains(r#"id="tick-"#), "{dm}");
 }
 
 /// One task note: the quick bar and the chips post to the note's own route,

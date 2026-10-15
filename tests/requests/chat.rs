@@ -545,10 +545,14 @@ async fn dms_show_read_once_the_other_person_opens_them() {
             "bob has not opened it: {tick}"
         );
 
+        let page = open(&request, &alice, dm.id).await;
+        let slot = receipt_slot(&page, hello.id);
+        assert!(!slot.contains("Read"), "nothing under it yet: {slot}");
+
         let bobs = open(&request, &bob, dm.id).await;
         assert!(
             !bobs.contains("msg-receipt") && !bobs.contains(r#"id="tick-"#),
-            "only the sender sees receipts"
+            "in a DM only the sender sees receipts"
         );
 
         let page = open(&request, &alice, dm.id).await;
@@ -559,7 +563,17 @@ async fn dms_show_read_once_the_other_person_opens_them() {
         );
         assert!(tick.contains(", read</span>"), "{tick}");
         let slot = receipt_slot(&page, hello.id);
-        assert!(!slot.contains("avatar"), "DMs show only the tick: {slot}");
+        assert!(!slot.contains("avatar"), "a DM shows no faces: {slot}");
+        assert!(
+            slot.contains(r#"<span class="msg-receipt-dm">"#) && slot.contains("Read</span>"),
+            "a DM says Read under the sender's message: {slot}"
+        );
+
+        // Bob's reply: alice, who did not write it, sees no receipt on it.
+        let reply = post(&request, &ctx, &bob, dm.id, "Sure").await;
+        let page = open(&request, &alice, dm.id).await;
+        assert!(!page.contains(&format!(r#"id="receipt-{}""#, reply.id)));
+        assert!(!page.contains(&format!(r#"id="tick-{}""#, reply.id)));
 
         // A message sent after bob last read is not read yet.
         let later = post(&request, &ctx, &alice, dm.id, "Never mind").await;
@@ -594,11 +608,16 @@ async fn groups_count_who_has_read() {
             "the tick says who has read it so far"
         );
 
+        // Everyone in a group sees who read every message, their own face
+        // included, but the tick stays on the sender's page.
         let carols = open(&request, &carol, group.id).await;
+        let slot = receipt_slot(&carols, message.id);
         assert!(
-            !carols.contains("msg-receipt"),
-            "only the sender sees receipts"
+            slot.contains(r#"aria-label="Read by bob, carol""#),
+            "{slot}"
         );
+        assert!(!carols.contains(r#"id="tick-"#), "{carols}");
+        assert!(!carols.contains("stamp-pad-tick"), "{carols}");
         let page = open(&request, &alice, group.id).await;
         let slot = receipt_slot(&page, message.id);
         assert!(
@@ -681,7 +700,12 @@ async fn general_shows_receipts_like_groups() {
         let slot = receipt_slot(&page, message.id);
         assert!(!slot.contains("avatar"), "dave is pending: {slot}");
 
-        open(&request, &bob, general.id).await;
+        let bobs = open(&request, &bob, general.id).await;
+        let slot = receipt_slot(&bobs, message.id);
+        assert!(
+            slot.contains(r#"aria-label="Read by bob""#),
+            "bob sees his own face: {slot}"
+        );
         let page = open(&request, &alice, general.id).await;
         let slot = receipt_slot(&page, message.id);
         assert!(slot.contains(r#"aria-label="Read by bob""#), "{slot}");
@@ -694,7 +718,7 @@ async fn general_shows_receipts_like_groups() {
 
 #[tokio::test]
 #[serial]
-async fn reading_publishes_receipts_for_the_authors() {
+async fn reading_publishes_receipts() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let (group, _carol) = group_of_three(&request, &ctx).await;
@@ -737,6 +761,7 @@ async fn reading_publishes_receipts_for_the_authors() {
         assert_eq!(receipts.len(), 1);
         assert_eq!(receipts[0].message_id, message.id);
         assert_eq!(receipts[0].author_id, alice_id);
+        assert!(!receipts[0].dm, "every member's socket takes it");
         assert_eq!(receipts[0].receipt.as_ref().unwrap().text, "Read by bob");
 
         // Nothing new since: nothing published.
@@ -764,6 +789,27 @@ async fn reading_publishes_receipts_for_the_authors() {
         let receipt = receipts[0].receipt.as_ref().unwrap();
         assert_eq!(receipt.text, "Read by bob");
         assert!(receipt.readers.iter().all(|p| p.id != dave_id));
+
+        // A DM's receipt is marked so only its author's socket takes it.
+        let dm = conversations::Model::start_dm(
+            &ctx.db,
+            acme_id(&ctx).await,
+            alice_id,
+            user_id(&ctx, "bob@example.com").await,
+        )
+        .await
+        .unwrap();
+        post(&request, &ctx, &alice, dm.id, "Got a minute?").await;
+        while events.try_recv().is_ok() {}
+        open(&request, &bob, dm.id).await;
+        let ChatEvent::Read { receipts, .. } = events
+            .try_recv()
+            .expect("bob's read of the DM is published")
+        else {
+            panic!("expected a read event");
+        };
+        assert!(receipts[0].dm);
+        assert_eq!(receipts[0].author_id, alice_id);
     })
     .await;
 }
@@ -813,4 +859,116 @@ async fn people_approved_later_count_once_they_read_older_messages() {
         assert_eq!(slot.matches("avatar avatar-2xs").count(), 2, "{slot}");
     })
     .await;
+}
+
+/// Real sockets: in General a member who did not write the message gets the
+/// faces, with no tick; in a DM only the sender's socket gets "Read".
+#[tokio::test]
+#[serial]
+async fn read_receipts_reach_the_right_sockets() {
+    use futures_util::StreamExt;
+    use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+    let (ctx, addr, cookie, alice, mut general_socket) =
+        super::live_sign_out::open_general_socket().await;
+    let joined = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(format!("http://{addr}/join/acme"))
+        .form(&[
+            ("name", "bob"),
+            ("email", "bob@example.com"),
+            ("password", super::prepare_data::USER_PASSWORD),
+        ])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(joined.status(), 303);
+    let bob = approve(&ctx, "bob@example.com").await;
+    let org_id = acme_id(&ctx).await;
+    let general = general(&ctx).await;
+    let say = |conversation: conversations::Model, user_id: i64, body: &'static str| {
+        let db = ctx.db.clone();
+        async move {
+            messages::Model::create(
+                &db,
+                &conversation,
+                user_id,
+                &messages::MessageParams {
+                    body: body.to_string(),
+                },
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // Bob's message in General, read by alice: her socket shows her face on it.
+    let bobs = say(general.clone(), bob.id, "Morning all").await;
+    collab::controllers::chat_ws::mark_read(&ctx, org_id, general.id, &general.kind, alice.id)
+        .await
+        .unwrap();
+    let next = tokio::time::timeout(super::live_sign_out::WAIT, general_socket.next())
+        .await
+        .unwrap();
+    let Some(Ok(Message::Text(html))) = next else {
+        panic!("expected the receipt, got {next:?}");
+    };
+    assert!(
+        html.contains(&format!(r#"id="receipt-{}" hx-swap-oob="true""#, bobs.id)),
+        "{html}"
+    );
+    assert!(html.contains(r#"aria-label="Read by alice""#), "{html}");
+    assert!(!html.contains("tick-"), "alice did not write it: {html}");
+
+    // A DM socket for alice.
+    let dm = conversations::Model::start_dm(&ctx.db, org_id, alice.id, bob.id)
+        .await
+        .unwrap();
+    let mut request = format!("ws://{addr}/chat/{}/ws", dm.id)
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", cookie.parse().unwrap());
+    let (mut dm_socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+
+    // Bob's DM, read by alice: not for her socket. Then hers, read by bob: it is.
+    let from_bob = say(dm.clone(), bob.id, "Got a minute?").await;
+    collab::controllers::chat_ws::mark_read(&ctx, org_id, dm.id, &dm.kind, alice.id)
+        .await
+        .unwrap();
+    let from_alice = say(dm.clone(), alice.id, "Sure").await;
+    collab::controllers::chat_ws::mark_read(&ctx, org_id, dm.id, &dm.kind, bob.id)
+        .await
+        .unwrap();
+    let next = tokio::time::timeout(super::live_sign_out::WAIT, dm_socket.next())
+        .await
+        .unwrap();
+    let Some(Ok(Message::Text(html))) = next else {
+        panic!("expected the receipt, got {next:?}");
+    };
+    assert!(
+        !html.contains(&format!("receipt-{}", from_bob.id)),
+        "bob's DM is not alice's to see: {html}"
+    );
+    assert!(
+        html.contains(&format!(
+            r#"id="receipt-{}" hx-swap-oob="true""#,
+            from_alice.id
+        )),
+        "{html}"
+    );
+    assert!(
+        html.contains("msg-receipt-dm") && html.contains("Read</span>"),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!(
+            r#"id="tick-{}" hx-swap-oob="true""#,
+            from_alice.id
+        )),
+        "{html}"
+    );
 }

@@ -15,7 +15,8 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
     controllers::chat::{
-        names, receipt, render_reactions, thread_line, MessageView, ReactionRow, ThreadLine,
+        names, receipt, render_reactions, shows_receipt, thread_line, MessageView, ReactionRow,
+        ThreadLine,
     },
     data::{
         chat_hub::{ChatEvent, ChatHub, ReceiptUpdate},
@@ -358,8 +359,9 @@ pub fn publish_reactions(
     Ok(())
 }
 
-/// Marks a conversation read for `reader_id` and tells the authors of the
-/// messages that read covered who has now read them.
+/// Marks a conversation read for `reader_id` and tells everyone who sees the
+/// receipts of the messages that read covered (see [`receipts_for`]) who has
+/// now read them.
 ///
 /// # Errors
 /// On database errors, or when the hub is missing.
@@ -390,6 +392,7 @@ pub async fn mark_read(
         .map(|m| ReceiptUpdate {
             message_id: m.id,
             author_id: m.user_id,
+            dm: conversation_kind == conversations::kind::DM,
             receipt: receipt(conversation_kind, m.user_id, m.created_at, &marks, &names),
         })
         .collect();
@@ -406,7 +409,7 @@ pub async fn mark_read(
 /// The message as HTML for this socket's viewer, wrapped for an out-of-band append.
 fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result<String> {
     message.own = author_id == session.user_id;
-    message.read_receipts = message.own;
+    message.read_receipts = shows_receipt(&session.conversation_kind, message.own);
     session
         .view
         .render("chat/_message_oob.html", data!({ "message": message }))
@@ -515,7 +518,8 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
 }
 
 /// The receipt updates in `event` that belong on this viewer's screen: only
-/// for this conversation, and only on messages the viewer wrote.
+/// for this conversation, and in a DM only on messages the viewer wrote. In a
+/// group or channel every member sees who read every message.
 fn receipts_for(event: &ChatEvent, conversation_id: i64, viewer_id: i64) -> Vec<&ReceiptUpdate> {
     match event {
         ChatEvent::Read {
@@ -523,7 +527,7 @@ fn receipts_for(event: &ChatEvent, conversation_id: i64, viewer_id: i64) -> Vec<
             receipts,
         } if *id == conversation_id => receipts
             .iter()
-            .filter(|r| r.author_id == viewer_id)
+            .filter(|r| !r.dm || r.author_id == viewer_id)
             .collect(),
         _ => Vec::new(),
     }
@@ -549,14 +553,19 @@ fn not_older<'a>(
         .collect()
 }
 
-/// Receipts as out-of-band swaps of each message's `#receipt-{id}` slot.
+/// Receipts as out-of-band swaps of each message's `#receipt-{id}` slot, and
+/// of its `#tick-{id}` when the viewer wrote it (no one else's page has one).
 fn render_receipts(session: &Session, updates: &[&ReceiptUpdate]) -> Result<String> {
     let mut html = String::new();
     for update in updates {
         html.push_str(&session.view.render(
             "chat/_receipt.html",
             data!({
-                "message": { "id": update.message_id, "receipt": update.receipt },
+                "message": {
+                    "id": update.message_id,
+                    "receipt": update.receipt,
+                    "own": update.author_id == session.user_id,
+                },
                 "oob": true,
             }),
         )?);
@@ -573,36 +582,56 @@ mod tests {
     use super::*;
     use crate::{controllers::chat::Receipt, views::layout::Person};
 
-    fn update(message_id: i64, author_id: i64) -> ReceiptUpdate {
+    fn update(message_id: i64, author_id: i64, dm: bool) -> ReceiptUpdate {
         ReceiptUpdate {
             message_id,
             author_id,
+            dm,
             receipt: None,
         }
     }
 
+    fn ids(updates: &[&ReceiptUpdate]) -> Vec<i64> {
+        updates.iter().map(|r| r.message_id).collect()
+    }
+
     #[test]
-    fn sockets_only_get_receipts_for_their_viewers_messages() {
+    fn group_sockets_get_receipts_for_every_message() {
         let event = ChatEvent::Read {
             conversation_id: 7,
-            receipts: Arc::new(vec![update(10, 1), update(11, 2), update(12, 1)]),
+            receipts: Arc::new(vec![update(10, 1, false), update(11, 2, false)]),
         };
-        let mine: Vec<i64> = receipts_for(&event, 7, 1)
-            .iter()
-            .map(|r| r.message_id)
-            .collect();
-        assert_eq!(mine, vec![10, 12]);
-        assert!(receipts_for(&event, 7, 3).is_empty(), "not the author");
+        assert_eq!(ids(&receipts_for(&event, 7, 1)), vec![10, 11]);
+        assert_eq!(
+            ids(&receipts_for(&event, 7, 3)),
+            vec![10, 11],
+            "not the author"
+        );
         assert!(
             receipts_for(&event, 8, 1).is_empty(),
             "another conversation"
         );
     }
 
+    #[test]
+    fn dm_sockets_only_get_receipts_for_their_viewers_messages() {
+        let event = ChatEvent::Read {
+            conversation_id: 7,
+            receipts: Arc::new(vec![
+                update(10, 1, true),
+                update(11, 2, true),
+                update(12, 1, true),
+            ]),
+        };
+        assert_eq!(ids(&receipts_for(&event, 7, 1)), vec![10, 12]);
+        assert!(receipts_for(&event, 7, 3).is_empty(), "not the author");
+    }
+
     fn read_by(message_id: i64, readers: &[&str]) -> ReceiptUpdate {
         ReceiptUpdate {
             message_id,
             author_id: 1,
+            dm: false,
             receipt: Some(Receipt {
                 dm: false,
                 text: String::new(),

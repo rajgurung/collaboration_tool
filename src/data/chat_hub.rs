@@ -52,11 +52,13 @@ pub enum ChatEvent {
     SignedOut { user_id: i64 },
 }
 
-/// The current receipt for one message, for its author's screen.
+/// The current receipt for one message. In a group or channel it goes to
+/// every member's screen; in a DM (`dm`) only to the author's.
 #[derive(Debug, Clone)]
 pub struct ReceiptUpdate {
     pub message_id: i64,
     pub author_id: i64,
+    pub dm: bool,
     pub receipt: Option<Receipt>,
 }
 
