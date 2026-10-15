@@ -561,7 +561,7 @@
   .composer textarea { display: block; width: 100%; min-height: 44px; max-height: 140px; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 22px; padding: 11px 16px 11px 46px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
   .composer.docked { padding-bottom: 8px; }
   /* A text field with the emoji button inside it, bottom left. */
-  .field { position: relative; flex: 1; min-width: 0; }
+  .emoji-field { position: relative; flex: 1; min-width: 0; }
   .field-emoji { position: absolute; left: 0; bottom: 0; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; }
   .field-emoji:hover { color: var(--text); }
   .field-emoji[aria-expanded="true"] { color: var(--link); }

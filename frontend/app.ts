@@ -913,7 +913,7 @@ function openPicker(toggle: HTMLButtonElement) {
   if (matchMedia("(pointer: coarse)").matches) return dockPicker(picker, field, toggle);
   picker.root.className = "ep ep-pop";
   // The row that holds the field: the chat composer, or the note form's row.
-  const row = field.closest(".field")?.parentElement;
+  const row = field.closest(".emoji-field")?.parentElement;
   if (!row) return;
   row.append(picker.root);
   // Open downward when there is no room above inside the scroll box (the task sheet).
