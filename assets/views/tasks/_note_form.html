@@ -2,7 +2,7 @@
   <div class="flex items-end gap-2">
     <label class="sr-only" for="note-body">Add a note</label>
     <div class="emoji-field">
-      <textarea id="note-body" name="body" rows="1" required data-autogrow data-mentions="{{ mention_names }}" data-everyone-hint="{{ everyone_hint }}" autocomplete="off" class="input min-h-11 resize-none rounded-[22px] pr-4 pl-[46px]" placeholder="Add a note…">{{ note_body }}</textarea>
+      <textarea id="note-body" name="body" rows="1" required data-autogrow data-mentions="{{ mention_names }}"{% if everyone_hint %} data-everyone-hint="{{ everyone_hint }}"{% endif %} autocomplete="off" class="input min-h-11 resize-none rounded-[22px] pr-4 pl-[46px]" placeholder="Add a note…">{{ note_body }}</textarea>
       <button type="button" class="field-emoji" data-emoji-for="note-body" aria-label="Emoji" aria-expanded="false" aria-controls="emoji-picker">{{<icon name="smile" class="ic-smile h-[22px] w-[22px]"/>}}{{<icon name="keyboard" class="ic-keyboard h-[22px] w-[22px]"/>}}</button>
     </div>
     <button type="submit" class="btn btn-primary h-11 w-11 shrink-0 p-0" aria-label="Post note">{{<icon name="send" class="h-5 w-5"/>}}</button>

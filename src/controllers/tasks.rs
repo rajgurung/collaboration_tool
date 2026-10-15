@@ -900,13 +900,15 @@ async fn sheet_data(
     .filter(|s| !s.is_empty())
     .collect::<Vec<_>>()
     .join(" · ");
-    // The @ menu offers "everyone" first when there is anyone else to tell.
+    // The @ menu offers "everyone" first when there is anyone else to tell,
+    // except to a super admin acting here, whose @everyone tells nobody.
     let others = team_list
         .iter()
         .filter(|(id, _)| *id != member.user.id)
         .count();
+    let offer_everyone = others > 0 && !member.acting;
     let names = mention_names(&team_list, member.user.id);
-    let names = if others > 0 {
+    let names = if offer_everyone {
         format!("{EVERYONE},{names}")
     } else {
         names
@@ -926,7 +928,7 @@ async fn sheet_data(
             "notes": notes,
             "note_body": note_body,
             "mention_names": names,
-            "everyone_hint": everyone_hint(others),
+            "everyone_hint": if offer_everyone { everyone_hint(others) } else { String::new() },
             "errors": errors,
         }),
     ))

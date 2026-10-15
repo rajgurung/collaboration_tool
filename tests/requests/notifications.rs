@@ -1076,6 +1076,11 @@ async fn an_acting_super_admin_cannot_notify_everyone() {
             .form(&serde_json::json!({ "body": "@everyone hi" }))
             .await;
         assert_eq!(res.status_code(), 200);
+        // The note box does not offer it either.
+        let sheet = res.text();
+        assert!(sheet.contains("data-mentions="), "{sheet}");
+        assert!(!sheet.contains(r#"data-mentions="everyone"#), "{sheet}");
+        assert!(!sheet.contains("data-everyone-hint"), "{sheet}");
         for id in [raj, shusma] {
             assert!(inbox(&ctx, id).await.is_empty());
         }
