@@ -8,8 +8,8 @@ use crate::{
     controllers::notifications::{self, TaskBefore},
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
-        memberships,
-        notifications::mention_parts,
+        field_error, memberships, note_reactions,
+        notifications::{mention_parts, Part, EVERYONE},
         projects,
         saved_views::{self, Setup},
         task_assignees,
@@ -17,8 +17,9 @@ use crate::{
         tasks::{self, TaskParams, PRIORITIES, STATUSES},
     },
     views::{
-        forms::{field_errors, invalid_form, FieldErrors},
+        forms::{field_errors, invalid_form, toast, FieldErrors},
         layout::{avatar_color, Person},
+        reactions::{chips, picks, Pick, ReactionChip, ReactionRow, FORMER_MEMBER},
         time,
     },
 };
@@ -866,20 +867,14 @@ async fn sheet_data(
             .ok(),
         None => None,
     };
-    let notes: Vec<serde_json::Value> = task_notes::Model::list_for_task(&ctx.db, task)
-        .await?
-        .into_iter()
+    let list = task_notes::Model::list_for_task(&ctx.db, task).await?;
+    let ids: Vec<i64> = list.iter().map(|n| n.id).collect();
+    let mut reactions = note_reactions::Model::for_notes(&ctx.db, member.org.id, &ids).await?;
+    let notes: Vec<NoteView> = list
+        .iter()
         .map(|n| {
-            let author = n
-                .author_id
-                .and_then(|id| team.get(&id).cloned())
-                .unwrap_or_else(|| "Former member".to_string());
-            serde_json::json!({
-                "color": avatar_color(&author),
-                "author": author,
-                "parts": mention_parts(&n.body, &team_list),
-                "at": time::local(n.created_at, member.tz()).format("%a %-d %b, %H:%M").to_string(),
-            })
+            let rows = reaction_rows(reactions.remove(&n.id).unwrap_or_default(), &team);
+            note_view(n, &team, &team_list, &rows, member)
         })
         .collect();
     let people: Vec<Chip> = task_assignees::Model::for_task(&ctx.db, member.org.id, task.id)
@@ -923,6 +918,62 @@ async fn sheet_data(
             "errors": errors,
         }),
     ))
+}
+
+/// One note as its viewer sees it, with its reaction chips and quick picks.
+#[derive(Debug, Serialize)]
+struct NoteView {
+    id: i64,
+    task_id: i64,
+    author: String,
+    color: &'static str,
+    parts: Vec<Part>,
+    at: String,
+    reactions: Vec<ReactionChip>,
+    picks: Vec<Pick>,
+}
+
+fn reaction_rows(
+    rows: Vec<note_reactions::Model>,
+    team: &HashMap<i64, String>,
+) -> Vec<ReactionRow> {
+    rows.into_iter()
+        .map(|r| ReactionRow::named(r.emoji, r.user_id, team))
+        .collect()
+}
+
+fn note_view(
+    note: &task_notes::Model,
+    team: &HashMap<i64, String>,
+    team_list: &[(i64, String)],
+    rows: &[ReactionRow],
+    member: &CurrentMember,
+) -> NoteView {
+    let author = note
+        .author_id
+        .and_then(|id| team.get(&id).cloned())
+        .unwrap_or_else(|| FORMER_MEMBER.to_string());
+    let reactions = chips(rows, member.user.id);
+    NoteView {
+        id: note.id,
+        task_id: note.task_id,
+        color: avatar_color(&author),
+        author,
+        parts: mention_parts(
+            &note.body,
+            &team_list
+                .iter()
+                .cloned()
+                // Not a person; only its name is used here.
+                .chain([(0, EVERYONE.to_string())])
+                .collect::<Vec<_>>(),
+        ),
+        at: time::local(note.created_at, member.tz())
+            .format("%a %-d %b, %H:%M")
+            .to_string(),
+        picks: picks(&reactions),
+        reactions,
+    }
 }
 
 /// Names the @ picker offers: teammates first, then the viewer, who can tag
@@ -1016,6 +1067,61 @@ async fn add_note(
     }
 }
 
+/// The state the client wants: `on` is "1" to add `emoji`, "0" to remove it.
+#[derive(Debug, Default, Deserialize)]
+struct NoteReactionForm {
+    #[serde(default)]
+    emoji: String,
+    #[serde(default)]
+    on: String,
+}
+
+/// Sets the viewer's reaction on a note and answers with the note. No
+/// notification and no live update.
+#[debug_handler]
+async fn react_note(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path((id, note_id)): Path<(i64, i64)>,
+    Form(form): Form<NoteReactionForm>,
+) -> Result<Response> {
+    // A reaction carries a person's name, so it needs a real membership.
+    member.require_own_membership()?;
+    let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    let note = task_notes::Model::find_on_task(&ctx.db, &task, note_id).await?;
+    let me = member.user.id;
+    let result = match form.on.as_str() {
+        "1" | "0" => {
+            note_reactions::Model::set(&ctx.db, &note, me, &form.emoji, form.on == "1").await
+        }
+        _ => Err(field_error("on", "Couldn't change your reaction.")),
+    };
+    if let Err(err) = result {
+        let errors = field_errors(&err).ok_or(err)?;
+        let text = errors.values().next().cloned().unwrap_or_default();
+        return format::render()
+            .status(422)
+            .header("HX-Reswap", "none")
+            .header("HX-Trigger", toast("error", &text))
+            .empty();
+    }
+    let team_list = memberships::Model::team(&ctx.db, member.org.id).await?;
+    let team: HashMap<i64, String> = team_list.iter().cloned().collect();
+    let rows = note_reactions::Model::for_notes(&ctx.db, member.org.id, &[note.id])
+        .await?
+        .remove(&note.id)
+        .unwrap_or_default();
+    let view = note_view(
+        &note,
+        &team,
+        &team_list,
+        &reaction_rows(rows, &team),
+        &member,
+    );
+    format::render().view(&v, "tasks/_note.html", data!({ "note": view }))
+}
+
 pub fn routes() -> Routes {
     Routes::new()
         .add("/tasks", get(index))
@@ -1029,4 +1135,5 @@ pub fn routes() -> Routes {
         .add("/tasks/{id}/delete", post(destroy))
         .add("/tasks/{id}/status", post(set_status))
         .add("/tasks/{id}/notes", post(add_note))
+        .add("/tasks/{id}/notes/{note_id}/reactions", post(react_note))
 }

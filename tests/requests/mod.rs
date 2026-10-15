@@ -49,3 +49,4 @@ pub mod documents;
 pub mod done_tasks;
 
 pub mod logins;
+pub mod note_reactions;

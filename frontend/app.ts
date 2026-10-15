@@ -309,6 +309,58 @@ document.addEventListener("click", (event) => {
   if (!target.classList.contains("hidden")) target.querySelector<HTMLInputElement>("input:not([type=hidden])")?.focus();
 });
 
+// Escape inside the task sheet's modal <dialog> would also close the sheet.
+// A popup that handles Escape itself claims it on keydown; the dialog's
+// cancel, which follows that keydown, is then stopped too.
+let escapeClaimed = false;
+function claimEscape(event: KeyboardEvent) {
+  event.preventDefault();
+  escapeClaimed = true;
+  window.setTimeout(() => (escapeClaimed = false));
+}
+document.addEventListener(
+  "cancel",
+  (event) => {
+    if (escapeClaimed) event.preventDefault();
+  },
+  true,
+);
+
+// Task notes: the smiley-plus button opens the six quick picks; Escape or a
+// click anywhere else closes them. A failed reaction shows a toast; a 422
+// brings its own through HX-Trigger.
+function closeQuickReact(bar: HTMLElement) {
+  bar.classList.add("hidden");
+  document.querySelector(`[data-toggle="#${bar.id}"]`)?.setAttribute("aria-expanded", "false");
+}
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const opener = target?.closest<HTMLElement>(".note-add")?.dataset.toggle;
+  document.querySelectorAll<HTMLElement>(".quick-react:not(.hidden)").forEach((bar) => {
+    if ((target && bar.contains(target)) || opener === `#${bar.id}`) return;
+    closeQuickReact(bar);
+  });
+});
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "Escape" || event.isComposing) return;
+    const bar = document.querySelector<HTMLElement>(".quick-react:not(.hidden)");
+    if (!bar) return;
+    claimEscape(event);
+    closeQuickReact(bar);
+    document.querySelector<HTMLElement>(`[data-toggle="#${bar.id}"]`)?.focus();
+  },
+  true,
+);
+for (const name of ["htmx:responseError", "htmx:sendError"]) {
+  document.body.addEventListener(name, (event) => {
+    const detail = (event as CustomEvent<{ elt?: Element; xhr?: XMLHttpRequest }>).detail;
+    if (!detail.elt?.closest("[data-note-react]") || detail.xhr?.status === 422) return;
+    showToast({ kind: "error", message: "Couldn't save your reaction. Try again." });
+  });
+}
+
 // <button data-copy="#input"> copies that input's value. `data-copy-message`
 // changes the toast (default "Link copied").
 document.addEventListener("click", (event) => {

@@ -5,8 +5,8 @@ use axum_test::multipart::{MultipartForm, Part};
 use collab::{
     app::App,
     models::{
-        conversations, documents, folders, meetings, memberships, messages, organisations,
-        projects, reactions, task_notes, tasks, users,
+        conversations, documents, folders, meetings, memberships, messages, note_reactions,
+        organisations, projects, reactions, task_notes, tasks, users,
     },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
@@ -23,6 +23,7 @@ struct Globex {
     pending: memberships::Model,
     project: projects::Model,
     task: tasks::Model,
+    note: task_notes::Model,
     general: conversations::Model,
     message: messages::Model,
     group: conversations::Model,
@@ -75,7 +76,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
     )
     .await
     .unwrap();
-    task_notes::Model::create(
+    let note = task_notes::Model::create(
         &ctx.db,
         &task,
         owner.id,
@@ -150,6 +151,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
         pending,
         project,
         task,
+        note,
         general,
         message,
         group,
@@ -228,6 +230,7 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/tasks/{}", globex.task.id), serde_json::json!({ "title": "hijacked", "project_id": "1", "priority": "high" })),
             (format!("/tasks/{}/delete", globex.task.id), serde_json::json!({})),
             (format!("/tasks/{}/notes", globex.task.id), serde_json::json!({ "body": "hijacked" })),
+            (format!("/tasks/{}/notes/{}/reactions", globex.task.id, globex.note.id), serde_json::json!({ "emoji": "👍", "on": "1" })),
             (format!("/members/{}/approve", globex.pending.id), serde_json::json!({})),
             (format!("/members/{}/reject", globex.pending.id), serde_json::json!({})),
             (format!("/members/{}/role", globex.pending.id), serde_json::json!({ "role": "admin" })),
@@ -245,6 +248,28 @@ async fn org_a_cannot_reach_org_b() {
             let res = request.post(path).add_header(a.0.clone(), a.1.clone()).form(form).await;
             assert_eq!(res.status_code(), 404, "POST {path}");
         }
+        // Alice's own task with Globex's note.
+        let acme_task = tasks::Model::create(
+            &ctx.db,
+            acme.id,
+            &tasks::TaskParams {
+                title: "Acme task".to_string(),
+                project_id: String::new(),
+                assignee_ids: vec![],
+                priority: "low".to_string(),
+                due_on: String::new(),
+                status: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+        let res = request
+            .post(&format!("/tasks/{}/notes/{}/reactions", acme_task.id, globex.note.id))
+            .add_header(a.0.clone(), a.1.clone())
+            .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
+            .await;
+        assert_eq!(res.status_code(), 404, "own task, Globex note");
+        assert!(!res.text().contains(SECRET), "own task, Globex note");
 
         let res = request
             .post(&format!("/documents/folders/{}/files", globex.folder.id))
@@ -287,8 +312,9 @@ async fn org_a_cannot_reach_org_b() {
         assert_eq!(task_notes::Entity::find().count(&ctx.db).await.unwrap(), 1);
         assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 1);
         assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
+        assert_eq!(note_reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(meetings::Entity::find().count(&ctx.db).await.unwrap(), 1);
-        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 2, "Globex's and alice's");
         assert_eq!(projects::Entity::find().count(&ctx.db).await.unwrap(), 2);
         let dms = conversations::Entity::find()
             .all(&ctx.db)

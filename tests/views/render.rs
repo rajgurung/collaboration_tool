@@ -387,3 +387,63 @@ fn renders_a_message_as_one_block() {
     assert!(!others.contains("stamp-pad-tick"), "{others}");
     assert!(!others.contains("msg-foot"), "{others}");
 }
+
+/// One task note: the quick bar and the chips post to the note's own route,
+/// every button is a plain button, and the text is escaped.
+#[test]
+fn renders_a_note_with_reactions() {
+    let reactor =
+        |name: &str| serde_json::json!({ "name": name, "username": name, "color": "#ffb454" });
+    let pick = |emoji: &str, mine: bool| serde_json::json!({ "emoji": emoji, "mine": mine });
+    let html = view_engine()
+        .render(
+            "tasks/_note.html",
+            serde_json::json!({
+                "note": {
+                    "id": 5, "task_id": 3, "author": "bob", "color": "#ffb454",
+                    "parts": [{ "text": "<b>Shelves</b> done", "mention": false }],
+                    "at": "Thu 15 Oct, 09:31",
+                    "reactions": [{
+                        "emoji": "👍", "count": 1, "mine": true, "people": [reactor("You")],
+                        "names": "You", "label": "👍 1, you reacted",
+                    }],
+                    "picks": [pick("👍", true), pick("❤️", false), pick("😂", false), pick("🎉", false), pick("👀", false), pick("✅", false)],
+                },
+            }),
+        )
+        .expect("a note should render");
+    assert!(
+        html.contains(r#"<article class="note" id="note-5">"#),
+        "{html}"
+    );
+    assert_eq!(
+        html.matches(r#"hx-post="/tasks/3/notes/5/reactions""#)
+            .count(),
+        7,
+        "six picks and one chip: {html}"
+    );
+    assert_eq!(
+        html.matches(r#"hx-sync="closest .note:replace""#).count(),
+        7,
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<div class="quick-react hidden" id="note-picks-5""#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<div class="note-who list hidden" id="note-who-5">"#),
+        "{html}"
+    );
+    assert_eq!(
+        html.matches("<button").count(),
+        html.matches(r#"<button type="button""#).count(),
+        "every button is type=button: {html}"
+    );
+    assert!(
+        html.contains("&lt;b&gt;Shelves&lt;&#x2F;b&gt; done")
+            || html.contains("&lt;b&gt;Shelves&lt;/b&gt; done"),
+        "{html}"
+    );
+    assert!(!html.contains("<b>Shelves</b>"), "{html}");
+}

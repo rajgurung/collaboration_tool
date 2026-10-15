@@ -4,8 +4,8 @@ use collab::{
     app::App,
     data::notify_hub::{NotifyEvent, NotifyHub},
     models::{
-        access_tokens, conversation_members, conversations, memberships, messages, notifications,
-        organisations, reactions, users,
+        access_tokens, conversation_members, conversations, memberships, messages, note_reactions,
+        notifications, organisations, reactions, task_notes, tasks, users,
     },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
@@ -188,6 +188,41 @@ async fn removing_someone_locks_them_out_of_everything() {
             .await;
         assert_eq!(res.status_code(), 403);
         assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
+        // Nor react to a task note.
+        let task = tasks::Model::create(
+            &ctx.db,
+            org.id,
+            &tasks::TaskParams {
+                title: "Stock count".to_string(),
+                project_id: String::new(),
+                assignee_ids: vec![],
+                priority: "low".to_string(),
+                due_on: String::new(),
+                status: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+        let note = task_notes::Model::create(
+            &ctx.db,
+            &task,
+            org.created_by_id.unwrap(),
+            &task_notes::NoteParams {
+                body: "Shelves done".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let res = request
+            .post(&format!("/tasks/{}/notes/{}/reactions", task.id, note.id))
+            .add_header(carol.0.clone(), carol.1.clone())
+            .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
+            .await;
+        assert_eq!(res.status_code(), 403);
+        assert_eq!(
+            note_reactions::Entity::find().count(&ctx.db).await.unwrap(),
+            0
+        );
         // Nor open, reload or reply in a thread.
         let thread = format!("/chat/{}/threads/{}", general.id, mention.id);
         for path in [
