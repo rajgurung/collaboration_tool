@@ -453,7 +453,6 @@
      pane: right for others' messages, left for your own. */
   .msg-tools { position: absolute; left: 0; top: -34px; z-index: 5; display: none; align-items: center; gap: 2px; padding: 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lift); }
   .msg-own .msg-tools { left: auto; right: 0; }
-  .chat-feed > .msg:first-child .msg-tools { top: auto; bottom: -40px; }
   .msg-tools button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 9px; background: none; font-size: 19px; cursor: pointer; }
   .msg-tools button:hover { background: var(--chip); }
   .msg-tools button.mine { background: var(--active-bg); }
@@ -1026,6 +1025,10 @@
        open behind the pointer. `:has(:focus-visible)` alone hides it for a
        moment as Tab leaves the bubble, and the browser then skips it. */
     .msg:hover .msg-tools, .msg:focus-within:not(:has(:focus:not(:focus-visible))) .msg-tools { display: flex; }
+    /* The faces and the chips have their own lists; the toolbar would sit on top of them. */
+    .msg:has(.msg-receipt:hover, .react-wrap:hover) .msg-tools { display: none; }
+    /* Room above the top message for its toolbar, which always opens upward. */
+    .chat-feed { padding-top: 44px; }
     .react:hover { background: var(--chip); }
     .react.mine:hover { background: var(--active-bg); }
   }
