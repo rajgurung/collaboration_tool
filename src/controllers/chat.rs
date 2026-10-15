@@ -525,6 +525,7 @@ async fn show(
     let feed = main_feed(&ctx, &member, &conversation, &names).await?;
     let label = label(&conversation, &members, &names, me);
     let mention_names = mention_names(&conversation, &people, me);
+    let everyone_hint = everyone_hint(&conversation, &label, &people, me);
     format::render().view(
         &v,
         "chat/show.html",
@@ -539,6 +540,7 @@ async fn show(
                     "label": label,
                     "members": people,
                     "mention_names": mention_names,
+                    "everyone_hint": everyone_hint,
                 },
                 "messages": feed,
             }),
@@ -573,6 +575,28 @@ fn mention_names(conversation: &conversations::Model, people: &[Person], me: i64
     } else {
         format!("{EVERYONE},{names}")
     }
+}
+
+/// The hint under "@everyone" in the @ menu: who it will tell. Empty in a DM,
+/// which has no @everyone.
+fn everyone_hint(
+    conversation: &conversations::Model,
+    label: &str,
+    people: &[Person],
+    me: i64,
+) -> String {
+    let place = match conversation.kind.as_str() {
+        kind::DM => return String::new(),
+        kind::CHANNEL => format!("#{label}"),
+        _ => label.to_string(),
+    };
+    let others = people.iter().filter(|p| p.id != me).count();
+    let count = if others == 1 {
+        "1 person".to_string()
+    } else {
+        format!("{others} people")
+    };
+    format!("Notify everyone in {place} ({count})")
 }
 
 /// The main feed as the viewer sees it: three queries (messages, reactions,
@@ -900,6 +924,7 @@ async fn thread(
         "kind": conversation.kind,
         "label": label,
         "mention_names": mention_names(&conversation, &people, me),
+        "everyone_hint": everyone_hint(&conversation, &label, &people, me),
     });
     page["thread"] = serde_json::json!({
         "parent_id": parent.id,

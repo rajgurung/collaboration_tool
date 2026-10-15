@@ -702,8 +702,15 @@
   .notice-dot { flex-shrink: 0; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .mention { padding: 0 2px; border-radius: 4px; font-weight: 600; color: var(--progress); background: color-mix(in srgb, var(--progress) 12%, transparent); }
   :has(> textarea[data-mentions]) { position: relative; }
-  .mention-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; min-width: 180px; max-width: 280px; margin: 0; padding: 6px; list-style: none; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-lift); }
-  .mention-menu li { padding: 8px 10px; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; }
+  .mention-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 20; width: 300px; max-width: 100%; box-sizing: border-box; margin: 0; padding: 6px; list-style: none; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-lift); }
+  .mention-menu li { display: flex; align-items: center; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer; }
+  /* "everyone" comes first, with a line under it. The line is a border, so
+     every <li> stays an option for the arrow keys. */
+  .mention-menu li[data-name="everyone"] { border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .mm-icon { display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 999px; background: var(--active-bg); color: var(--link); }
+  .mm-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+  .mm-text b { font-weight: 700; }
+  .mm-hint { font-size: 12px; font-weight: 500; color: var(--muted); }
   .mention-menu li[aria-selected="true"], .mention-menu li:hover { background: var(--chip); }
   .msg-own .mention { color: inherit; background: color-mix(in srgb, var(--own-text) 10%, transparent); }
 

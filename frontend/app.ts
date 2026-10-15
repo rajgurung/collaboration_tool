@@ -487,6 +487,27 @@ function markActiveMention() {
   mentionField?.setAttribute("aria-activedescendant", `mention-option-${mentionActive}`);
 }
 
+// "@everyone" with an icon and who it tells. The hint is text, never HTML.
+const USERS_ICON =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>';
+function everyoneOption(li: HTMLLIElement, hint: string) {
+  const icon = document.createElement("span");
+  icon.className = "mm-icon";
+  icon.innerHTML = USERS_ICON;
+  const text = document.createElement("span");
+  text.className = "mm-text";
+  const label = document.createElement("b");
+  label.textContent = "@everyone";
+  text.append(label);
+  if (hint) {
+    const small = document.createElement("span");
+    small.className = "mm-hint";
+    small.textContent = hint;
+    text.append(small);
+  }
+  li.append(icon, text);
+}
+
 function showMentions(field: HTMLTextAreaElement) {
   const found = mentionQuery(field);
   const names = (field.dataset.mentions ?? "").split(",").filter(Boolean);
@@ -500,7 +521,8 @@ function showMentions(field: HTMLTextAreaElement) {
       li.id = `mention-option-${i}`;
       li.setAttribute("role", "option");
       li.dataset.name = name;
-      li.textContent = `@${name}`;
+      if (name === "everyone") everyoneOption(li, field.dataset.everyoneHint ?? "");
+      else li.textContent = `@${name}`;
       return li;
     }),
   );

@@ -168,6 +168,10 @@ async fn everyone_tells_each_active_member_once() {
             page.contains(r#"data-mentions="everyone,"#),
             "the picker offers everyone first"
         );
+        assert!(
+            page.contains(r#"data-everyone-hint="Notify everyone in #general ("#),
+            "{page}"
+        );
 
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
@@ -272,6 +276,7 @@ async fn everyone_stays_inside_groups_and_dms() {
             .await
             .text();
         assert!(page.contains("data-mentions=\"carol,alice\""), "{page}");
+        assert!(!page.contains("data-everyone-hint"), "no @everyone in a DM");
         request
             .post(&format!("/chat/{}/messages", dm.id))
             .add_header(alice.0.clone(), alice.1.clone())
