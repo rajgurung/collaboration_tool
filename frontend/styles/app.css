@@ -414,6 +414,8 @@
   /* One row: the avatar sits level with the bubble. */
   .msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; align-items: end; border-radius: 12px; }
   .msg + .msg-start, .msg-start + .msg-start { margin-top: 12px; }
+  /* A chip's tap area reaches 9px below it; keep it off the next bubble in a run. */
+  .msg:has(> .msg-body .reacts:not(:empty)) + .msg:not(.msg-start) { margin-top: 8px; }
   .msg > .msg-av { grid-column: 1; display: inline-flex; }
   /* Chips hang 18px below the bubble, so the avatar lifts to stay level with it. */
   .msg:has(> .msg-body > .reacts:not(:empty)) > .msg-av { margin-bottom: 18px; }
