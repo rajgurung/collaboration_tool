@@ -95,7 +95,7 @@ document.body.addEventListener("htmx:wsOpen", (event) => {
 });
 
 // Chat message actions: a tap, click, Enter or Space on a bubble opens its
-// sheet (react, who reacted). Taps on a chip, receipt, link or button do their
+// sheet (react, who reacted). Taps on a chip, the thread footer or a button do their
 // own thing, and a tap that ends a text selection leaves the selection alone.
 function openActions(bubble: HTMLElement) {
   const url = bubble.dataset.actionsUrl;
@@ -124,7 +124,7 @@ function selectingIn(bubble: Element) {
 document.addEventListener("click", (event) => {
   const target = event.target as Element | null;
   const bubble = target?.closest<HTMLElement>(".bubble[data-actions-url]");
-  if (!bubble || target?.closest("a, button, .react, .thread-link, .msg-receipt")) return;
+  if (!bubble || target?.closest("a, button, .react, .thread-foot")) return;
   window.clearTimeout(pendingOpen);
   if (event.detail > 1 || selectingIn(bubble)) return;
   if (lastPointer !== "mouse") return openActions(bubble);
