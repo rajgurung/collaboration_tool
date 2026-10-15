@@ -1,4 +1,5 @@
 // Small client helpers. HTMX does the heavy lifting; this covers dialogs and toasts.
+import { CATEGORIES } from "./emoji";
 
 type ToastKind = "success" | "error" | "info";
 type ToastDetail = { kind?: ToastKind; message: string };
@@ -579,6 +580,348 @@ mentionMenu.addEventListener("mousedown", (event) => {
 document.addEventListener("focusout", (event) => {
   if (event.target === mentionField) closeMentions();
 });
+
+// Emoji picker: one element, built on first use and moved to the field it
+// serves. A popover on desktop. Everything is built with textContent; only
+// the constant icons below go through innerHTML.
+const SEARCH_ICON =
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>';
+const CLEAR_ICON =
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+const CLOCK_ICON =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+const RECENT_KEY = "collab:emoji-recent";
+const RECENT_MAX = 16;
+const GRID_COLUMNS = 8;
+const EMOJI_NAMES = new Map<string, string>(CATEGORIES.flatMap((c) => c.list.map(([e, name]): [string, string] => [e, name])));
+
+// Recent picks, newest first. No storage (private browsing) or bad JSON means none.
+function recentEmoji(): string[] {
+  try {
+    const list: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    if (!Array.isArray(list)) return [];
+    return list.filter((e): e is string => typeof e === "string" && EMOJI_NAMES.has(e)).slice(0, RECENT_MAX);
+  } catch {
+    return [];
+  }
+}
+function rememberEmoji(emoji: string) {
+  try {
+    const list = [emoji, ...recentEmoji().filter((e) => e !== emoji)].slice(0, RECENT_MAX);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch {
+    // No storage: Recent just stays empty.
+  }
+}
+
+// Every picker button. type="button", because the picker sits inside the
+// chat form and the note form, where a default button would submit them.
+function pickerButton(className: string, label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  if (className) button.className = className;
+  button.setAttribute("aria-label", label);
+  return button;
+}
+
+type Picker = {
+  root: HTMLElement;
+  search: HTMLInputElement;
+  clear: HTMLButtonElement;
+  tabs: HTMLElement;
+  body: HTMLElement;
+  footEmoji: HTMLElement;
+  footName: HTMLElement;
+};
+let picker: Picker | null = null;
+let pickerField: HTMLTextAreaElement | null = null;
+let pickerToggle: HTMLButtonElement | null = null;
+
+function buildPicker(): Picker {
+  const root = document.createElement("div");
+  root.id = "emoji-picker";
+  root.className = "ep";
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-label", "Emoji");
+
+  const searchRow = document.createElement("div");
+  searchRow.className = "ep-search";
+  const icon = document.createElement("span");
+  icon.className = "ep-search-icon";
+  icon.innerHTML = SEARCH_ICON;
+  // No name, so neither the chat socket nor the note form sends it.
+  const search = document.createElement("input");
+  search.type = "search";
+  search.placeholder = "Search emoji";
+  search.setAttribute("aria-label", "Search emoji");
+  search.autocomplete = "off";
+  const clear = pickerButton("ep-clear", "Clear search");
+  clear.innerHTML = CLEAR_ICON;
+  clear.hidden = true;
+  searchRow.append(icon, search, clear);
+
+  const tabs = document.createElement("div");
+  tabs.className = "ep-tabs";
+  const recentTab = pickerButton("ep-tab", "Recent");
+  recentTab.dataset.section = "recent";
+  recentTab.innerHTML = CLOCK_ICON;
+  tabs.append(recentTab);
+  for (const category of CATEGORIES) {
+    const tab = pickerButton("ep-tab", category.label);
+    tab.dataset.section = category.id;
+    const glyph = document.createElement("span");
+    glyph.className = "emoji";
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.textContent = category.icon;
+    tab.append(glyph);
+    tabs.append(tab);
+  }
+
+  const body = document.createElement("div");
+  body.className = "ep-body";
+
+  const foot = document.createElement("div");
+  foot.className = "ep-foot";
+  foot.setAttribute("aria-hidden", "true");
+  const footEmoji = document.createElement("span");
+  footEmoji.className = "emoji";
+  const footName = document.createElement("b");
+  const footHint = document.createElement("span");
+  footHint.className = "ep-foot-hint";
+  footHint.textContent = "Enter to add · Esc to close";
+  foot.append(footEmoji, footName, footHint);
+
+  root.append(searchRow, tabs, body, foot);
+  const built = { root, search, clear, tabs, body, footEmoji, footName };
+
+  search.addEventListener("input", () => renderPicker(built));
+  clear.addEventListener("click", () => {
+    search.value = "";
+    renderPicker(built);
+    search.focus();
+  });
+  tabs.addEventListener("click", (event) => {
+    const tab = (event.target as Element).closest<HTMLElement>(".ep-tab");
+    const section = tab && body.querySelector<HTMLElement>(`[data-section="${tab.dataset.section}"]`);
+    if (section) body.scrollTop = section.offsetTop;
+  });
+  body.addEventListener("scroll", () => markPickerTab(built));
+  body.addEventListener("click", (event) => {
+    const button = (event.target as Element).closest<HTMLElement>("[data-emoji]");
+    if (button?.dataset.emoji) insertEmoji(button.dataset.emoji);
+  });
+  body.addEventListener("focusin", (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("[data-emoji]");
+    if (!button) return;
+    body.querySelectorAll<HTMLButtonElement>("[data-emoji]").forEach((b) => (b.tabIndex = b === button ? 0 : -1));
+    showPickerName(built, button);
+  });
+  body.addEventListener("mouseover", (event) => {
+    const button = (event.target as Element).closest<HTMLElement>("[data-emoji]");
+    if (button) showPickerName(built, button);
+  });
+  root.addEventListener("keydown", (event) => pickerKeys(built, event));
+  return built;
+}
+
+function showPickerName(p: Picker, button: HTMLElement) {
+  p.footEmoji.textContent = button.dataset.emoji ?? "";
+  p.footName.textContent = EMOJI_NAMES.get(button.dataset.emoji ?? "") ?? "";
+}
+
+function emojiSection(id: string, label: string, list: readonly string[]): HTMLElement {
+  const section = document.createElement("section");
+  section.dataset.section = id;
+  const heading = document.createElement("p");
+  heading.className = "ep-label";
+  heading.textContent = label;
+  const grid = document.createElement("div");
+  grid.className = "ep-grid";
+  for (const emoji of list) {
+    const button = pickerButton("", EMOJI_NAMES.get(emoji) ?? emoji);
+    button.dataset.emoji = emoji;
+    button.textContent = emoji;
+    button.tabIndex = -1;
+    grid.append(button);
+  }
+  section.append(heading, grid);
+  return section;
+}
+
+// Every word of the search starts some word of the emoji's name.
+function searchEmoji(query: string): string[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return [...EMOJI_NAMES].filter(([, name]) => {
+    const parts = name.split(" ");
+    return words.every((w) => parts.some((part) => part.startsWith(w)));
+  }).map(([emoji]) => emoji);
+}
+
+function renderPicker(p: Picker) {
+  const query = p.search.value.trim();
+  p.clear.hidden = query === "";
+  p.tabs.hidden = query !== "";
+  const sections: HTMLElement[] = [];
+  if (query) {
+    const found = searchEmoji(query);
+    if (found.length) sections.push(emojiSection("results", "Results", found));
+    else {
+      const empty = document.createElement("div");
+      empty.className = "ep-empty";
+      const title = document.createElement("strong");
+      title.textContent = `No emoji match "${query}"`;
+      const hint = document.createElement("span");
+      hint.textContent = "Try a word like smile, heart or rocket.";
+      empty.append(title, hint);
+      sections.push(empty);
+    }
+  } else {
+    const recent = recentEmoji();
+    // Recent and its tab stay hidden until something has been picked.
+    p.tabs.querySelector<HTMLElement>('[data-section="recent"]')!.hidden = recent.length === 0;
+    if (recent.length) sections.push(emojiSection("recent", "Recent", recent));
+    for (const category of CATEGORIES) sections.push(emojiSection(category.id, category.label, category.list.map(([e]) => e)));
+  }
+  p.body.replaceChildren(...sections);
+  p.body.scrollTop = 0;
+  const first = p.body.querySelector<HTMLButtonElement>("[data-emoji]");
+  if (first) {
+    first.tabIndex = 0;
+    showPickerName(p, first);
+  } else {
+    p.footEmoji.textContent = "";
+    p.footName.textContent = "";
+  }
+  markPickerTab(p);
+}
+
+// The tab for the section at the top of the scroll is the pressed one.
+function markPickerTab(p: Picker) {
+  let current = "";
+  p.body.querySelectorAll<HTMLElement>("section[data-section]").forEach((section) => {
+    if (section.offsetTop <= p.body.scrollTop + 4) current = section.dataset.section ?? "";
+  });
+  p.tabs.querySelectorAll<HTMLElement>(".ep-tab").forEach((tab) => tab.setAttribute("aria-pressed", String(tab.dataset.section === current)));
+}
+
+// Arrows move through the grid (up and down by a row), Home and End go to
+// the ends of the section, ArrowDown leaves the search for the grid, and
+// Enter in the search adds the first result. Enter or Space on an emoji
+// clicks it.
+function pickerKeys(p: Picker, event: KeyboardEvent) {
+  if (event.isComposing) return;
+  if (event.target === p.search) {
+    const first = p.body.querySelector<HTMLButtonElement>("[data-emoji]");
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (first?.dataset.emoji) insertEmoji(first.dataset.emoji);
+    } else if (event.key === "ArrowDown" && first) {
+      event.preventDefault();
+      (p.body.querySelector<HTMLButtonElement>('[data-emoji][tabindex="0"]') ?? first).focus();
+    }
+    return;
+  }
+  const button = (event.target as Element).closest<HTMLButtonElement>("[data-emoji]");
+  if (!button) return;
+  const all = [...p.body.querySelectorAll<HTMLButtonElement>("[data-emoji]")];
+  const inSection = [...(button.parentElement?.querySelectorAll<HTMLButtonElement>("[data-emoji]") ?? [])];
+  const i = all.indexOf(button);
+  const moves: Record<string, () => HTMLButtonElement | undefined> = {
+    ArrowRight: () => all[i + 1],
+    ArrowLeft: () => all[i - 1],
+    ArrowDown: () => all[Math.min(i + GRID_COLUMNS, all.length - 1)],
+    ArrowUp: () => (i < GRID_COLUMNS ? undefined : all[i - GRID_COLUMNS]),
+    Home: () => inSection[0],
+    End: () => inSection[inSection.length - 1],
+  };
+  const move = moves[event.key];
+  if (!move) return;
+  event.preventDefault();
+  const next = move();
+  if (next) {
+    next.focus();
+    next.scrollIntoView({ block: "nearest" });
+  } else if (event.key === "ArrowUp") p.search.focus();
+}
+
+// Adds the emoji at the field's cursor. A field that has lost focus keeps
+// its selection, so this works with the focus in the picker. The input event
+// lets autogrow and the mention menu catch up.
+function insertEmoji(emoji: string) {
+  const field = pickerField;
+  if (!field?.isConnected) return;
+  const start = field.selectionStart;
+  const end = field.selectionEnd;
+  if (field.maxLength > 0 && field.value.length - (end - start) + emoji.length > field.maxLength) return;
+  field.setRangeText(emoji, start, end, "end");
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  rememberEmoji(emoji);
+}
+
+function closePicker(refocus: boolean) {
+  const field = pickerField;
+  picker?.root.remove();
+  if (pickerToggle) {
+    pickerToggle.setAttribute("aria-expanded", "false");
+    pickerToggle.setAttribute("aria-label", "Emoji");
+  }
+  pickerField = null;
+  pickerToggle = null;
+  if (refocus && field?.isConnected) field.focus();
+}
+
+function openPicker(toggle: HTMLButtonElement) {
+  const field = document.getElementById(toggle.dataset.emojiFor ?? "");
+  if (!(field instanceof HTMLTextAreaElement)) return;
+  // The field it last served may have left the page with the picker in it
+  // (the task sheet re-renders after a note is posted).
+  if (picker && !picker.root.isConnected) {
+    document.querySelectorAll("[data-emoji-for]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    pickerField = null;
+    pickerToggle = null;
+  }
+  if (pickerField) closePicker(false);
+  picker ??= buildPicker();
+  pickerField = field;
+  pickerToggle = toggle;
+  picker.search.value = "";
+  renderPicker(picker);
+  picker.root.className = "ep ep-pop";
+  // The row that holds the field: the chat composer, or the note form's row.
+  const row = field.closest(".field")?.parentElement;
+  if (!row) return;
+  row.append(picker.root);
+  // Open downward when there is no room above inside the scroll box (the task sheet).
+  const box = row.closest(".sheet-body, .chat-screen")?.getBoundingClientRect().top ?? 0;
+  picker.root.classList.toggle("ep-below", row.getBoundingClientRect().top - box < picker.root.offsetHeight + 8);
+  toggle.setAttribute("aria-expanded", "true");
+  picker.search.focus();
+}
+
+document.addEventListener("click", (event) => {
+  const toggle = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-emoji-for]");
+  if (!toggle) return;
+  if (pickerToggle === toggle && picker?.root.isConnected) closePicker(true);
+  else openPicker(toggle);
+});
+// Desktop: a press anywhere outside the picker, its field and its button closes it.
+document.addEventListener("pointerdown", (event) => {
+  if (!pickerField || !picker) return;
+  const target = event.target as Node;
+  if (picker.root.contains(target) || pickerField.contains(target) || pickerToggle?.contains(target)) return;
+  closePicker(false);
+});
+// Escape closes it and goes back to the field. Inside the task sheet's dialog
+// the Escape is claimed, so the sheet stays open.
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "Escape" || event.isComposing || !pickerField || !picker?.root.isConnected) return;
+    claimEscape(event);
+    closePicker(true);
+  },
+  true,
+);
 
 // Welcome pop-up on Home: shown once, a few slides with Next and Back. Closing
 // it any way (Skip, ×, Escape, Get started) records that it was seen.
