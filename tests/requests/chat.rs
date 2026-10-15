@@ -589,6 +589,10 @@ async fn groups_count_who_has_read() {
             !tick_slot(&page, message.id).contains("tick-read"),
             "carol has not read it"
         );
+        assert!(
+            tick_slot(&page, message.id).contains(", Read by bob</span>"),
+            "the tick says who has read it so far"
+        );
 
         let carols = open(&request, &carol, group.id).await;
         assert!(
