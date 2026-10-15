@@ -636,6 +636,12 @@ type Picker = {
 let picker: Picker | null = null;
 let pickerField: HTMLTextAreaElement | null = null;
 let pickerToggle: HTMLButtonElement | null = null;
+// Phones: the picker is docked where the keyboard was. A tap on the picker
+// can move the blurred field's cursor (seen in Chrome's touch emulation), so
+// while docked the picker keeps the cursor itself.
+let pickerDocked = false;
+let dockedCaret = 0;
+let dockedCaretEnd = 0;
 
 function buildPicker(): Picker {
   const root = document.createElement("div");
@@ -797,10 +803,11 @@ function renderPicker(p: Picker) {
 
 // The tab for the section at the top of the scroll is the pressed one.
 function markPickerTab(p: Picker) {
-  let current = "";
-  p.body.querySelectorAll<HTMLElement>("section[data-section]").forEach((section) => {
-    if (section.offsetTop <= p.body.scrollTop + 4) current = section.dataset.section ?? "";
-  });
+  const sections = [...p.body.querySelectorAll<HTMLElement>("section[data-section]")];
+  let current = sections[0]?.dataset.section ?? "";
+  for (const section of sections) {
+    if (section.offsetTop <= p.body.scrollTop + 16) current = section.dataset.section ?? "";
+  }
   p.tabs.querySelectorAll<HTMLElement>(".ep-tab").forEach((tab) => tab.setAttribute("aria-pressed", String(tab.dataset.section === current)));
 }
 
@@ -850,23 +857,39 @@ function pickerKeys(p: Picker, event: KeyboardEvent) {
 function insertEmoji(emoji: string) {
   const field = pickerField;
   if (!field?.isConnected) return;
-  const start = field.selectionStart;
-  const end = field.selectionEnd;
+  const start = pickerDocked ? dockedCaret : field.selectionStart;
+  const end = pickerDocked ? dockedCaretEnd : field.selectionEnd;
   if (field.maxLength > 0 && field.value.length - (end - start) + emoji.length > field.maxLength) return;
   field.setRangeText(emoji, start, end, "end");
+  dockedCaret = dockedCaretEnd = start + emoji.length;
   field.dispatchEvent(new Event("input", { bubbles: true }));
   rememberEmoji(emoji);
 }
 
+// Keeps a chat feed that was at its newest message there while the picker
+// docks or undocks and the feed's height changes.
+function keepFeedAtEnd(change: () => void) {
+  const feed = document.getElementById("chat-feed");
+  const atEnd = !!feed && feed.scrollHeight - feed.scrollTop - feed.clientHeight < 8;
+  change();
+  if (feed && atEnd) scrollToEnd(feed);
+}
+
 function closePicker(refocus: boolean) {
   const field = pickerField;
-  picker?.root.remove();
+  if (pickerDocked && field) field.setSelectionRange(dockedCaret, dockedCaretEnd);
+  keepFeedAtEnd(() => {
+    picker?.root.remove();
+    field?.form?.classList.remove("docked");
+  });
   if (pickerToggle) {
     pickerToggle.setAttribute("aria-expanded", "false");
     pickerToggle.setAttribute("aria-label", "Emoji");
   }
   pickerField = null;
   pickerToggle = null;
+  pickerDocked = false;
+  // On a phone this runs inside the tap, so the keyboard comes back.
   if (refocus && field?.isConnected) field.focus();
 }
 
@@ -886,6 +909,8 @@ function openPicker(toggle: HTMLButtonElement) {
   pickerToggle = toggle;
   picker.search.value = "";
   renderPicker(picker);
+  toggle.setAttribute("aria-expanded", "true");
+  if (matchMedia("(pointer: coarse)").matches) return dockPicker(picker, field, toggle);
   picker.root.className = "ep ep-pop";
   // The row that holds the field: the chat composer, or the note form's row.
   const row = field.closest(".field")?.parentElement;
@@ -894,8 +919,30 @@ function openPicker(toggle: HTMLButtonElement) {
   // Open downward when there is no room above inside the scroll box (the task sheet).
   const box = row.closest(".sheet-body, .chat-screen")?.getBoundingClientRect().top ?? 0;
   picker.root.classList.toggle("ep-below", row.getBoundingClientRect().top - box < picker.root.offsetHeight + 8);
-  toggle.setAttribute("aria-expanded", "true");
+  // Sections have no position until the picker is on the page.
+  markPickerTab(picker);
   picker.search.focus();
+}
+
+// Phones: the picker goes under the field's form and the keyboard goes down,
+// so the picker stands in for it. In chat the feed shrinks to make room; in
+// the task sheet the sheet scrolls to show it. The search box is not focused,
+// since that would bring the keyboard back up.
+function dockPicker(p: Picker, field: HTMLTextAreaElement, toggle: HTMLButtonElement) {
+  const form = field.form;
+  if (!form) return;
+  pickerDocked = true;
+  dockedCaret = field.selectionStart;
+  dockedCaretEnd = field.selectionEnd;
+  p.root.className = "ep ep-dock";
+  toggle.setAttribute("aria-label", "Show keyboard");
+  keepFeedAtEnd(() => {
+    form.after(p.root);
+    if (form.classList.contains("composer")) form.classList.add("docked");
+  });
+  field.blur();
+  if (form.closest(".sheet-body")) p.root.scrollIntoView({ block: "end" });
+  markPickerTab(p);
 }
 
 document.addEventListener("click", (event) => {
@@ -904,12 +951,21 @@ document.addEventListener("click", (event) => {
   if (pickerToggle === toggle && picker?.root.isConnected) closePicker(true);
   else openPicker(toggle);
 });
-// Desktop: a press anywhere outside the picker, its field and its button closes it.
+// Desktop: a press anywhere outside the picker, its field and its button
+// closes it. Phones: a press on the field closes it so the keyboard can come
+// up; anywhere else (the feed, say) leaves it open.
 document.addEventListener("pointerdown", (event) => {
   if (!pickerField || !picker) return;
   const target = event.target as Node;
+  if (pickerDocked) {
+    if (pickerField.contains(target)) closePicker(false);
+    return;
+  }
   if (picker.root.contains(target) || pickerField.contains(target) || pickerToggle?.contains(target)) return;
   closePicker(false);
+});
+document.addEventListener("focusin", (event) => {
+  if (pickerDocked && event.target === pickerField) closePicker(false);
 });
 // Escape closes it and goes back to the field. Inside the task sheet's dialog
 // the Escape is claimed, so the sheet stays open.
