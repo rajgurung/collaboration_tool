@@ -85,7 +85,7 @@ const RECEIPT_AVATARS: usize = 3;
 /// Past this many readers, the screen-reader label names two and counts the rest.
 const RECEIPT_LABEL_NAMES: usize = 5;
 
-/// Who has read a message, for its author. A DM shows `text` ("Read"); a
+/// Who has read a message. A DM shows `text` ("Read") to the author; a
 /// group or channel shows reader avatars and uses `text` as the screen-reader
 /// label. `all` turns the tick read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -197,8 +197,9 @@ pub fn thread_line(
 /// `start` and `show_time` group consecutive messages from the same person.
 /// Every bubble shows its time; `show_time` now only marks the last message
 /// in a run, which is the one that shows the author's avatar.
-/// `read_receipts` is set on the viewer's own messages, so the page has a slot
-/// for `receipt` even before anyone has read it.
+/// `read_receipts` is set on messages whose readers the viewer sees (see
+/// [`shows_receipt`]), so the page has a slot for `receipt` even before anyone
+/// has read it. The tick in the bubble is only on the viewer's own messages.
 #[derive(Debug, Clone, Serialize)]
 pub struct MessageView {
     pub id: i64,
@@ -342,9 +343,16 @@ pub fn receipt(
     })
 }
 
+/// Whether the viewer sees who read a message. In a group or channel everyone
+/// sees who read every message; in a DM only the author does.
+#[must_use]
+pub fn shows_receipt(conversation_kind: &str, own: bool) -> bool {
+    own || conversation_kind != kind::DM
+}
+
 /// The main feed: marks where each run of messages from one person starts
-/// and ends, and adds receipts to the viewer's own messages, reactions to
-/// every message and reply lines to those with threads.
+/// and ends, and adds receipts (see [`shows_receipt`]), reactions to every
+/// message and reply lines to those with threads.
 #[allow(clippy::too_many_arguments)]
 fn grouped(
     conversation: &conversations::Model,
@@ -366,7 +374,7 @@ fn grouped(
             if let Some(stats) = threads.get(&m.id) {
                 view.thread = thread_line(conversation.id, m.id, stats, names, tz);
             }
-            if view.own {
+            if shows_receipt(&conversation.kind, view.own) {
                 view.read_receipts = true;
                 view.receipt = receipt(&conversation.kind, m.user_id, m.created_at, marks, names);
             }
