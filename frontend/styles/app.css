@@ -417,8 +417,11 @@
   /* A chip's tap area reaches 9px below it; keep it off the next bubble in a run. */
   .msg:has(> .msg-body .reacts:not(:empty)) + .msg:not(.msg-start) { margin-top: 8px; }
   .msg > .msg-av { grid-column: 1; display: inline-flex; }
-  /* Chips hang 18px below the bubble, so the avatar lifts to stay level with it. */
-  .msg:has(> .msg-body > .reacts:not(:empty)) > .msg-av { margin-bottom: 18px; }
+  /* Chips hang 18px below the bubble, and reader faces sit 22px below it, so
+     the avatar lifts to stay level with it. */
+  .msg:has(> .msg-body > .msg-foot > .msg-receipt:not(:empty)) > .msg-av.visible { margin-bottom: 22px; }
+  .msg:has(> .msg-body > .msg-foot > .reacts:not(:empty)) > .msg-av.visible { margin-bottom: 18px; }
+  .msg:has(> .msg-body > .msg-foot > .reacts:not(:empty)) > .msg-av { margin-bottom: 18px; }
   .msg > .msg-body { grid-column: 2; justify-self: start; }
   .msg-own { grid-template-columns: minmax(0, 1fr); }
   .msg-own > .msg-body { grid-column: 1; justify-self: end; }
@@ -431,8 +434,8 @@
      10px in from its left, with a 44px tap area. */
   .reacts { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; margin: -8px 10px 0; padding: 0; }
   .reacts:empty { display: none; }
-  /* Your messages: one row under the bubble, chips on the left and who read
-     it on the right. With no chips it sits 4px under the bubble. */
+  /* One row under the bubble, chips on the left and who read it on the
+     right. With no chips it sits 4px under the bubble. */
   .msg-foot { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; align-self: stretch; min-width: 0; margin-top: 4px; }
   .msg-foot:has(> .reacts:not(:empty)) { margin-top: -8px; }
   .msg-foot > .reacts { margin: 0 0 0 10px; }
@@ -537,9 +540,12 @@
   .tick { display: inline-flex; }
   .tick-read { color: var(--link); }
   .msg-name { margin: 0 0 2px 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
-  /* Who read your message: up to three faces, a 44px tap area, and a list. */
+  /* Who read a message: up to three faces, a 44px tap area, and a list. A DM
+     says "Read" under your own message instead. */
   .msg-receipt { position: relative; display: inline-flex; }
   .msg-receipt:empty { display: none; }
+  .msg-receipt-dm { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; color: var(--muted); }
+  .msg-receipt-dm svg { color: var(--link); }
   .seen { position: relative; display: inline-flex; align-items: center; min-height: 18px; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; }
   .seen::after { content: ""; position: absolute; inset: -13px -6px; }
   .seen-stack { display: inline-flex; align-items: center; }
@@ -554,8 +560,12 @@
   .receipt-stack > * + * { margin-left: -4px; } /* about a quarter, so each initial stays readable */
   .receipt-more { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: var(--chip); color: var(--text); font-size: 9px; font-weight: 700; }
   .receipt-pop-row { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
-  /* Only the last message in a run of your own shows who read it. */
-  /* Live messages land after .chat-empty, so a run can straddle it. */
+  /* Only the last message in a run shows who read it. A message followed by
+     one that is not .msg-start is not the last. Live messages always start a
+     run, so your own run is also followed through them; they land after
+     .chat-empty, so it can straddle that. */
+  .msg:has(+ .msg:not(.msg-start)) .msg-receipt,
+  .msg:has(+ .msg:not(.msg-start)) .msg-foot:has(> .reacts:empty),
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-receipt,
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-foot:has(> .reacts:empty) { display: none; }
   .composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
