@@ -558,7 +558,19 @@
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-receipt,
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-foot:has(> .reacts:empty) { display: none; }
   .composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
-  .composer textarea { flex: 1; min-height: 44px; max-height: 140px; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 22px; padding: 11px 16px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
+  .composer textarea { display: block; width: 100%; min-height: 44px; max-height: 140px; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 22px; padding: 11px 16px 11px 46px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
+  .composer.docked { padding-bottom: 8px; }
+  /* A text field with the emoji button inside it, bottom left. */
+  .field { position: relative; flex: 1; min-width: 0; }
+  .field-emoji { position: absolute; left: 0; bottom: 0; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: none; color: var(--muted); cursor: pointer; }
+  .field-emoji:hover { color: var(--text); }
+  .field-emoji[aria-expanded="true"] { color: var(--link); }
+  /* Phones: while the picker stands in for the keyboard, the button brings the keyboard back. */
+  .field-emoji .ic-keyboard { display: none; }
+  @media (pointer: coarse) {
+    .field-emoji[aria-expanded="true"] .ic-smile { display: none; }
+    .field-emoji[aria-expanded="true"] .ic-keyboard { display: block; }
+  }
   .composer textarea:focus { border-color: var(--accent); }
   .chat-empty { margin: auto; padding: 24px; text-align: center; color: var(--muted); }
   .chat-feed:has(.msg) .chat-empty { display: none; }
