@@ -870,11 +870,12 @@ async fn sheet_data(
     let list = task_notes::Model::list_for_task(&ctx.db, task).await?;
     let ids: Vec<i64> = list.iter().map(|n| n.id).collect();
     let mut reactions = note_reactions::Model::for_notes(&ctx.db, member.org.id, &ids).await?;
+    let note_names = mentionable(&team_list);
     let notes: Vec<NoteView> = list
         .iter()
         .map(|n| {
             let rows = reaction_rows(reactions.remove(&n.id).unwrap_or_default(), &team);
-            note_view(n, &team, &team_list, &rows, member)
+            note_view(n, &team, &note_names, &rows, member)
         })
         .collect();
     let people: Vec<Chip> = task_assignees::Model::for_task(&ctx.db, member.org.id, task.id)
@@ -956,10 +957,21 @@ fn reaction_rows(
         .collect()
 }
 
+/// The names a note's text can mention: the team, and "everyone" so that
+/// "@everyone" is highlighted.
+fn mentionable(team_list: &[(i64, String)]) -> Vec<(i64, String)> {
+    team_list
+        .iter()
+        .cloned()
+        // Not a person; only its name is used here.
+        .chain([(0, EVERYONE.to_string())])
+        .collect()
+}
+
 fn note_view(
     note: &task_notes::Model,
     team: &HashMap<i64, String>,
-    team_list: &[(i64, String)],
+    mentionable: &[(i64, String)],
     rows: &[ReactionRow],
     member: &CurrentMember,
 ) -> NoteView {
@@ -973,15 +985,7 @@ fn note_view(
         task_id: note.task_id,
         color: avatar_color(&author),
         author,
-        parts: mention_parts(
-            &note.body,
-            &team_list
-                .iter()
-                .cloned()
-                // Not a person; only its name is used here.
-                .chain([(0, EVERYONE.to_string())])
-                .collect::<Vec<_>>(),
-        ),
+        parts: mention_parts(&note.body, mentionable),
         at: time::local(note.created_at, member.tz())
             .format("%a %-d %b, %H:%M")
             .to_string(),
@@ -1138,7 +1142,7 @@ async fn react_note(
     let view = note_view(
         &note,
         &team,
-        &team_list,
+        &mentionable(&team_list),
         &reaction_rows(rows, &team),
         &member,
     );
