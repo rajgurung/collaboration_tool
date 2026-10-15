@@ -165,9 +165,14 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
    bubble's bottom edge. Others' messages: from the left, away from the time stamp.
    Your messages: from the right, so a short bubble's chips never run off screen. */
 .reacts { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; margin: -8px 10px 0 10px; align-self: flex-start; }
-.msg-own .reacts { align-self: flex-end; justify-content: flex-end; }
+/* Your messages: one row under the bubble, reactions on the left, who saw it on the right. */
+.msg-foot { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; align-self: stretch; min-width: 0; }
+.msg-foot:has(> .reacts) { margin-top: -8px; }
+.msg-foot:not(:has(> .reacts)) { margin-top: 4px; }
+.msg-foot > .reacts { margin: 0 0 0 10px; align-self: auto; }
+.msg-foot > .seen { min-height: 18px; margin: 0 6px 0 auto; transform: translateY(3px); }
 /* A bubble with chips gets 5px more at the bottom, so the chips never cover the time. */
-.msg-body:has(> .reacts) > .bubble:not(:has(.thread-foot)) { padding-bottom: 12px; }
+.msg-body:is(:has(> .reacts), :has(> .msg-foot > .reacts)) > .bubble:not(:has(.thread-foot)) { padding-bottom: 12px; }
 .react-chip { position: relative; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px 0 6px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--text); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--bg); }
 .react-chip .emoji { font-size: 14px; }
 .react-chip::after { content: ""; position: absolute; inset: -9px -2px; } /* 44px tall tap area */
@@ -351,7 +356,7 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
         <li>Every message shows its time. It costs no extra row now, so a run no longer needs to hide it.</li>
         <li>Ticks: grey when sent, amber-brown (<code>--link</code>) when everyone has read it, a clock while sending. Amber itself is too faint on the own bubble.</li>
         <li>Each emoji gets its own small chip with its own count ("👍 4 · 🎉 3 · ❤️ 1"), most used first, so you can see how many people picked each one. The chips sit in one row on the bubble’s bottom edge and wrap if there are many.</li>
-        <li>On others' messages the chips start 10px in from the bubble's left edge, away from the time. On your messages they start from the right edge, so a short bubble's chips never run off screen. The bubble gets 5px more at the bottom so the chips never cover the time.</li>
+        <li>Chips start 10px in from the bubble's left edge on every message, away from the time. On your messages the faces of who saw it sit at the right end of the same row (section 8). The bubble gets 5px more at the bottom so the chips never cover the time.</li>
         <li>The chip you reacted with is amber. The others stay neutral.</li>
         <li>Each chip is 26px to look at but has a 44px tap area. Tapping a chip shows who reacted with it. The avatar lifts to stay level with the bubble.</li>
         <li>Thread replies become a footer inside the bubble under a hairline: faces, "3 replies", time of the last reply. 44px tall, a real link.</li>
@@ -475,7 +480,7 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
 
 <section class="section" id="seen">
   <h2>8. Who read it</h2>
-  <p class="lead">Changed at Raj's request: the faces of who has read your message stay on each message, as they do today. They sit right under the bubble, aligned to its right edge, below any reaction chips. Time and ticks stay inside the bubble.</p>
+  <p class="lead">Changed at Raj's request: the faces of who has read your message stay on each message, as they do today. They sit right under the bubble on its right side. Reaction chips sit on the left side of the same row, pinned to the bubble's edge. Time and ticks stay inside the bubble.</p>
   <div class="shots">
     <div class="shot shot-phone"><span class="shot-label">Phone · tapped the faces on your message</span><div id="p-seen"></div></div>
     <div class="shot"><span class="shot-label">Close up</span><div class="specimen" id="spec-seen"></div></div>
@@ -485,7 +490,7 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
         <li>Same rule as today: the faces show under the last of your messages in a run, so a run of five messages does not repeat them five times.</li>
         <li>Up to three faces, then "+4". Nothing shows until someone has read it.</li>
         <li>Phone: tap the faces (44px tap area) to list everyone who read it. Desktop: hover or focus shows the same list. This is today's list, restyled.</li>
-        <li>The faces sit below the reaction chips, so the chips stay pinned to the bubble and the faces never cover them.</li>
+        <li>One row under your bubble: reaction chips on the left, who saw it on the right. Others' messages have chips on the left too, so reactions are always in the same place. If a short message has many chips, the row widens past the bubble to the left, and the faces stay on the right.</li>
         <li>The tick inside the bubble turns amber-brown once everyone in the room has read it. The faces say who.</li>
         <li>Direct messages: no faces, as today. The tick inside the bubble shows "read".</li>
         <li>Others' messages never show receipts, as today.</li>
@@ -541,7 +546,7 @@ function msg(m) {
   const cls = ["msg", own && "msg-own", m.start && "msg-start", m.hover && "hover"].filter(Boolean).join(" ");
   const avatar = own ? "" : `<span class="msg-av${m.last ? "" : " invisible"}">${av(m.who)}</span>`;
   const name = !own && m.start && !m.dm ? `<span class="msg-name">${m.who}</span>` : "";
-  return `<div class="${cls}">${avatar}<div class="msg-body">${m.hover ? tools() : ""}${name}<div class="bubble" tabindex="0"><div class="bubble-main">${m.text}<span class="stamp-pad"></span>${stamp(m, own)}</div>${m.thread ? threadFoot(m.thread) : ""}</div>${m.reacts ? pill(m.reacts) : ""}${m.seen ? seen(m.seen) : ""}${m.tick === "failed" ? `<button type="button" class="msg-failed">${ic("circle-alert", 16)}Not sent. Tap to try again</button>` : ""}${m.extra || ""}</div></div>`;
+  return `<div class="${cls}">${avatar}<div class="msg-body">${m.hover ? tools() : ""}${name}<div class="bubble" tabindex="0"><div class="bubble-main">${m.text}<span class="stamp-pad"></span>${stamp(m, own)}</div>${m.thread ? threadFoot(m.thread) : ""}</div>${own ? (m.reacts || m.seen ? `<div class="msg-foot">${m.reacts ? pill(m.reacts) : ""}${m.seen ? seen(m.seen) : ""}</div>` : "") : (m.reacts ? pill(m.reacts) : "")}${m.tick === "failed" ? `<button type="button" class="msg-failed">${ic("circle-alert", 16)}Not sent. Tap to try again</button>` : ""}${m.extra || ""}</div></div>`;
 }
 
 /* ---------- #launch ---------- */
@@ -767,6 +772,7 @@ document.getElementById("spec-seen").innerHTML = [
     msg({ who: ME, start: true, time: "10:02", tick: "read", text: "Moving standup to 10:15" }),
     msg({ who: ME, time: "10:02", tick: "read", text: "Design review ran over", seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } }),
   ].join("")),
+  spec("Short message, many reactions", msg({ who: ME, start: true, time: "10:20", tick: "read", text: "Yes", reacts: { e: ["👍", "❤️", "😂", "✅"], c: [3, 2, 1, 1] }, seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } })),
   spec("Direct message, read: tick only", msg({ who: ME, start: true, dm: true, time: "11:05", tick: "read", text: "Can you cover on-call Thursday?" })),
 ].join("");
 

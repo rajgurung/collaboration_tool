@@ -162,3 +162,8 @@ chat and task notes.
 One PR (15 October 2026): Raj chose a single PR for the chat restyle, note
 reactions, note @everyone and the picker, over the product manager's
 suggestion to split it.
+
+Who read it (15 October 2026): Raj reversed decision 5. Reader faces stay on
+the last of your messages in a run, as today. Your messages get one row under
+the bubble: reaction chips on the left, who read it on the right. Mockup
+section 8.
