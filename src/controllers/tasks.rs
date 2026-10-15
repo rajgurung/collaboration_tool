@@ -900,6 +900,17 @@ async fn sheet_data(
     .filter(|s| !s.is_empty())
     .collect::<Vec<_>>()
     .join(" · ");
+    // The @ menu offers "everyone" first when there is anyone else to tell.
+    let others = team_list
+        .iter()
+        .filter(|(id, _)| *id != member.user.id)
+        .count();
+    let names = mention_names(&team_list, member.user.id);
+    let names = if others > 0 {
+        format!("{EVERYONE},{names}")
+    } else {
+        names
+    };
     Ok(member.page(
         "tasks",
         data!({
@@ -914,7 +925,8 @@ async fn sheet_data(
             "statuses": statuses,
             "notes": notes,
             "note_body": note_body,
-            "mention_names": mention_names(&team_list, member.user.id),
+            "mention_names": names,
+            "everyone_hint": everyone_hint(others),
             "errors": errors,
         }),
     ))
@@ -973,6 +985,15 @@ fn note_view(
             .to_string(),
         picks: picks(&reactions),
         reactions,
+    }
+}
+
+/// The hint under "@everyone" in the note box's @ menu.
+fn everyone_hint(others: usize) -> String {
+    if others == 1 {
+        "Notify the whole team (1 person)".to_string()
+    } else {
+        format!("Notify the whole team ({others} people)")
     }
 }
 
