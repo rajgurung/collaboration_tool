@@ -381,7 +381,7 @@ pub async fn mark_read(
     let marks = conversation_members::Model::read_marks(&ctx.db, org_id, conversation_id).await?;
     // Only this conversation's members: everyone has General open, so this runs often.
     let names: HashMap<i64, String> =
-        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|(id, _)| *id))
+        memberships::Model::team_among(&ctx.db, org_id, marks.iter().map(|(id, _, _)| *id))
             .await?
             .into_iter()
             .collect();
@@ -616,6 +616,7 @@ mod tests {
                     .collect(),
                 shown: Vec::new(),
                 more: 0,
+                all: false,
             }),
         }
     }

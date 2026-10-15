@@ -87,7 +87,7 @@ const RECEIPT_LABEL_NAMES: usize = 5;
 
 /// Who has read a message, for its author. A DM shows `text` ("Read"); a
 /// group or channel shows reader avatars and uses `text` as the screen-reader
-/// label.
+/// label. `all` turns the tick read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Receipt {
     pub dm: bool,
@@ -98,6 +98,8 @@ pub struct Receipt {
     pub shown: Vec<Person>,
     /// Readers beyond `shown`.
     pub more: usize,
+    /// Everyone the message was sent to has read it.
+    pub all: bool,
 }
 
 /// Reaction rows for the given messages, keyed by message id. People no
@@ -278,7 +280,9 @@ impl MessageView {
 /// Who has read a message. Reading is in order, so a member has read it once
 /// their `last_read_at` reaches its `created_at`. The author never counts, nor
 /// do people no longer on the team. Nothing shows until someone has read it.
-/// There is no "everyone": people who join later would make it misleading.
+/// `all` counts only people who were in the conversation when the message was
+/// sent: someone who joins later never saw it arrive, so they do not hold the
+/// tick back.
 #[must_use]
 pub fn receipt(
     conversation_kind: &str,
@@ -289,8 +293,8 @@ pub fn receipt(
 ) -> Option<Receipt> {
     let mut readers: Vec<Person> = marks
         .iter()
-        .filter(|(id, at)| *id != author_id && at.is_some_and(|at| at >= created_at))
-        .filter_map(|(id, _)| {
+        .filter(|(id, at, _)| *id != author_id && at.is_some_and(|at| at >= created_at))
+        .filter_map(|(id, _, _)| {
             names.get(id).map(|name| Person {
                 id: *id,
                 color: avatar_color(name),
@@ -302,6 +306,16 @@ pub fn receipt(
         return None;
     }
     readers.sort_by(|a, b| a.username.cmp(&b.username));
+    let waiting_on: Vec<&ReadMark> = marks
+        .iter()
+        .filter(|(id, _, joined)| {
+            *id != author_id && *joined <= created_at && names.contains_key(id)
+        })
+        .collect();
+    let all = !waiting_on.is_empty()
+        && waiting_on
+            .iter()
+            .all(|(_, at, _)| at.is_some_and(|at| at >= created_at));
     let dm = conversation_kind == kind::DM;
     let text = if dm {
         "Read".to_string()
@@ -324,6 +338,7 @@ pub fn receipt(
         more: readers.len() - shown.len(),
         shown,
         readers,
+        all,
     })
 }
 
@@ -1072,21 +1087,65 @@ mod tests {
     #[test]
     fn dms_say_read_once_the_other_person_has_read() {
         let sent = at(5);
-        let unread = [(1, Some(at(9))), (2, Some(at(4)))];
+        let unread = [(1, Some(at(9)), at(0)), (2, Some(at(4)), at(0))];
         assert_eq!(receipt(kind::DM, 1, sent, &unread, &team()), None);
-        let never_opened = [(1, Some(at(9))), (2, None)];
+        let never_opened = [(1, Some(at(9)), at(0)), (2, None, at(0))];
         assert_eq!(receipt(kind::DM, 1, sent, &never_opened, &team()), None);
-        let read = [(1, None), (2, Some(at(5)))];
+        let read = [(1, None, at(0)), (2, Some(at(5)), at(0))];
         let r = receipt(kind::DM, 1, sent, &read, &team()).unwrap();
         assert_eq!(r.text, "Read");
         assert!(r.dm);
+        assert!(r.all);
         assert_eq!(names(&r.readers), vec!["bob"]);
+    }
+
+    #[test]
+    fn groups_say_everyone_once_all_who_were_there_have_read() {
+        let sent = at(5);
+        let everyone = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (3, Some(at(7)), at(0)),
+        ];
+        let r = receipt(kind::GROUP, 1, sent, &everyone, &team()).unwrap();
+        assert!(r.all);
+        // The label still names them, as the faces' label.
+        assert_eq!(r.text, "Read by bob, carol");
+
+        // dev joined after the message and has not read it: not waited on.
+        let late = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (3, Some(at(7)), at(0)),
+            (4, None, at(8)),
+        ];
+        assert!(receipt(kind::GROUP, 1, sent, &late, &team()).unwrap().all);
+
+        // eve was there and has not read it.
+        let waiting = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (5, Some(at(4)), at(0)),
+        ];
+        assert!(
+            !receipt(kind::GROUP, 1, sent, &waiting, &team())
+                .unwrap()
+                .all
+        );
+
+        // Someone off the team (removed or pending) does not count.
+        let gone = [(1, None, at(0)), (2, Some(at(6)), at(0)), (99, None, at(0))];
+        assert!(receipt(kind::GROUP, 1, sent, &gone, &team()).unwrap().all);
     }
 
     #[test]
     fn groups_count_readers_and_never_the_author() {
         let sent = at(5);
-        let some = [(1, Some(at(9))), (2, Some(at(6))), (3, Some(at(1)))];
+        let some = [
+            (1, Some(at(9)), at(0)),
+            (2, Some(at(6)), at(0)),
+            (3, Some(at(1)), at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, sent, &some, &team()).unwrap();
         assert_eq!(r.text, "Read by bob");
         assert_eq!(names(&r.readers), vec!["bob"]);
@@ -1094,7 +1153,11 @@ mod tests {
         assert!(!r.dm);
 
         // Even when every other member has read it, the label names them.
-        let all = [(3, Some(at(7))), (1, None), (2, Some(at(6)))];
+        let all = [
+            (3, Some(at(7)), at(0)),
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, sent, &all, &team()).unwrap();
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(names(&r.readers), vec!["bob", "carol"]);
@@ -1103,7 +1166,11 @@ mod tests {
     #[test]
     fn people_off_the_team_are_ignored() {
         let sent = at(5);
-        let marks = [(1, None), (2, Some(at(6))), (99, Some(at(6)))];
+        let marks = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (99, Some(at(6)), at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, sent, &marks, &team()).unwrap();
         assert_eq!(r.text, "Read by bob");
         assert_eq!(names(&r.readers), vec!["bob"]);
@@ -1112,18 +1179,23 @@ mod tests {
     #[test]
     fn groups_show_three_avatars_then_a_count() {
         let marks = [
-            (1, None),
-            (5, Some(at(9))),
-            (4, Some(at(9))),
-            (3, Some(at(9))),
-            (2, Some(at(9))),
+            (1, None, at(0)),
+            (5, Some(at(9)), at(0)),
+            (4, Some(at(9)), at(0)),
+            (3, Some(at(9)), at(0)),
+            (2, Some(at(9)), at(0)),
         ];
         let r = receipt(kind::GROUP, 1, at(5), &marks, &team()).unwrap();
         assert_eq!(names(&r.shown), vec!["bob", "carol", "dev"]);
         assert_eq!(r.more, 1);
         assert_eq!(r.readers.len(), 4);
 
-        let partial = [(1, None), (2, Some(at(9))), (3, Some(at(9))), (4, None)];
+        let partial = [
+            (1, None, at(0)),
+            (2, Some(at(9)), at(0)),
+            (3, Some(at(9)), at(0)),
+            (4, None, at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, at(5), &partial, &team()).unwrap();
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(r.more, 0);
@@ -1132,9 +1204,9 @@ mod tests {
     #[test]
     fn big_groups_name_two_readers_and_count_the_rest() {
         let team: HashMap<i64, String> = (1..=8).map(|id| (id, format!("u{id}"))).collect();
-        let mut marks: Vec<ReadMark> = (2..=7).map(|id| (id, Some(at(9)))).collect();
-        marks.push((1, None));
-        marks.push((8, None));
+        let mut marks: Vec<ReadMark> = (2..=7).map(|id| (id, Some(at(9)), at(0))).collect();
+        marks.push((1, None, at(0)));
+        marks.push((8, None, at(0)));
         let r = receipt(kind::GROUP, 1, at(5), &marks, &team).unwrap();
         assert_eq!(r.text, "Read by u2, u3 and 4 others");
         assert_eq!(r.readers.len(), 6);
@@ -1144,7 +1216,7 @@ mod tests {
     #[test]
     fn nobody_left_to_read_means_no_receipt() {
         // Everyone else has left the group.
-        let marks = [(1, Some(at(9))), (99, Some(at(9)))];
+        let marks = [(1, Some(at(9)), at(0)), (99, Some(at(9)), at(0))];
         assert_eq!(receipt(kind::GROUP, 1, at(5), &marks, &team()), None);
     }
 
@@ -1204,7 +1276,11 @@ mod tests {
 
     #[test]
     fn channels_show_receipts_like_groups() {
-        let marks = [(1, None), (2, Some(at(9))), (3, Some(at(9)))];
+        let marks = [
+            (1, None, at(0)),
+            (2, Some(at(9)), at(0)),
+            (3, Some(at(9)), at(0)),
+        ];
         let r = receipt(kind::CHANNEL, 1, at(5), &marks, &team()).unwrap();
         assert!(!r.dm);
         assert_eq!(r.text, "Read by bob, carol");
