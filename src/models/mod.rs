@@ -42,6 +42,7 @@ pub mod guide;
 pub mod login_accesses;
 pub mod login_events;
 pub mod logins;
+pub mod note_reactions;
 pub mod notifications;
 pub mod oauth_clients;
 pub mod oauth_codes;
@@ -68,4 +69,3 @@ pub fn visible_text(text: &str, keep_newlines: bool) -> String {
         .filter(|c| (keep_newlines && *c == '\n') || !(c.is_control() || HIDDEN.contains(c)))
         .collect()
 }
-pub mod note_reactions;
