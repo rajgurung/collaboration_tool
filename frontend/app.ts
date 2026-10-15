@@ -593,7 +593,11 @@ const CLOCK_ICON =
 const RECENT_KEY = "collab:emoji-recent";
 const RECENT_MAX = 16;
 const GRID_COLUMNS = 8;
+// The name shows in labels and the footer; search also uses the keywords.
 const EMOJI_NAMES = new Map<string, string>(CATEGORIES.flatMap((c) => c.list.map(([e, name]): [string, string] => [e, name])));
+const EMOJI_SEARCH = new Map<string, string[]>(
+  CATEGORIES.flatMap((c) => c.list.map(([e, name, keywords = ""]): [string, string[]] => [e, `${name} ${keywords}`.split(" ").filter(Boolean)])),
+);
 
 // Recent picks, newest first. No storage (private browsing) or bad JSON means none.
 function recentEmoji(): string[] {
@@ -754,13 +758,12 @@ function emojiSection(id: string, label: string, list: readonly string[]): HTMLE
   return section;
 }
 
-// Every word of the search starts some word of the emoji's name.
+// Every word of the search starts some word of the emoji's name or keywords.
 function searchEmoji(query: string): string[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return [...EMOJI_NAMES].filter(([, name]) => {
-    const parts = name.split(" ");
-    return words.every((w) => parts.some((part) => part.startsWith(w)));
-  }).map(([emoji]) => emoji);
+  return [...EMOJI_SEARCH]
+    .filter(([, parts]) => words.every((w) => parts.some((part) => part.startsWith(w))))
+    .map(([emoji]) => emoji);
 }
 
 function renderPicker(p: Picker) {
