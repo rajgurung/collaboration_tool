@@ -26,6 +26,8 @@ feature, with screenshots.
 | Staff reviewer | `~/.claude/agents/staff-reviewer.md` | Reviews the build plan and the finished diff: correctness, data, access rules, migrations. |
 | Staff engineer | `~/.claude/agents/staff-engineer.md` | Builds the approved plan in a worktree and runs the checks. Never pushes. |
 
+The staff reviewer and staff engineer are Raj's own agents, used across projects, so they are not in this repo. Without them, use the general-purpose agent with the same brief.
+
 The review bot (Michael Scott) reviews every PR on GitHub.
 
 ## The loop
