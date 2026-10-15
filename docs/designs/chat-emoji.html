@@ -172,6 +172,18 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
 .react-chip .emoji { font-size: 14px; }
 .react-chip::after { content: ""; position: absolute; inset: -9px -2px; } /* 44px tall tap area */
 .react-chip.mine { background: var(--active-bg); border-color: var(--accent); }
+/* Who read it: reader faces under the last of your messages in a run, as today.
+   Right-aligned under the bubble, below any reaction chips. Tap or hover lists the names. */
+.seen { position: relative; display: inline-flex; align-items: center; gap: 4px; align-self: flex-end; min-height: 22px; margin: 4px 6px 0 0; padding: 0; border: 0; background: none; color: var(--muted); font-size: 11px; font-weight: 600; }
+.seen::after { content: ""; position: absolute; inset: -11px -6px; } /* 44px tap area */
+.seen .ic { color: var(--link); }
+.seen-stack { display: inline-flex; align-items: center; }
+.seen-stack > * { box-shadow: 0 0 0 1.5px var(--bg); }
+.seen-stack > * + * { margin-left: -4px; }
+.seen-more { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--chip); color: var(--text); font-size: 9px; font-weight: 700; }
+.seen-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 25; display: flex; flex-direction: column; gap: 6px; min-width: 170px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-lift); color: var(--text); font-size: 13px; font-weight: 500; text-align: left; }
+.seen-pop-head { font-size: 12px; font-weight: 700; color: var(--muted); }
+.seen-pop-row { display: flex; align-items: center; gap: 8px; }
 .msg-failed { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--danger); font-size: 13px; font-weight: 600; }
 /* Desktop hover toolbar (unchanged from today) */
 .msg-tools { position: absolute; left: 0; top: -40px; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-lift); }
@@ -321,7 +333,7 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
 <header class="mock-bar">
   <h1>Chat reactions, threads and emoji picker · mockup</h1>
   <nav aria-label="Sections">
-    <a href="#chat">1 Chat</a><a href="#states">2 Message states</a><a href="#who">3 Who reacted</a><a href="#thread">4 Thread</a><a href="#picker">5 Emoji picker</a><a href="#notes">6 Task notes</a><a href="#roles">7 Roles</a>
+    <a href="#chat">1 Chat</a><a href="#states">2 Message states</a><a href="#who">3 Who reacted</a><a href="#thread">4 Thread</a><a href="#picker">5 Emoji picker</a><a href="#notes">6 Task notes</a><a href="#roles">7 Roles</a><a href="#seen">8 Who read it</a>
   </nav>
   <div class="seg" role="group" aria-label="Theme"><button type="button" data-theme-set="light" aria-pressed="true">Light</button><button type="button" data-theme-set="dark" aria-pressed="false">Dark</button></div>
   <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
@@ -361,7 +373,7 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
       <h3>Notes for the build</h3>
       <ol>
         <li>The pill and the thread footer can both appear. The footer is 44px with its text centred, so the pill's 8px overlap clears the faces and "3 replies".</li>
-        <li>Group read receipts: the reader faces leave the message. Ticks show the state; who has read it moves into the message sheet (tap the bubble) and a hover list on desktop. See open question 1.</li>
+        <li>Group read receipts stay on the message, as today: reader faces under the last of your messages in a run, below any reaction chips. Section 8 shows them close up.</li>
         <li>Screen readers: the stamp reads "Sent 09:31, read by everyone". Each chip reads its own emoji and count, e.g. "🎉 3, including you. Show who reacted".</li>
         <li>Tapping the bubble still opens the message sheet. Taps on the thread footer or the pill go to those, not the sheet.</li>
         <li>"Not sent" keeps the text in the bubble and offers a 44px retry under it.</li>
@@ -461,6 +473,28 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
   </div>
 </section>
 
+<section class="section" id="seen">
+  <h2>8. Who read it</h2>
+  <p class="lead">Changed at Raj's request: the faces of who has read your message stay on each message, as they do today. They sit right under the bubble, aligned to its right edge, below any reaction chips. Time and ticks stay inside the bubble.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · tapped the faces on your message</span><div id="p-seen"></div></div>
+    <div class="shot"><span class="shot-label">Close up</span><div class="specimen" id="spec-seen"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Same rule as today: the faces show under the last of your messages in a run, so a run of five messages does not repeat them five times.</li>
+        <li>Up to three faces, then "+4". Nothing shows until someone has read it.</li>
+        <li>Phone: tap the faces (44px tap area) to list everyone who read it. Desktop: hover or focus shows the same list. This is today's list, restyled.</li>
+        <li>The faces sit below the reaction chips, so the chips stay pinned to the bubble and the faces never cover them.</li>
+        <li>The tick inside the bubble turns amber-brown once everyone in the room has read it. The faces say who.</li>
+        <li>Direct messages: no faces, as today. The tick inside the bubble shows "read".</li>
+        <li>Others' messages never show receipts, as today.</li>
+      </ol>
+    </div>
+    <div class="shot shot-desk" style="flex-basis:100%"><span class="shot-label">Desktop · pointer on the faces of your 09:32 message</span><div class="desk-holder" data-desk="d-seen"></div></div>
+  </div>
+</section>
+
 <script>
 const ME = "raj";
 const COLORS = ["#ffb454", "#df85ff", "#72e5b4", "#6cb6ff", "#ff758f", "#c9d76a"];
@@ -493,6 +527,12 @@ function pill(r) {
   const counts = r.c || [r.n];
   return `<div class="reacts" role="group" aria-label="Reactions">${r.e.map((e, i) => `<button type="button" class="react-chip${r.my === e ? " mine" : ""}" aria-pressed="${r.my === e}" aria-label="${e} ${counts[i]}${r.my === e ? ", including you" : ""}. Show who reacted"><span class="emoji">${e}</span><span>${counts[i]}</span></button>`).join("")}</div>`;
 }
+// s.faces: readers (up to 3 shown), s.more: the rest, s.open: show the name list.
+function seen(s) {
+  const all = [...s.faces, ...(s.rest || [])];
+  const pop = s.open ? `<span class="seen-pop" role="tooltip"><span class="seen-pop-head">Read by ${all.length}</span>${all.map((n) => `<span class="seen-pop-row">${av(n, "xs")}<span>${n}</span></span>`).join("")}</span>` : "";
+  return `<button type="button" class="seen" aria-label="Read by ${all.join(", ")}" aria-expanded="${!!s.open}">${pop}<span class="seen-stack">${s.faces.map((f) => av(f, "2xs")).join("")}${s.more ? `<span class="seen-more">+${s.more}</span>` : ""}</span></button>`;
+}
 function tools() {
   return `<div class="msg-tools" role="toolbar" aria-label="Message actions">${SIX.map((e) => `<button type="button" class="emoji">${e}</button>`).join("")}<span class="msg-tools-sep"></span><a class="msg-tools-reply" href="#">${ic("reply", 18)}Reply in thread</a></div>`;
 }
@@ -501,7 +541,7 @@ function msg(m) {
   const cls = ["msg", own && "msg-own", m.start && "msg-start", m.hover && "hover"].filter(Boolean).join(" ");
   const avatar = own ? "" : `<span class="msg-av${m.last ? "" : " invisible"}">${av(m.who)}</span>`;
   const name = !own && m.start && !m.dm ? `<span class="msg-name">${m.who}</span>` : "";
-  return `<div class="${cls}">${avatar}<div class="msg-body">${m.hover ? tools() : ""}${name}<div class="bubble" tabindex="0"><div class="bubble-main">${m.text}<span class="stamp-pad"></span>${stamp(m, own)}</div>${m.thread ? threadFoot(m.thread) : ""}</div>${m.reacts ? pill(m.reacts) : ""}${m.tick === "failed" ? `<button type="button" class="msg-failed">${ic("circle-alert", 16)}Not sent. Tap to try again</button>` : ""}${m.extra || ""}</div></div>`;
+  return `<div class="${cls}">${avatar}<div class="msg-body">${m.hover ? tools() : ""}${name}<div class="bubble" tabindex="0"><div class="bubble-main">${m.text}<span class="stamp-pad"></span>${stamp(m, own)}</div>${m.thread ? threadFoot(m.thread) : ""}</div>${m.reacts ? pill(m.reacts) : ""}${m.seen ? seen(m.seen) : ""}${m.tick === "failed" ? `<button type="button" class="msg-failed">${ic("circle-alert", 16)}Not sent. Tap to try again</button>` : ""}${m.extra || ""}</div></div>`;
 }
 
 /* ---------- #launch ---------- */
@@ -515,10 +555,10 @@ const LAUNCH = [
   { who: "maya", last: true, time: "09:13", text: "Mostly the Notes section, I rewrote the intro." },
   { who: "sam", start: true, last: true, time: "09:20", text: "Reading it now", reacts: { e: ["👍"], n: 1 } },
   { who: ME, start: true, time: "09:31", tick: "read", text: `Thanks both. ${mention("everyone")} we go live Thursday at 3pm. Tom is on call.`, reacts: { e: ["👍", "🎉", "❤️"], c: [4, 3, 1], my: "🎉" } },
-  { who: ME, time: "09:32", tick: "read", text: "Checklist is in the thread, add anything I missed.", thread: { n: 2, faces: ["tom", "ana"], last: "09:58" }, reacts: { e: ["✅"], n: 1 } },
+  { who: ME, time: "09:32", tick: "read", text: "Checklist is in the thread, add anything I missed.", thread: { n: 2, faces: ["tom", "ana"], last: "09:58" }, reacts: { e: ["✅"], n: 1 }, seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } },
   { who: "priya", start: true, last: true, time: "09:44", text: "Checkout flow passed on staging. Only the receipt email is left.", reacts: { e: ["🎉", "✅"], c: [2, 1], my: "🎉" } },
   { who: "leo", start: true, last: true, time: "09:46", text: "Receipt email fix is in review, should land by noon." },
-  { who: ME, start: true, time: "09:50", tick: "sent", text: "Great work, everyone" },
+  { who: ME, start: true, time: "09:50", tick: "sent", text: "Great work, everyone", seen: { faces: ["maya", "sam"] } },
 ];
 
 /* ---------- Composer and picker ---------- */
@@ -614,7 +654,8 @@ document.getElementById("spec-a").innerHTML = [
 document.getElementById("spec-b").innerHTML = [
   spec("Sending", msg({ who: ME, start: true, time: "09:50", tick: "sending", text: "Great work, everyone" })),
   spec("Sent, not read by everyone", msg({ who: ME, start: true, time: "09:50", tick: "sent", text: "Great work, everyone" })),
-  spec("Read by everyone, one reaction", msg({ who: ME, start: true, time: "09:32", tick: "read", text: "Checklist is in the thread.", reacts: { e: ["✅"], n: 1 } })),
+  spec("Read by two of seven", msg({ who: ME, start: true, time: "09:50", tick: "sent", text: "Great work, everyone", seen: { faces: ["maya", "sam"] } })),
+  spec("Read by everyone, one reaction", msg({ who: ME, start: true, time: "09:32", tick: "read", text: "Checklist is in the thread.", reacts: { e: ["✅"], n: 1 }, seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } })),
   spec("Three emoji, yours among them", msg({ who: ME, start: true, time: "09:31", tick: "read", text: `${mention("everyone")} we go live Thursday at 3pm. Tom is on call.`, reacts: { e: ["👍", "🎉", "❤️"], c: [4, 3, 1], my: "🎉" } })),
   spec("Thread and reactions together", msg({ who: ME, start: true, time: "09:32", tick: "read", text: "Checklist is in the thread, add anything I missed.", thread: { n: 2, faces: ["tom", "ana"], last: "09:58" }, reacts: { e: ["✅", "👍"], c: [3, 1] } })),
   spec("Run of two", [
@@ -712,6 +753,22 @@ const MORE_NOTES = [
 DESK["d-notes"] = () => `<div class="frame-desk">${sidebar("Tasks")}<div style="padding:16px 32px"><div class="topbar" style="padding:0"><h1>Tasks</h1></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px">${[["To do", ["On-call rota for Thursday", "Launch tweet"]], ["In progress", ["Write launch release notes", "Receipt email template"]], ["Blocked", ["Fix pricing toggle on Safari"]], ["Done", ["Staging checkout test", "Pricing page copy"]]].map(([h, cards]) => `<div class="board-col"><strong style="font-size:14px">${h}</strong>${cards.map((c) => `<div class="task-card">${c}<span class="meta" style="font-weight:500">Website launch</span></div>`).join("")}</div>`).join("")}</div></div><div class="m-scrim"></div><div class="m-side"><div class="sheet-body">${taskTop()}${notesBlock(MORE_NOTES)}${noteForm({ text: "Looks great 👍", pick: "pop" })}</div></div></div>`;
 
 document.getElementById("spec-c").innerHTML = `<div class="notes">${note(NOTES[2])}</div>`;
+
+/* ---------- Section 8: who read it ---------- */
+const openSeen = (list) => list.map((m) => (m.seen && m.time === "09:32" ? msg({ ...m, seen: { ...m.seen, open: true } }) : msg(m))).join("");
+document.getElementById("p-seen").innerHTML = phoneChat({ feed: openSeen(LAUNCH.slice(0, 6)), composer: {} });
+DESK["d-seen"] = () => deskChat({ feed: openSeen([...EARLY, ...LAUNCH]), composer: {} });
+document.getElementById("spec-seen").innerHTML = [
+  spec("Nobody has read it yet", msg({ who: ME, start: true, time: "09:50", tick: "sent", text: "Great work, everyone" })),
+  spec("Read by two", msg({ who: ME, start: true, time: "09:50", tick: "sent", text: "Great work, everyone", seen: { faces: ["maya", "sam"] } })),
+  spec("Read by all seven", msg({ who: ME, start: true, time: "09:32", tick: "read", text: "Checklist is in the thread.", seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } })),
+  spec("Reactions and readers together", msg({ who: ME, start: true, time: "09:31", tick: "read", text: "We go live Thursday at 3pm.", reacts: { e: ["👍", "🎉", "❤️"], c: [4, 3, 1], my: "🎉" }, seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } })),
+  spec("Run of two: faces on the last only", [
+    msg({ who: ME, start: true, time: "10:02", tick: "read", text: "Moving standup to 10:15" }),
+    msg({ who: ME, time: "10:02", tick: "read", text: "Design review ran over", seen: { faces: ["ana", "kai", "leo"], more: 4, rest: ["maya", "priya", "sam", "tom"] } }),
+  ].join("")),
+  spec("Direct message, read: tick only", msg({ who: ME, start: true, dm: true, time: "11:05", tick: "read", text: "Can you cover on-call Thursday?" })),
+].join("");
 
 /* ---------- Desktop frames, scaled to fit ---------- */
 function renderDesk() {
