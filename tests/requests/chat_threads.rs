@@ -219,7 +219,7 @@ async fn the_thread_page_shows_the_parent_and_replies_in_order() {
         // No receipts in a thread, even on alice's own reply, no reply line and
         // no "Reply in thread".
         assert!(!page.contains("receipt-"), "{page}");
-        assert!(!page.contains("thread-link"), "{page}");
+        assert!(!page.contains("thread-foot"), "{page}");
         assert!(!page.contains("Reply in thread</a>"), "{page}");
         // Sheets opened here leave out Reply in thread.
         assert!(page.contains(&format!(

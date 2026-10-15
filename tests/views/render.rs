@@ -159,7 +159,7 @@ fn renders_reactions_as_live_swaps() {
         )
         .expect("reactions should render");
     assert!(
-        html.contains(r#"id="reacts-42" aria-live="off" hx-swap-oob="true""#),
+        html.contains(r#"id="reacts-42" role="group" aria-label="Reactions" aria-live="off" hx-swap-oob="true""#),
         "{html}"
     );
     assert!(html.contains(r#"id="tools-42""#), "{html}");
@@ -190,7 +190,7 @@ fn renders_reactions_as_live_swaps() {
         .expect("an empty slot should render");
     // Nothing inside, not even a space, so `.reacts:empty` hides it.
     assert!(
-        empty.contains(r#"<div class="reacts" id="reacts-42" aria-live="off"></div>"#),
+        empty.contains(r#"<div class="reacts" id="reacts-42" role="group" aria-label="Reactions" aria-live="off"></div>"#),
         "{empty}"
     );
 }
@@ -290,4 +290,62 @@ fn renders_the_thread_count_as_a_live_swap() {
         )
         .expect("an empty count should render");
     assert!(none.contains(r#"aria-live="off"></div>"#), "{none}");
+}
+
+/// Every live swap target keeps a home: the time and the thread footer sit
+/// inside the bubble, the chips after it, then the receipt, then the toolbar.
+#[test]
+fn renders_a_message_as_one_block() {
+    let engine = view_engine();
+    let face = |name: &str| serde_json::json!({ "id": 1, "username": name, "color": "#ffb454" });
+    let reactor =
+        |name: &str| serde_json::json!({ "name": name, "username": name, "color": "#ffb454" });
+    let chip = |emoji: &str| serde_json::json!({ "emoji": emoji, "count": 1, "mine": false, "people": [reactor("bob")], "names": "bob", "label": format!("{emoji} 1") });
+    let pick = |emoji: &str| serde_json::json!({ "emoji": emoji, "mine": false });
+    let message = |own: bool, read_receipts: bool| {
+        serde_json::json!({
+            "message": {
+                "id": 42, "conversation_id": 7, "author": "alice", "color": "#ffb454",
+                "parts": [{ "text": "Stock count Friday", "mention": false }],
+                "at": "09:31", "own": own, "start": true, "show_time": true,
+                "read_receipts": read_receipts, "receipt": null,
+                "reactions": [chip("👍"), chip("✅")], "picks": [pick("👍")],
+                "can_reply": true,
+                "thread": {
+                    "url": "/chat/7/threads/42", "count": 3, "label": "3 replies",
+                    "last": "14:05", "faces": [face("bob")], "more": 0,
+                },
+            },
+        })
+    };
+    let html = engine
+        .render("chat/_message.html", message(true, true))
+        .expect("a message should render");
+    let at = |needle: &str| {
+        html.find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}: {html}"))
+    };
+    let bubble = at(r#"class="bubble""#);
+    let stamp = at(r#"<span class="stamp"><span class="sr-only">Sent </span>09:31</span>"#);
+    let thread = at(r#"id="thread-42""#);
+    let bubble_end = thread + html[thread..].find("</div>").expect("the bubble closes");
+    let reacts = at(r#"id="reacts-42""#);
+    let receipt = at(r#"id="receipt-42""#);
+    let tools = at(r#"id="tools-42""#);
+    assert!(bubble < stamp && stamp < thread, "{html}");
+    assert!(html[thread..bubble_end].contains("thread-foot"), "{html}");
+    assert!(
+        bubble_end < reacts && reacts < receipt && receipt < tools,
+        "{html}"
+    );
+    assert!(!html.contains("msg-time"), "{html}");
+
+    let others = engine
+        .render("chat/_message.html", message(false, false))
+        .expect("someone else's message should render");
+    assert!(
+        others.contains(r#"<span class="stamp">09:31</span>"#),
+        "{others}"
+    );
+    assert!(!others.contains(r#"id="receipt-"#), "{others}");
 }

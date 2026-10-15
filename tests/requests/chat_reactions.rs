@@ -83,7 +83,7 @@ async fn setting_a_reaction_is_safe_to_repeat() {
             let html = res.text();
             assert!(
                 html.contains(&format!(
-                    r#"<div class="reacts" id="reacts-{}" aria-live="off" hx-swap-oob="true"></div>"#,
+                    r#"<div class="reacts" id="reacts-{}" role="group" aria-label="Reactions" aria-live="off" hx-swap-oob="true"></div>"#,
                     message.id
                 )),
                 "{html}"
@@ -352,7 +352,7 @@ async fn a_socket_only_gets_reactions_for_its_conversation() {
     );
     assert!(
         html.contains(&format!(
-            r#"id="reacts-{}" aria-live="off" hx-swap-oob="true""#,
+            r#"id="reacts-{}" role="group" aria-label="Reactions" aria-live="off" hx-swap-oob="true""#,
             hello.id
         )),
         "{html}"
@@ -428,6 +428,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
             .await
             .text();
         assert!(sheet.contains("VAT is due 7 November"));
+        assert!(sheet.contains("Reactions · 4"), "{sheet}");
         assert!(
             sheet.contains(r#"<span class="names truncate-1">You, carol, bob</span>"#),
             "{sheet}"

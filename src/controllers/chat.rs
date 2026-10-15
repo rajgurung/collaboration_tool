@@ -193,6 +193,8 @@ pub fn thread_line(
 
 /// One rendered chat message. `own` decides the bubble style for the viewer;
 /// `start` and `show_time` group consecutive messages from the same person.
+/// Every bubble shows its time; `show_time` now only marks the last message
+/// in a run, which is the one that shows the author's avatar.
 /// `read_receipts` is set on the viewer's own messages, so the page has a slot
 /// for `receipt` even before anyone has read it.
 #[derive(Debug, Clone, Serialize)]
@@ -775,7 +777,12 @@ async fn actions(
             .get(&message.id)
             .and_then(|s| thread_line(conversation.id, message.id, s, &names, member.tz()));
     }
-    format::render().view(&v, "chat/_actions.html", data!({ "message": view }))
+    let reaction_total: usize = view.reactions.iter().map(|c| c.count).sum();
+    format::render().view(
+        &v,
+        "chat/_actions.html",
+        data!({ "message": view, "reaction_total": reaction_total }),
+    )
 }
 
 /// A thread's parent and replies as its page shows them: no reply line, no

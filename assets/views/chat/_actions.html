@@ -10,7 +10,7 @@
   <div class="list"><a class="list-row action-row" href="/chat/{{ message.conversation_id }}/threads/{{ message.id }}?reply=1">{{<icon name="message-square-reply" class="h-6 w-6"/>}}<span class="flex-1">Reply in thread</span>{% if message.thread %}<span class="meta">{{ message.thread.label }}</span>{% endif %}{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a></div>
   {% endif %}
   {% if message.reactions | length > 0 %}
-  <p class="section-label m-0">Reactions</p>
+  <p class="section-label m-0">Reactions · {{ reaction_total }}</p>
   <div class="list">
     {% for chip in message.reactions %}
     <div class="list-row who-row"><span class="emoji" aria-hidden="true">{{ chip.emoji }}</span><span class="sr-only">{{ chip.emoji }}:</span><span class="names truncate-1">{{ chip.names }}</span><span class="receipt-stack">{% for p in chip.people %}{% if loop.index <= 3 %}{{<avatar name={p.username} color={p.color} size="xs" label={false}/>}}{% endif %}{% endfor %}{% if chip.people | length > 3 %}<span class="receipt-more">+{{ chip.people | length - 3 }}</span>{% endif %}</span></div>
