@@ -512,6 +512,16 @@ fn receipt_slot(html: &str, message_id: i64) -> &str {
     &html[start..end]
 }
 
+/// The tick inside one message's bubble.
+fn tick_slot(html: &str, message_id: i64) -> &str {
+    let id = html
+        .find(&format!(r#"id="tick-{message_id}""#))
+        .expect("the message has a tick");
+    let start = html[..id].rfind("<span").unwrap();
+    let end = id + html[id..].find("</span></span>").unwrap() + "</span></span>".len();
+    &html[start..end]
+}
+
 #[tokio::test]
 #[serial]
 async fn dms_show_read_once_the_other_person_opens_them() {
@@ -528,30 +538,34 @@ async fn dms_show_read_once_the_other_person_opens_them() {
         let hello = post(&request, &ctx, &alice, dm.id, "Got a minute?").await;
 
         let page = open(&request, &alice, dm.id).await;
+        let tick = tick_slot(&page, hello.id);
+        assert!(tick.starts_with(r#"<span class="tick" "#), "{tick}");
         assert!(
-            !receipt_slot(&page, hello.id).contains("Read"),
-            "bob has not opened it"
+            tick.contains("not read yet"),
+            "bob has not opened it: {tick}"
         );
 
         let bobs = open(&request, &bob, dm.id).await;
         assert!(
-            !bobs.contains("msg-receipt"),
+            !bobs.contains("msg-receipt") && !bobs.contains(r#"id="tick-"#),
             "only the sender sees receipts"
         );
 
         let page = open(&request, &alice, dm.id).await;
-        let slot = receipt_slot(&page, hello.id);
+        let tick = tick_slot(&page, hello.id);
         assert!(
-            slot.contains("</svg>Read</span>"),
-            "DMs keep the word: {slot}"
+            tick.starts_with(r#"<span class="tick tick-read""#),
+            "{tick}"
         );
-        assert!(!slot.contains("avatar"), "{slot}");
+        assert!(tick.contains(", read</span>"), "{tick}");
+        let slot = receipt_slot(&page, hello.id);
+        assert!(!slot.contains("avatar"), "DMs show only the tick: {slot}");
 
         // A message sent after bob last read is not read yet.
         let later = post(&request, &ctx, &alice, dm.id, "Never mind").await;
         let page = open(&request, &alice, dm.id).await;
-        assert!(!receipt_slot(&page, later.id).contains("Read"));
-        assert!(receipt_slot(&page, hello.id).contains("Read"));
+        assert!(!tick_slot(&page, later.id).contains("tick-read"));
+        assert!(tick_slot(&page, hello.id).contains("tick-read"));
     })
     .await;
 }
@@ -569,7 +583,12 @@ async fn groups_count_who_has_read() {
         let slot = receipt_slot(&page, message.id);
         assert!(slot.contains(r#"aria-label="Read by bob""#), "{slot}");
         assert!(slot.contains("avatar avatar-2xs"), "{slot}");
-        assert!(!slot.contains("receipt-more"), "{slot}");
+        assert!(slot.contains("Read by 1"), "{slot}");
+        assert!(!slot.contains("seen-more"), "{slot}");
+        assert!(
+            !tick_slot(&page, message.id).contains("tick-read"),
+            "carol has not read it"
+        );
 
         let carols = open(&request, &carol, group.id).await;
         assert!(
@@ -590,6 +609,44 @@ async fn groups_count_who_has_read() {
             "the reader list to hover or tap open: {slot}"
         );
         assert!(!slot.contains("everyone"), "{slot}");
+        assert!(tick_slot(&page, message.id).contains("tick-read"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn late_joiners_and_pending_people_do_not_block_the_read_tick() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, bob) = acme_with_bob(&request, &ctx).await;
+        let (group, carol) = group_of_three(&request, &ctx).await;
+        // Erin is pending, with an old read mark in the group.
+        join(&request, "acme", "erin", "erin@example.com").await;
+        let erin_id = user_id(&ctx, "erin@example.com").await;
+        conversation_members::Model::add(&ctx.db, &group, erin_id)
+            .await
+            .unwrap();
+        conversation_members::Model::mark_read(&ctx.db, group.organisation_id, group.id, erin_id)
+            .await
+            .unwrap();
+
+        let message = post(&request, &ctx, &alice, group.id, "Launch is Friday").await;
+        open(&request, &bob, group.id).await;
+        open(&request, &carol, group.id).await;
+        // Dave joins the group after the message and has not read it.
+        join(&request, "acme", "dave", "dave@example.com").await;
+        let dave_id = approve(&ctx, "dave@example.com").await.id;
+        conversation_members::Model::add(&ctx.db, &group, dave_id)
+            .await
+            .unwrap();
+
+        let page = open(&request, &alice, group.id).await;
+        let tick = tick_slot(&page, message.id);
+        assert!(
+            tick.starts_with(r#"<span class="tick tick-read""#),
+            "{tick}"
+        );
+        assert!(tick.contains("read by everyone"), "{tick}");
     })
     .await;
 }

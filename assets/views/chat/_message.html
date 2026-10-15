@@ -5,10 +5,9 @@
   <div class="msg-body">
     {% if message.start and not message.own %}<span class="msg-name">{{ message.author }}</span>{% endif %}
     {# Tap, click, Enter or Space opens the message's action sheet (frontend/app.ts). A thread page has no "Reply in thread". #}
-    <div class="bubble" tabindex="0" data-actions-url="/chat/{{ message.conversation_id }}/messages/{{ message.id }}/actions{% if in_thread | default(value=false) %}?thread=1{% endif %}"><div class="bubble-main"><span class="bubble-text">{% for p in message.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</span><span class="stamp-pad" aria-hidden="true"></span><span class="stamp">{% if message.own %}<span class="sr-only">Sent </span>{% endif %}{{ message.at }}</span></div>{% include "chat/_thread_link.html" %}</div>
-    {% include "chat/_reactions.html" %}
-    {# Who has read your message, as today: reader faces under the bubble. #}
-    {% if message.read_receipts %}<div class="msg-meta">{% include "chat/_receipt.html" %}</div>{% endif %}
+    <div class="bubble" tabindex="0" data-actions-url="/chat/{{ message.conversation_id }}/messages/{{ message.id }}/actions{% if in_thread | default(value=false) %}?thread=1{% endif %}"><div class="bubble-main"><span class="bubble-text">{% for p in message.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</span><span class="stamp-pad{% if message.read_receipts %} stamp-pad-tick{% endif %}" aria-hidden="true"></span><span class="stamp">{% if message.own %}<span class="sr-only">Sent </span>{% endif %}{{ message.at }}{% if message.read_receipts %}{% include "chat/_tick.html" %}{% endif %}</span></div>{% include "chat/_thread_link.html" %}</div>
+    {# Your messages: one row under the bubble, chips on the left, who read it on the right. #}
+    {% if message.own %}<div class="msg-foot">{% include "chat/_reactions.html" %}{% if message.read_receipts %}{% include "chat/_receipt.html" %}{% endif %}</div>{% else %}{% include "chat/_reactions.html" %}{% endif %}
     {% include "chat/_tools.html" %}
   </div>
 </div>
