@@ -23,5 +23,6 @@ debug/
 # Uploaded documents in development (see document_storage in src/app.rs)
 /tmp/storage/
 
-# Agent loop progress for the agent-board mod (docs/how-we-work.md)
+# Agent loop progress for the agent-board plugin (docs/how-we-work.md)
 /.claude/loop.json
+/.claude/loops/

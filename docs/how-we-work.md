@@ -65,26 +65,40 @@ A Block says exactly what would turn it into an Approve.
 
 ## Watching the loop
 
-The `agent-board` Claude Code mod shows the loop live: a band above the prompt
-with the feature, a stage bar, the agents running and how long each has taken,
-and the next step. `/board` opens a pane with the full table.
+The `agent-board` Claude Code plugin shows every piece of work at once.
 
-The producer keeps `.claude/loop.json` up to date at each stage. It is local and
-ignored by git:
+- **Band above the prompt:** one line per open loop (up to three, then "+N
+  more"): its stage, a progress bar, and either the agents working on it or
+  what it is waiting for. ◆ means waiting on Raj, ● running, ✓ done.
+- **`/board`:** a pane with the loops on the left (press one to open it, done
+  loops hidden behind "Show done") and the open loop on the right: stages,
+  next step, its agents with status and time, notes and links.
+
+The producer keeps one file per piece of work in `.claude/loops/<id>.json`
+(local, ignored by git):
 
 ```json
 {
-  "decision": "documents",
-  "title": "Documents space",
-  "stage": 1,
-  "stages": ["Brief", "Approve brief", "Design", "Approve design", "Plan", "Build", "Review", "PR"],
-  "next": "Raj answers the brief's questions",
-  "notes": { "product-manager": "Brief drafted" }
+  "decision": "drop",
+  "title": "Documents: drag and drop to upload",
+  "stage": 2,
+  "stages": ["Plan", "Build", "Review", "PR"],
+  "state": "waiting",
+  "next": "Raj approves the PR",
+  "notes": { "staff-reviewer": "Approve with changes" },
+  "links": { "PR": "https://github.com/..." }
 }
 ```
 
-`stage` counts from 1. The mod lives in the Claude Code mods folder, not in this
-repo.
+- `stage` counts from 1. `state` is optional: `waiting` (needs Raj) or
+  `done`; otherwise the board works it out from the loop's agents.
+- **Every agent's description starts with its loop id**, e.g. `drop: Build
+  drag-and-drop`. That is how the board groups agents under their loop;
+  anything without a prefix shows under "Other agents".
+- The older single `.claude/loop.json` still works and shows as one loop.
+
+The plugin is not in this repo. Install it with `/plugin install agent-board
+--marketplace rajgurung/agent-board`; `.claude/settings.json` enables it here.
 
 ## Where things live
 
