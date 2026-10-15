@@ -701,3 +701,49 @@ async fn notes_notify_mentioned_people() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn the_connector_cannot_notify_everyone() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
+        let (_, carol) =
+            approved_member(&request, &ctx, &owner, "carol", "carol@example.com").await;
+        let token = token_for(&ctx, "alice@example.com").await;
+        let (_, task) = tool(
+            &request,
+            &token,
+            "create_task",
+            json!({ "title": "Chore", "assignees": ["carol"] }),
+        )
+        .await;
+
+        let (error, note) = tool(
+            &request,
+            &token,
+            "add_task_note",
+            json!({ "task_id": task["id"], "body": "@everyone hello" }),
+        )
+        .await;
+        assert!(!error, "{note}");
+        assert!(notices(&ctx, bob, "mention").await.is_empty());
+        assert!(notices(&ctx, carol, "mention").await.is_empty());
+        assert_eq!(
+            notices(&ctx, carol, "note").await.len(),
+            1,
+            "the assignee still hears of the note"
+        );
+
+        tool(
+            &request,
+            &token,
+            "add_task_note",
+            json!({ "task_id": task["id"], "body": "@bob @everyone hello" }),
+        )
+        .await;
+        assert_eq!(notices(&ctx, bob, "mention").await.len(), 1);
+        assert!(notices(&ctx, carol, "mention").await.is_empty());
+    })
+    .await;
+}

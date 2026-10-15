@@ -14,17 +14,19 @@ use crate::{
         field_error, memberships,
         messages::{self, MessageParams, ReplierStat},
         notifications::{mention_parts, Part, EVERYONE},
-        reactions::{self, EMOJI},
+        reactions,
     },
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
         layout::{avatar_color, Person},
+        reactions::FORMER_MEMBER,
         time,
     },
 };
 
+pub use crate::views::reactions::{chips, picks, Pick, ReactionChip, ReactionRow, Reactor};
+
 const GROUP_FORM_ID: &str = "group-form";
-const FORMER_MEMBER: &str = "Former member";
 
 #[derive(Debug, Default, Deserialize)]
 struct LegacyQuery {
@@ -85,7 +87,7 @@ const RECEIPT_LABEL_NAMES: usize = 5;
 
 /// Who has read a message, for its author. A DM shows `text` ("Read"); a
 /// group or channel shows reader avatars and uses `text` as the screen-reader
-/// label.
+/// label. `all` turns the tick read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Receipt {
     pub dm: bool,
@@ -96,105 +98,8 @@ pub struct Receipt {
     pub shown: Vec<Person>,
     /// Readers beyond `shown`.
     pub more: usize,
-}
-
-/// One person's reaction, with the name the team knows them by.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReactionRow {
-    pub emoji: String,
-    pub user_id: i64,
-    pub username: String,
-}
-
-/// Someone who reacted, as the viewer sees them: `name` is "You" for the
-/// viewer, and the avatar still uses their username.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Reactor {
-    pub name: String,
-    pub username: String,
-    pub color: &'static str,
-}
-
-/// One emoji under a message, with its count and who chose it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReactionChip {
-    pub emoji: String,
-    pub count: usize,
-    /// The viewer is one of them.
-    pub mine: bool,
-    /// "You" first, then others in the order they reacted.
-    pub people: Vec<Reactor>,
-    /// `people` as one line, for the sheet.
-    pub names: String,
-    /// The chip's screen-reader label, such as "👍 3, you reacted".
-    pub label: String,
-}
-
-/// One of the six choices on the toolbar and in the sheet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Pick {
-    pub emoji: &'static str,
-    pub mine: bool,
-}
-
-/// Reactions grouped into chips for one viewer, in the fixed [`EMOJI`] order
-/// so chips never move around.
-#[must_use]
-pub fn chips(rows: &[ReactionRow], viewer_id: i64) -> Vec<ReactionChip> {
-    EMOJI
-        .iter()
-        .filter_map(|emoji| {
-            let of: Vec<&ReactionRow> = rows.iter().filter(|r| r.emoji == *emoji).collect();
-            if of.is_empty() {
-                return None;
-            }
-            let reactor = |r: &ReactionRow, name: &str| Reactor {
-                name: name.to_string(),
-                color: avatar_color(&r.username),
-                username: r.username.clone(),
-            };
-            let mut people: Vec<Reactor> = of
-                .iter()
-                .filter(|r| r.user_id == viewer_id)
-                .map(|r| reactor(r, "You"))
-                .collect();
-            let mine = !people.is_empty();
-            people.extend(
-                of.iter()
-                    .filter(|r| r.user_id != viewer_id)
-                    .map(|r| reactor(r, &r.username)),
-            );
-            let count = of.len();
-            Some(ReactionChip {
-                emoji: (*emoji).to_string(),
-                count,
-                mine,
-                names: people
-                    .iter()
-                    .map(|p| p.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                people,
-                label: if mine {
-                    format!("{emoji} {count}, you reacted")
-                } else {
-                    format!("{emoji} {count}")
-                },
-            })
-        })
-        .collect()
-}
-
-/// The six choices, marking the ones the viewer has already made.
-#[must_use]
-pub fn picks(chips: &[ReactionChip]) -> Vec<Pick> {
-    EMOJI
-        .iter()
-        .map(|emoji| Pick {
-            emoji,
-            mine: chips.iter().any(|c| c.mine && c.emoji == *emoji),
-        })
-        .collect()
+    /// Everyone the message was sent to has read it.
+    pub all: bool,
 }
 
 /// Reaction rows for the given messages, keyed by message id. People no
@@ -214,14 +119,7 @@ pub async fn reaction_rows(
         .map(|(id, list)| {
             let rows = list
                 .into_iter()
-                .map(|r| ReactionRow {
-                    username: names
-                        .get(&r.user_id)
-                        .cloned()
-                        .unwrap_or_else(|| FORMER_MEMBER.to_string()),
-                    emoji: r.emoji,
-                    user_id: r.user_id,
-                })
+                .map(|r| ReactionRow::named(r.emoji, r.user_id, names))
                 .collect();
             (id, rows)
         })
@@ -297,6 +195,8 @@ pub fn thread_line(
 
 /// One rendered chat message. `own` decides the bubble style for the viewer;
 /// `start` and `show_time` group consecutive messages from the same person.
+/// Every bubble shows its time; `show_time` now only marks the last message
+/// in a run, which is the one that shows the author's avatar.
 /// `read_receipts` is set on the viewer's own messages, so the page has a slot
 /// for `receipt` even before anyone has read it.
 #[derive(Debug, Clone, Serialize)]
@@ -380,7 +280,9 @@ impl MessageView {
 /// Who has read a message. Reading is in order, so a member has read it once
 /// their `last_read_at` reaches its `created_at`. The author never counts, nor
 /// do people no longer on the team. Nothing shows until someone has read it.
-/// There is no "everyone": people who join later would make it misleading.
+/// `all` counts only people who were in the conversation when the message was
+/// sent: someone who joins later never saw it arrive, so they do not hold the
+/// tick back.
 #[must_use]
 pub fn receipt(
     conversation_kind: &str,
@@ -391,8 +293,8 @@ pub fn receipt(
 ) -> Option<Receipt> {
     let mut readers: Vec<Person> = marks
         .iter()
-        .filter(|(id, at)| *id != author_id && at.is_some_and(|at| at >= created_at))
-        .filter_map(|(id, _)| {
+        .filter(|(id, at, _)| *id != author_id && at.is_some_and(|at| at >= created_at))
+        .filter_map(|(id, _, _)| {
             names.get(id).map(|name| Person {
                 id: *id,
                 color: avatar_color(name),
@@ -404,6 +306,16 @@ pub fn receipt(
         return None;
     }
     readers.sort_by(|a, b| a.username.cmp(&b.username));
+    let waiting_on: Vec<&ReadMark> = marks
+        .iter()
+        .filter(|(id, _, joined)| {
+            *id != author_id && *joined <= created_at && names.contains_key(id)
+        })
+        .collect();
+    let all = !waiting_on.is_empty()
+        && waiting_on
+            .iter()
+            .all(|(_, at, _)| at.is_some_and(|at| at >= created_at));
     let dm = conversation_kind == kind::DM;
     let text = if dm {
         "Read".to_string()
@@ -426,6 +338,7 @@ pub fn receipt(
         more: readers.len() - shown.len(),
         shown,
         readers,
+        all,
     })
 }
 
@@ -612,6 +525,7 @@ async fn show(
     let feed = main_feed(&ctx, &member, &conversation, &names).await?;
     let label = label(&conversation, &members, &names, me);
     let mention_names = mention_names(&conversation, &people, me);
+    let everyone_hint = everyone_hint(&conversation, &label, &people, me);
     format::render().view(
         &v,
         "chat/show.html",
@@ -626,6 +540,7 @@ async fn show(
                     "label": label,
                     "members": people,
                     "mention_names": mention_names,
+                    "everyone_hint": everyone_hint,
                 },
                 "messages": feed,
             }),
@@ -660,6 +575,28 @@ fn mention_names(conversation: &conversations::Model, people: &[Person], me: i64
     } else {
         format!("{EVERYONE},{names}")
     }
+}
+
+/// The hint under "@everyone" in the @ menu: who it will tell. Empty in a DM,
+/// which has no @everyone.
+fn everyone_hint(
+    conversation: &conversations::Model,
+    label: &str,
+    people: &[Person],
+    me: i64,
+) -> String {
+    let place = match conversation.kind.as_str() {
+        kind::DM => return String::new(),
+        kind::CHANNEL => format!("#{label}"),
+        _ => label.to_string(),
+    };
+    let others = people.iter().filter(|p| p.id != me).count();
+    let count = if others == 1 {
+        "1 person".to_string()
+    } else {
+        format!("{others} people")
+    };
+    format!("Notify everyone in {place} ({count})")
 }
 
 /// The main feed as the viewer sees it: three queries (messages, reactions,
@@ -879,7 +816,12 @@ async fn actions(
             .get(&message.id)
             .and_then(|s| thread_line(conversation.id, message.id, s, &names, member.tz()));
     }
-    format::render().view(&v, "chat/_actions.html", data!({ "message": view }))
+    let reaction_total: usize = view.reactions.iter().map(|c| c.count).sum();
+    format::render().view(
+        &v,
+        "chat/_actions.html",
+        data!({ "message": view, "reaction_total": reaction_total }),
+    )
 }
 
 /// A thread's parent and replies as its page shows them: no reply line, no
@@ -982,6 +924,7 @@ async fn thread(
         "kind": conversation.kind,
         "label": label,
         "mention_names": mention_names(&conversation, &people, me),
+        "everyone_hint": everyone_hint(&conversation, &label, &people, me),
     });
     page["thread"] = serde_json::json!({
         "parent_id": parent.id,
@@ -1169,21 +1112,65 @@ mod tests {
     #[test]
     fn dms_say_read_once_the_other_person_has_read() {
         let sent = at(5);
-        let unread = [(1, Some(at(9))), (2, Some(at(4)))];
+        let unread = [(1, Some(at(9)), at(0)), (2, Some(at(4)), at(0))];
         assert_eq!(receipt(kind::DM, 1, sent, &unread, &team()), None);
-        let never_opened = [(1, Some(at(9))), (2, None)];
+        let never_opened = [(1, Some(at(9)), at(0)), (2, None, at(0))];
         assert_eq!(receipt(kind::DM, 1, sent, &never_opened, &team()), None);
-        let read = [(1, None), (2, Some(at(5)))];
+        let read = [(1, None, at(0)), (2, Some(at(5)), at(0))];
         let r = receipt(kind::DM, 1, sent, &read, &team()).unwrap();
         assert_eq!(r.text, "Read");
         assert!(r.dm);
+        assert!(r.all);
         assert_eq!(names(&r.readers), vec!["bob"]);
+    }
+
+    #[test]
+    fn groups_say_everyone_once_all_who_were_there_have_read() {
+        let sent = at(5);
+        let everyone = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (3, Some(at(7)), at(0)),
+        ];
+        let r = receipt(kind::GROUP, 1, sent, &everyone, &team()).unwrap();
+        assert!(r.all);
+        // The label still names them, as the faces' label.
+        assert_eq!(r.text, "Read by bob, carol");
+
+        // dev joined after the message and has not read it: not waited on.
+        let late = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (3, Some(at(7)), at(0)),
+            (4, None, at(8)),
+        ];
+        assert!(receipt(kind::GROUP, 1, sent, &late, &team()).unwrap().all);
+
+        // eve was there and has not read it.
+        let waiting = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (5, Some(at(4)), at(0)),
+        ];
+        assert!(
+            !receipt(kind::GROUP, 1, sent, &waiting, &team())
+                .unwrap()
+                .all
+        );
+
+        // Someone off the team (removed or pending) does not count.
+        let gone = [(1, None, at(0)), (2, Some(at(6)), at(0)), (99, None, at(0))];
+        assert!(receipt(kind::GROUP, 1, sent, &gone, &team()).unwrap().all);
     }
 
     #[test]
     fn groups_count_readers_and_never_the_author() {
         let sent = at(5);
-        let some = [(1, Some(at(9))), (2, Some(at(6))), (3, Some(at(1)))];
+        let some = [
+            (1, Some(at(9)), at(0)),
+            (2, Some(at(6)), at(0)),
+            (3, Some(at(1)), at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, sent, &some, &team()).unwrap();
         assert_eq!(r.text, "Read by bob");
         assert_eq!(names(&r.readers), vec!["bob"]);
@@ -1191,7 +1178,11 @@ mod tests {
         assert!(!r.dm);
 
         // Even when every other member has read it, the label names them.
-        let all = [(3, Some(at(7))), (1, None), (2, Some(at(6)))];
+        let all = [
+            (3, Some(at(7)), at(0)),
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, sent, &all, &team()).unwrap();
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(names(&r.readers), vec!["bob", "carol"]);
@@ -1200,7 +1191,11 @@ mod tests {
     #[test]
     fn people_off_the_team_are_ignored() {
         let sent = at(5);
-        let marks = [(1, None), (2, Some(at(6))), (99, Some(at(6)))];
+        let marks = [
+            (1, None, at(0)),
+            (2, Some(at(6)), at(0)),
+            (99, Some(at(6)), at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, sent, &marks, &team()).unwrap();
         assert_eq!(r.text, "Read by bob");
         assert_eq!(names(&r.readers), vec!["bob"]);
@@ -1209,18 +1204,23 @@ mod tests {
     #[test]
     fn groups_show_three_avatars_then_a_count() {
         let marks = [
-            (1, None),
-            (5, Some(at(9))),
-            (4, Some(at(9))),
-            (3, Some(at(9))),
-            (2, Some(at(9))),
+            (1, None, at(0)),
+            (5, Some(at(9)), at(0)),
+            (4, Some(at(9)), at(0)),
+            (3, Some(at(9)), at(0)),
+            (2, Some(at(9)), at(0)),
         ];
         let r = receipt(kind::GROUP, 1, at(5), &marks, &team()).unwrap();
         assert_eq!(names(&r.shown), vec!["bob", "carol", "dev"]);
         assert_eq!(r.more, 1);
         assert_eq!(r.readers.len(), 4);
 
-        let partial = [(1, None), (2, Some(at(9))), (3, Some(at(9))), (4, None)];
+        let partial = [
+            (1, None, at(0)),
+            (2, Some(at(9)), at(0)),
+            (3, Some(at(9)), at(0)),
+            (4, None, at(0)),
+        ];
         let r = receipt(kind::GROUP, 1, at(5), &partial, &team()).unwrap();
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(r.more, 0);
@@ -1229,9 +1229,9 @@ mod tests {
     #[test]
     fn big_groups_name_two_readers_and_count_the_rest() {
         let team: HashMap<i64, String> = (1..=8).map(|id| (id, format!("u{id}"))).collect();
-        let mut marks: Vec<ReadMark> = (2..=7).map(|id| (id, Some(at(9)))).collect();
-        marks.push((1, None));
-        marks.push((8, None));
+        let mut marks: Vec<ReadMark> = (2..=7).map(|id| (id, Some(at(9)), at(0))).collect();
+        marks.push((1, None, at(0)));
+        marks.push((8, None, at(0)));
         let r = receipt(kind::GROUP, 1, at(5), &marks, &team).unwrap();
         assert_eq!(r.text, "Read by u2, u3 and 4 others");
         assert_eq!(r.readers.len(), 6);
@@ -1241,55 +1241,8 @@ mod tests {
     #[test]
     fn nobody_left_to_read_means_no_receipt() {
         // Everyone else has left the group.
-        let marks = [(1, Some(at(9))), (99, Some(at(9)))];
+        let marks = [(1, Some(at(9)), at(0)), (99, Some(at(9)), at(0))];
         assert_eq!(receipt(kind::GROUP, 1, at(5), &marks, &team()), None);
-    }
-
-    fn row(emoji: &str, user_id: i64, username: &str) -> ReactionRow {
-        ReactionRow {
-            emoji: emoji.to_string(),
-            user_id,
-            username: username.to_string(),
-        }
-    }
-
-    #[test]
-    fn chips_keep_the_fixed_order_and_put_you_first() {
-        // Reacted out of order: ✅, then 👍 by bob, carol and alice.
-        let rows = [
-            row("✅", 2, "bob"),
-            row("👍", 2, "bob"),
-            row("👍", 3, "carol"),
-            row("👍", 1, "alice"),
-        ];
-        let chips = chips(&rows, 1);
-        let order: Vec<&str> = chips.iter().map(|c| c.emoji.as_str()).collect();
-        assert_eq!(order, vec!["👍", "✅"]);
-        assert_eq!(chips[0].count, 3);
-        assert!(chips[0].mine);
-        assert_eq!(chips[0].names, "You, bob, carol");
-        assert_eq!(
-            chips[0].people[0].username, "alice",
-            "the avatar is still alice's"
-        );
-        assert_eq!(chips[0].label, "👍 3, you reacted");
-        assert!(!chips[1].mine);
-        assert_eq!(chips[1].label, "✅ 1");
-
-        // Bob sees the same chips with himself first.
-        let bobs = super::chips(&rows, 2);
-        assert_eq!(bobs[0].names, "You, carol, alice");
-        assert!(bobs[1].mine);
-    }
-
-    #[test]
-    fn picks_mark_only_your_own_reactions() {
-        let rows = [row("❤️", 2, "bob"), row("🎉", 1, "alice")];
-        let picks = picks(&chips(&rows, 1));
-        assert_eq!(picks.len(), 6);
-        let mine: Vec<&str> = picks.iter().filter(|p| p.mine).map(|p| p.emoji).collect();
-        assert_eq!(mine, vec!["🎉"]);
-        assert!(super::picks(&[]).iter().all(|p| !p.mine));
     }
 
     fn stat(user_id: i64, replies: i64, first: u32, last: u32) -> ReplierStat {
@@ -1348,7 +1301,11 @@ mod tests {
 
     #[test]
     fn channels_show_receipts_like_groups() {
-        let marks = [(1, None), (2, Some(at(9))), (3, Some(at(9)))];
+        let marks = [
+            (1, None, at(0)),
+            (2, Some(at(9)), at(0)),
+            (3, Some(at(9)), at(0)),
+        ];
         let r = receipt(kind::CHANNEL, 1, at(5), &marks, &team()).unwrap();
         assert!(!r.dm);
         assert_eq!(r.text, "Read by bob, carol");

@@ -159,8 +159,9 @@ pub async fn task_saved(
     Ok(())
 }
 
-/// After a note is posted: tells everyone mentioned, then the task's other
-/// assignees that there is a new note.
+/// After a note is posted: tells everyone mentioned, then the whole team for
+/// @everyone, then the task's other assignees that there is a new note. Each
+/// person gets one notice; a name wins over @everyone.
 ///
 /// # Errors
 /// On database errors.
@@ -174,7 +175,7 @@ pub async fn note_added(
     let team = memberships::Model::team(&ctx.db, org_id).await?;
     let link = format!("/tasks?open={}", task.id);
     let quote = excerpt(&note.body);
-    let told = send(
+    let mut told = send(
         ctx,
         org_id,
         member.user.id,
@@ -186,6 +187,30 @@ pub async fn note_added(
         },
     )
     .await?;
+    // Only a person in their own organisation, in the browser, can tell everyone.
+    // Claude's bearer tokens and a super admin acting elsewhere cannot.
+    let everyone_allowed = member.via_session && !member.acting;
+    if everyone_allowed && notifications::mentions_everyone(&note.body) {
+        let rest: Vec<i64> = team
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| *id != member.user.id && !told.contains(id))
+            .collect();
+        told.extend(
+            send(
+                ctx,
+                org_id,
+                member.user.id,
+                &rest,
+                &Notice {
+                    kind: kind::MENTION,
+                    body: format!("mentioned everyone on “{}”\n{quote}", task.title),
+                    link: link.clone(),
+                },
+            )
+            .await?,
+        );
+    }
     let assignees: Vec<i64> = task_assignees::Model::for_task(&ctx.db, org_id, task.id)
         .await?
         .into_iter()

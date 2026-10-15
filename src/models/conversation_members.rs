@@ -5,8 +5,9 @@ use super::{conversations, messages};
 
 pub type ConversationMembers = Entity;
 
-/// A member and when they last read the conversation.
-pub type ReadMark = (i64, Option<DateTimeWithTimeZone>);
+/// A member, when they last read the conversation, and when they joined it
+/// (the row's `created_at`).
+pub type ReadMark = (i64, Option<DateTimeWithTimeZone>, DateTimeWithTimeZone);
 
 /// What one read covered: messages after `from` (from the start when `None`) up to `to`.
 #[derive(Debug, Clone, Copy)]
@@ -122,7 +123,7 @@ impl Model {
         Ok(())
     }
 
-    /// When each member of a conversation last read it.
+    /// When each member of a conversation last read it, and when they joined.
     ///
     /// # Errors
     /// On database errors.
@@ -137,7 +138,7 @@ impl Model {
             .all(db)
             .await?
             .into_iter()
-            .map(|m| (m.user_id, m.last_read_at))
+            .map(|m| (m.user_id, m.last_read_at, m.created_at))
             .collect())
     }
 

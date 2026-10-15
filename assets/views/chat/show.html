@@ -21,7 +21,10 @@
     </div>
     <form class="composer" method="post" action="/chat/{{ conversation.id }}/messages" ws-send>
       <label class="sr-only" for="composer-body">Message</label>
-      <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}" autocomplete="off" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
+      <div class="emoji-field">
+        <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}"{% if conversation.everyone_hint %} data-everyone-hint="{{ conversation.everyone_hint }}"{% endif %} autocomplete="off" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
+        <button type="button" class="field-emoji" data-emoji-for="composer-body" aria-label="Emoji" aria-expanded="false" aria-controls="emoji-picker">{{<icon name="smile" class="ic-smile h-[22px] w-[22px]"/>}}{{<icon name="keyboard" class="ic-keyboard h-[22px] w-[22px]"/>}}</button>
+      </div>
       <button type="submit" class="btn btn-primary h-11 w-11 p-0" aria-label="Send">{{<icon name="send" class="h-5 w-5"/>}}</button>
     </form>
   </section>

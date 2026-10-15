@@ -39,6 +39,7 @@ mod m20261012_203901_logins_starter_folder;
 mod m20261012_204623_add_done_at_to_tasks;
 mod m20261013_140537_reactions;
 mod m20261013_145508_add_parent_id_to_messages;
+mod m20261015_142719_note_reactions;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -82,6 +83,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261012_204623_add_done_at_to_tasks::Migration),
             Box::new(m20261013_140537_reactions::Migration),
             Box::new(m20261013_145508_add_parent_id_to_messages::Migration),
+            Box::new(m20261015_142719_note_reactions::Migration),
             // inject-above (do not remove this comment)
         ]
     }

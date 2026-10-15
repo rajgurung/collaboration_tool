@@ -78,6 +78,7 @@ fn renders_read_receipts_as_live_swaps() {
                     "readers": readers,
                     "shown": readers[..3],
                     "more": 2,
+                    "all": true,
                 } },
                 "oob": true,
             }),
@@ -93,10 +94,17 @@ fn renders_read_receipts_as_live_swaps() {
     );
     assert_eq!(read.matches("avatar avatar-2xs").count(), 3, "{read}");
     assert!(
-        read.contains(r#"<span class="receipt-more">+2</span>"#),
+        read.contains(r#"<span class="seen-more">+2</span>"#),
         "{read}"
     );
+    assert!(read.contains("Read by 5</span>"), "{read}");
     assert_eq!(read.matches("receipt-pop-row").count(), 5, "{read}");
+    // The tick is swapped with the faces.
+    assert!(
+        read.contains(r#"<span class="tick tick-read" id="tick-42" hx-swap-oob="true">"#),
+        "{read}"
+    );
+    assert!(read.contains("read by everyone"), "{read}");
     assert!(
         read.contains(r##"data-toggle="#receipt-names-42""##),
         "{read}"
@@ -109,18 +117,25 @@ fn renders_read_receipts_as_live_swaps() {
         "{read}"
     );
     assert!(read.contains(r#"aria-expanded="false""#), "{read}");
-    assert!(!read.contains("msg-receipt-dm"), "{read}");
 
     let dm = engine
         .render(
             "chat/_receipt.html",
             serde_json::json!({ "message": { "id": 43, "receipt": {
-                "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0,
-            } } }),
+                "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0, "all": true,
+            } }, "oob": true }),
         )
         .expect("a DM receipt should render");
-    assert!(dm.contains(r#"<span class="msg-receipt-dm">"#), "{dm}");
-    assert!(dm.contains("</svg>Read</span>"), "{dm}");
+    // DMs: no faces, only the tick.
+    assert!(
+        dm.contains(r#"<span class="msg-receipt" id="receipt-43" hx-swap-oob="true"></span>"#),
+        "{dm}"
+    );
+    assert!(
+        dm.contains(r#"class="tick tick-read" id="tick-43""#),
+        "{dm}"
+    );
+    assert!(dm.contains(", read</span>"), "{dm}");
     assert!(!dm.contains("avatar"), "{dm}");
 
     let unread = engine
@@ -133,6 +148,22 @@ fn renders_read_receipts_as_live_swaps() {
         unread.contains(r#"<span class="msg-receipt" id="receipt-42"></span>"#),
         "{unread}"
     );
+    assert!(
+        !unread.contains("tick"),
+        "the page renders the tick in the bubble"
+    );
+
+    let grey = engine
+        .render(
+            "chat/_tick.html",
+            serde_json::json!({ "message": { "id": 42, "receipt": null } }),
+        )
+        .expect("an unread tick should render");
+    assert!(
+        grey.contains(r#"<span class="tick" id="tick-42">"#),
+        "{grey}"
+    );
+    assert!(grey.contains("not read yet"), "{grey}");
 }
 
 #[test]
@@ -159,7 +190,7 @@ fn renders_reactions_as_live_swaps() {
         )
         .expect("reactions should render");
     assert!(
-        html.contains(r#"id="reacts-42" aria-live="off" hx-swap-oob="true""#),
+        html.contains(r#"id="reacts-42" role="group" aria-label="Reactions" aria-live="off" hx-swap-oob="true""#),
         "{html}"
     );
     assert!(html.contains(r#"id="tools-42""#), "{html}");
@@ -190,7 +221,7 @@ fn renders_reactions_as_live_swaps() {
         .expect("an empty slot should render");
     // Nothing inside, not even a space, so `.reacts:empty` hides it.
     assert!(
-        empty.contains(r#"<div class="reacts" id="reacts-42" aria-live="off"></div>"#),
+        empty.contains(r#"<div class="reacts" id="reacts-42" role="group" aria-label="Reactions" aria-live="off"></div>"#),
         "{empty}"
     );
 }
@@ -290,4 +321,129 @@ fn renders_the_thread_count_as_a_live_swap() {
         )
         .expect("an empty count should render");
     assert!(none.contains(r#"aria-live="off"></div>"#), "{none}");
+}
+
+/// Every live swap target keeps a home: the time, tick and thread footer sit
+/// inside the bubble; your chips and reader faces share a row after it; then
+/// the toolbar.
+#[test]
+fn renders_a_message_as_one_block() {
+    let engine = view_engine();
+    let face = |name: &str| serde_json::json!({ "id": 1, "username": name, "color": "#ffb454" });
+    let reactor =
+        |name: &str| serde_json::json!({ "name": name, "username": name, "color": "#ffb454" });
+    let chip = |emoji: &str| serde_json::json!({ "emoji": emoji, "count": 1, "mine": false, "people": [reactor("bob")], "names": "bob", "label": format!("{emoji} 1") });
+    let pick = |emoji: &str| serde_json::json!({ "emoji": emoji, "mine": false });
+    let message = |own: bool, read_receipts: bool| {
+        serde_json::json!({
+            "message": {
+                "id": 42, "conversation_id": 7, "author": "alice", "color": "#ffb454",
+                "parts": [{ "text": "Stock count Friday", "mention": false }],
+                "at": "09:31", "own": own, "start": true, "show_time": true,
+                "read_receipts": read_receipts, "receipt": null,
+                "reactions": [chip("👍"), chip("✅")], "picks": [pick("👍")],
+                "can_reply": true,
+                "thread": {
+                    "url": "/chat/7/threads/42", "count": 3, "label": "3 replies",
+                    "last": "14:05", "faces": [face("bob")], "more": 0,
+                },
+            },
+        })
+    };
+    let html = engine
+        .render("chat/_message.html", message(true, true))
+        .expect("a message should render");
+    let at = |needle: &str| {
+        html.find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}: {html}"))
+    };
+    let bubble = at(r#"class="bubble""#);
+    let stamp = at(r#"<span class="stamp"><span class="sr-only">Sent </span>09:31"#);
+    let tick = at(r#"<span class="tick" id="tick-42">"#);
+    let thread = at(r#"id="thread-42""#);
+    let bubble_end = thread + html[thread..].find("</div>").expect("the bubble closes");
+    let reacts = at(r#"id="reacts-42""#);
+    let receipt = at(r#"id="receipt-42""#);
+    let tools = at(r#"id="tools-42""#);
+    assert!(bubble < stamp && stamp < tick && tick < thread, "{html}");
+    assert!(html.contains("stamp-pad stamp-pad-tick"), "{html}");
+    let foot = at(r#"class="msg-foot""#);
+    assert!(foot < reacts, "your chips and faces share one row: {html}");
+    assert!(html[thread..bubble_end].contains("thread-foot"), "{html}");
+    assert!(
+        bubble_end < reacts && reacts < receipt && receipt < tools,
+        "{html}"
+    );
+    assert!(!html.contains("msg-time"), "{html}");
+
+    let others = engine
+        .render("chat/_message.html", message(false, false))
+        .expect("someone else's message should render");
+    assert!(
+        others.contains(r#"<span class="stamp">09:31</span>"#),
+        "{others}"
+    );
+    assert!(!others.contains(r#"id="receipt-"#), "{others}");
+    assert!(!others.contains("stamp-pad-tick"), "{others}");
+    assert!(!others.contains("msg-foot"), "{others}");
+}
+
+/// One task note: the quick bar and the chips post to the note's own route,
+/// every button is a plain button, and the text is escaped.
+#[test]
+fn renders_a_note_with_reactions() {
+    let reactor =
+        |name: &str| serde_json::json!({ "name": name, "username": name, "color": "#ffb454" });
+    let pick = |emoji: &str, mine: bool| serde_json::json!({ "emoji": emoji, "mine": mine });
+    let html = view_engine()
+        .render(
+            "tasks/_note.html",
+            serde_json::json!({
+                "note": {
+                    "id": 5, "task_id": 3, "author": "bob", "color": "#ffb454",
+                    "parts": [{ "text": "<b>Shelves</b> done", "mention": false }],
+                    "at": "Thu 15 Oct, 09:31",
+                    "reactions": [{
+                        "emoji": "👍", "count": 1, "mine": true, "people": [reactor("You")],
+                        "names": "You", "label": "👍 1, you reacted",
+                    }],
+                    "picks": [pick("👍", true), pick("❤️", false), pick("😂", false), pick("🎉", false), pick("👀", false), pick("✅", false)],
+                },
+            }),
+        )
+        .expect("a note should render");
+    assert!(
+        html.contains(r#"<article class="note" id="note-5">"#),
+        "{html}"
+    );
+    assert_eq!(
+        html.matches(r#"hx-post="/tasks/3/notes/5/reactions""#)
+            .count(),
+        7,
+        "six picks and one chip: {html}"
+    );
+    assert_eq!(
+        html.matches(r#"hx-sync="closest .note:replace""#).count(),
+        7,
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<div class="quick-react hidden" id="note-picks-5""#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<div class="note-who list hidden" id="note-who-5">"#),
+        "{html}"
+    );
+    assert_eq!(
+        html.matches("<button").count(),
+        html.matches(r#"<button type="button""#).count(),
+        "every button is type=button: {html}"
+    );
+    assert!(
+        html.contains("&lt;b&gt;Shelves&lt;&#x2F;b&gt; done")
+            || html.contains("&lt;b&gt;Shelves&lt;/b&gt; done"),
+        "{html}"
+    );
+    assert!(!html.contains("<b>Shelves</b>"), "{html}");
 }

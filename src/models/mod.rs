@@ -42,6 +42,7 @@ pub mod guide;
 pub mod login_accesses;
 pub mod login_events;
 pub mod logins;
+pub mod note_reactions;
 pub mod notifications;
 pub mod oauth_clients;
 pub mod oauth_codes;

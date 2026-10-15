@@ -32,17 +32,7 @@
 
   <div class="flex flex-col gap-3 border-t border-line pt-4">
     <h3 class="m-0 text-[16px] font-bold">Notes {% if notes %}<span class="meta font-medium">{{ notes | length }}</span>{% endif %}</h3>
-    {% for note in notes %}
-    <article class="flex gap-2.5">
-      {{<avatar name={note.author} color={note.color} size="md"/>}}
-      <div class="min-w-0 flex-1">
-        <div class="flex items-baseline gap-2"><strong class="text-sm">{{ note.author }}</strong><span class="meta text-xs">{{ note.at }}</span></div>
-        <p class="m-0 mt-0.5 whitespace-pre-wrap text-[15px] leading-relaxed">{% for p in note.parts %}{% if p.mention %}<span class="mention">{{ p.text }}</span>{% else %}{{ p.text }}{% endif %}{% endfor %}</p>
-      </div>
-    </article>
-    {% else %}
-    <p class="meta m-0">No notes yet. Add context, an update or a decision.</p>
-    {% endfor %}
+    <div class="notes">{% for note in notes %}{% include "tasks/_note.html" %}{% else %}<p class="meta m-0">No notes yet. Add context, an update or a decision.</p>{% endfor %}</div>
   </div>
 
   {% include "tasks/_note_form.html" %}

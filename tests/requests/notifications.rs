@@ -168,6 +168,10 @@ async fn everyone_tells_each_active_member_once() {
             page.contains(r#"data-mentions="everyone,"#),
             "the picker offers everyone first"
         );
+        assert!(
+            page.contains(r#"data-everyone-hint="Notify everyone in #general ("#),
+            "{page}"
+        );
 
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
@@ -272,6 +276,7 @@ async fn everyone_stays_inside_groups_and_dms() {
             .await
             .text();
         assert!(page.contains("data-mentions=\"carol,alice\""), "{page}");
+        assert!(!page.contains("data-everyone-hint"), "no @everyone in a DM");
         request
             .post(&format!("/chat/{}/messages", dm.id))
             .add_header(alice.0.clone(), alice.1.clone())
@@ -366,8 +371,8 @@ async fn assignments_and_notes_notify_the_right_people() {
             .text();
         assert!(sheet.contains(r#"<span class="mention">@alice</span>"#));
         assert!(
-            sheet.contains(r#"data-mentions="alice,bob,carol""#),
-            "picker offers the team, with you last"
+            sheet.contains(r#"data-mentions="everyone,alice,bob,carol""#),
+            "picker offers everyone, then the team, with you last"
         );
 
         // Tagging yourself in a note reads as a reminder to you.
@@ -906,6 +911,208 @@ async fn reply_notices_stay_inside_groups_and_dms() {
                 "mention".to_string(),
                 "mentioned you in a thread\n@raj thanks".to_string()
             )]
+        );
+    })
+    .await;
+}
+
+/// A task in Acme, assigned to `assignees`.
+async fn acme_task(ctx: &AppContext, title: &str, assignees: Vec<i64>) -> tasks::Model {
+    let org = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap();
+    tasks::Model::create(
+        &ctx.db,
+        org.id,
+        &tasks::TaskParams {
+            title: title.to_string(),
+            project_id: String::new(),
+            assignee_ids: assignees,
+            priority: "medium".to_string(),
+            due_on: String::new(),
+            status: String::new(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+async fn add_note(
+    request: &loco_rs::TestServer,
+    who: &super::chat::Cookie,
+    task: &tasks::Model,
+    body: &str,
+) {
+    let res = request
+        .post(&format!("/tasks/{}/notes", task.id))
+        .add_header(who.0.clone(), who.1.clone())
+        .add_header("HX-Request", "true")
+        .form(&serde_json::json!({ "body": body }))
+        .await;
+    assert_eq!(res.status_code(), 200, "{}", res.text());
+}
+
+fn everyone_on(title: &str, body: &str) -> (String, String) {
+    (
+        "mention".to_string(),
+        format!("mentioned everyone on “{title}”\n{body}"),
+    )
+}
+
+#[tokio::test]
+#[serial]
+async fn everyone_in_a_note_tells_the_whole_team_once() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (_, shusma), (_, kreepa), (samir_c, samir)] = people.try_into().unwrap();
+        join(&request, "acme", "pete", "pete@example.com").await;
+        let pete = user_id(&ctx, "pete@example.com").await;
+        let task = acme_task(&ctx, "Stock count", vec![]).await;
+
+        add_note(&request, &samir_c, &task, "@everyone stock count Friday").await;
+        for id in [raj, shusma, kreepa] {
+            assert_eq!(
+                inbox(&ctx, id).await,
+                vec![everyone_on("Stock count", "@everyone stock count Friday")]
+            );
+        }
+        assert!(inbox(&ctx, samir).await.is_empty(), "not the writer");
+        assert!(inbox(&ctx, pete).await.is_empty(), "not a pending member");
+        let links: Vec<String> = notifications::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.link)
+            .collect();
+        assert_eq!(links.len(), 3);
+        assert!(links
+            .iter()
+            .all(|l| *l == format!("/tasks?open={}", task.id)));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_name_wins_over_everyone_in_a_note() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (_, shusma), (_, kreepa), (samir_c, _)] = people.try_into().unwrap();
+        let task = acme_task(&ctx, "Stock count", vec![]).await;
+
+        add_note(&request, &samir_c, &task, "@shusma @everyone counts due").await;
+        assert_eq!(
+            inbox(&ctx, shusma).await,
+            vec![(
+                "mention".to_string(),
+                "mentioned you on “Stock count”\n@shusma @everyone counts due".to_string()
+            )]
+        );
+        for id in [raj, kreepa] {
+            assert_eq!(
+                inbox(&ctx, id).await,
+                vec![everyone_on("Stock count", "@shusma @everyone counts due")]
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn everyone_in_a_note_replaces_the_comment_notice() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _) = team_of_four(&request, &ctx).await;
+        let [_, _, (_, kreepa), (samir_c, _)] = people.try_into().unwrap();
+        let task = acme_task(&ctx, "Stock count", vec![kreepa]).await;
+
+        add_note(&request, &samir_c, &task, "@everyone done").await;
+        assert_eq!(
+            inbox(&ctx, kreepa).await,
+            vec![everyone_on("Stock count", "@everyone done")],
+            "the assignee is told once"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn mentioning_yourself_and_everyone_in_a_note() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (_, shusma), (_, kreepa), (samir_c, samir)] = people.try_into().unwrap();
+        let task = acme_task(&ctx, "Stock count", vec![]).await;
+
+        add_note(&request, &samir_c, &task, "@samir @everyone check").await;
+        let own = inbox(&ctx, samir).await;
+        assert_eq!(own.len(), 1, "only the reminder: {own:?}");
+        assert!(own[0].1.starts_with("mentioned you on"), "{own:?}");
+        for id in [raj, shusma, kreepa] {
+            assert_eq!(inbox(&ctx, id).await.len(), 1);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn an_acting_super_admin_cannot_notify_everyone() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _) = team_of_four(&request, &ctx).await;
+        let [(_, raj), (_, shusma), (_, kreepa), _] = people.try_into().unwrap();
+        let task = acme_task(&ctx, "Stock count", vec![kreepa]).await;
+        let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+            .await
+            .unwrap();
+        let admin = super::admin::super_admin_cookie(&request, &ctx).await;
+        let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
+
+        let res = request
+            .post(&format!("/tasks/{}/notes", task.id))
+            .add_header("cookie", acting)
+            .add_header("HX-Request", "true")
+            .form(&serde_json::json!({ "body": "@everyone hi" }))
+            .await;
+        assert_eq!(res.status_code(), 200);
+        // The note box does not offer it either.
+        let sheet = res.text();
+        assert!(sheet.contains("data-mentions="), "{sheet}");
+        assert!(!sheet.contains(r#"data-mentions="everyone"#), "{sheet}");
+        assert!(!sheet.contains("data-everyone-hint"), "{sheet}");
+        for id in [raj, shusma] {
+            assert!(inbox(&ctx, id).await.is_empty());
+        }
+        let kreepas = inbox(&ctx, kreepa).await;
+        assert_eq!(kreepas.len(), 1, "{kreepas:?}");
+        assert_eq!(kreepas[0].0, "note", "the assignee still hears of the note");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_note_box_offers_everyone_first() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (people, _) = team_of_four(&request, &ctx).await;
+        let [_, _, _, (samir_c, _)] = people.try_into().unwrap();
+        let task = acme_task(&ctx, "Stock count", vec![]).await;
+        add_note(&request, &samir_c, &task, "@everyone stock count Friday").await;
+
+        let sheet = request
+            .get(&format!("/tasks/{}", task.id))
+            .add_header(samir_c.0.clone(), samir_c.1.clone())
+            .await
+            .text();
+        assert!(sheet.contains(r#"data-mentions="everyone,"#), "{sheet}");
+        assert!(
+            sheet.contains(r#"data-everyone-hint="Notify the whole team (3 people)""#),
+            "{sheet}"
+        );
+        assert!(
+            sheet.contains(r#"<span class="mention">@everyone</span>"#),
+            "{sheet}"
         );
     })
     .await;

@@ -41,3 +41,5 @@ mod login_accesses;
 mod login_events;
 
 mod reactions;
+
+mod note_reactions;

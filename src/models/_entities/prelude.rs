@@ -13,6 +13,7 @@ pub use super::meeting_attendees::Entity as MeetingAttendees;
 pub use super::meetings::Entity as Meetings;
 pub use super::memberships::Entity as Memberships;
 pub use super::messages::Entity as Messages;
+pub use super::note_reactions::Entity as NoteReactions;
 pub use super::notifications::Entity as Notifications;
 pub use super::oauth_clients::Entity as OauthClients;
 pub use super::oauth_codes::Entity as OauthCodes;

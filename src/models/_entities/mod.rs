@@ -15,6 +15,7 @@ pub mod meeting_attendees;
 pub mod meetings;
 pub mod memberships;
 pub mod messages;
+pub mod note_reactions;
 pub mod notifications;
 pub mod oauth_clients;
 pub mod oauth_codes;

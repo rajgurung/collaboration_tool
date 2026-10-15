@@ -141,7 +141,7 @@ pub struct AddTaskNote {
     #[schemars(description = "The task's id.")]
     pub task_id: i64,
     #[schemars(
-        description = "The note, up to 2,000 characters. @username mentions notify people."
+        description = "The note, up to 2,000 characters. @username mentions notify people; @everyone does not notify anyone from here."
     )]
     pub body: String,
 }
@@ -367,7 +367,7 @@ impl CollabServer {
     }
 
     #[tool(
-        description = "Add a note to a task. @username mentions and the task's assignees are notified.",
+        description = "Add a note to a task. @username mentions and the task's assignees are notified; @everyone does not notify anyone from here.",
         annotations(destructive_hint = false, open_world_hint = false)
     )]
     async fn add_task_note(

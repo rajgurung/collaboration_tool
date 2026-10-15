@@ -52,6 +52,24 @@ impl Model {
             .await?)
     }
 
+    /// A note on `task`, in the task's organisation. A note on another task,
+    /// in this or any organisation, is not found.
+    ///
+    /// # Errors
+    /// `EntityNotFound`, or database errors.
+    pub async fn find_on_task<C: ConnectionTrait>(
+        db: &C,
+        task: &tasks::Model,
+        id: i64,
+    ) -> ModelResult<Self> {
+        Entity::find_by_id(id)
+            .in_tenant(task.organisation_id)
+            .filter(Column::TaskId.eq(task.id))
+            .one(db)
+            .await?
+            .ok_or(ModelError::EntityNotFound)
+    }
+
     /// Number of notes per task id, for the board.
     ///
     /// # Errors
