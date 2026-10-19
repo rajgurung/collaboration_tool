@@ -1,7 +1,10 @@
 use chrono::{offset::Local, Duration};
 use collab::{
     app::App,
-    models::users::{self, Model, RegisterParams},
+    models::{
+        organisations::{self, SignupParams},
+        users::{self, Model, RegisterParams},
+    },
 };
 use insta::assert_debug_snapshot;
 use loco_rs::testing::prelude::*;
@@ -383,4 +386,61 @@ async fn magic_link() {
         actual_expiration <= should_expired_at,
         "Magic link expiration exceeds expected maximum expiration time"
     );
+}
+
+/// Signs up an organisation and returns its owner and the org id.
+async fn owner_of(ctx: &loco_rs::app::AppContext, org: &str, owner: &str) -> (Model, i64) {
+    let (user, org) = organisations::Model::sign_up(
+        &ctx.db,
+        &SignupParams {
+            organisation_name: org.to_string(),
+            name: owner.to_string(),
+            email: format!("{owner}@example.com"),
+            password: "correct-horse".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    (user, org.id)
+}
+
+#[tokio::test]
+#[serial]
+async fn an_unlock_counts_only_in_its_own_org() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, acme) = owner_of(ctx, "Acme", "alice").await;
+    let (_, beta) = owner_of(ctx, "Beta", "bob").await;
+
+    Model::unlock_secrets(&ctx.db, alice.id, "sid-1", acme)
+        .await
+        .unwrap();
+    let alice = Model::find_by_id(&ctx.db, alice.id).await.unwrap();
+    assert!(alice.secrets_unlocked(Some("sid-1"), acme));
+    assert!(!alice.secrets_unlocked(Some("sid-1"), beta));
+    assert!(!alice.secrets_unlocked(Some("sid-2"), acme));
+
+    Model::end_unlock(&ctx.db, alice.id).await.unwrap();
+    let alice = Model::find_by_id(&ctx.db, alice.id).await.unwrap();
+    assert!(!alice.secrets_unlocked(Some("sid-1"), acme));
+    assert_eq!(alice.secrets_unlocked_org_id, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_session_bump_clears_the_unlock_org() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, acme) = owner_of(ctx, "Acme", "alice").await;
+
+    Model::unlock_secrets(&ctx.db, alice.id, "sid-1", acme)
+        .await
+        .unwrap();
+    Model::increment_session_version(&ctx.db, alice.id)
+        .await
+        .unwrap();
+    let alice = Model::find_by_id(&ctx.db, alice.id).await.unwrap();
+    assert_eq!(alice.secrets_unlocked_org_id, None);
+    assert_eq!(alice.secrets_unlocked_sid, None);
+    assert!(!alice.secrets_unlocked(Some("sid-1"), acme));
 }

@@ -405,13 +405,17 @@ impl Model {
     }
 
     /// Whether this sign-in re-entered the app password in the last
-    /// [`UNLOCK_MINUTES`]. Both the time and the sign-in must match.
+    /// [`UNLOCK_MINUTES`], inside this organisation. The time, the sign-in
+    /// and the organisation must all match.
     #[must_use]
-    pub fn secrets_unlocked(&self, session_id: Option<&str>) -> bool {
+    pub fn secrets_unlocked(&self, session_id: Option<&str>, org_id: i64) -> bool {
         let fresh = self
             .secrets_unlocked_until
             .is_some_and(|until| until > chrono::Utc::now());
-        fresh && session_id.is_some() && self.secrets_unlocked_sid.as_deref() == session_id
+        fresh
+            && session_id.is_some()
+            && self.secrets_unlocked_sid.as_deref() == session_id
+            && self.secrets_unlocked_org_id == Some(org_id)
     }
 
     /// Seconds left on the unlock, for the "Unlocked for 4 more minutes"
@@ -426,7 +430,8 @@ impl Model {
         })
     }
 
-    /// Unlocks logins for [`UNLOCK_MINUTES`], for one sign-in only.
+    /// Unlocks logins for [`UNLOCK_MINUTES`], for one sign-in and one
+    /// organisation only.
     ///
     /// # Errors
     /// On database errors.
@@ -434,6 +439,7 @@ impl Model {
         db: &C,
         user_id: i64,
         session_id: &str,
+        org_id: i64,
     ) -> ModelResult<()> {
         let until = chrono::Utc::now() + Duration::minutes(UNLOCK_MINUTES);
         users::Entity::update_many()
@@ -444,6 +450,34 @@ impl Model {
             .col_expr(
                 users::Column::SecretsUnlockedSid,
                 Expr::value(Some(session_id.to_string())),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedOrgId,
+                Expr::value(Some(org_id)),
+            )
+            .filter(users::Column::Id.eq(user_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// Ends any unlock of logins, without ending sessions.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn end_unlock<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<()> {
+        users::Entity::update_many()
+            .col_expr(
+                users::Column::SecretsUnlockedUntil,
+                Expr::value(None::<chrono::DateTime<chrono::FixedOffset>>),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedSid,
+                Expr::value(None::<String>),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedOrgId,
+                Expr::value(None::<i64>),
             )
             .filter(users::Column::Id.eq(user_id))
             .exec(db)
@@ -519,6 +553,10 @@ impl Model {
             .col_expr(
                 users::Column::SecretsUnlockedSid,
                 Expr::value(None::<String>),
+            )
+            .col_expr(
+                users::Column::SecretsUnlockedOrgId,
+                Expr::value(None::<i64>),
             )
             .col_expr(users::Column::UpdatedAt, Expr::value(chrono::Utc::now()))
             .filter(users::Column::Id.eq(user_id))

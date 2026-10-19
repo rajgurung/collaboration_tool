@@ -136,7 +136,10 @@ async fn login_data(
     ask.truncate(2);
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, login.folder_id).await?;
     let can_reveal = login.can_reveal(&ctx.db, member).await?;
-    let unlocked = can_reveal && member.user.secrets_unlocked(member.session_id.as_deref());
+    let unlocked = can_reveal
+        && member
+            .user
+            .secrets_unlocked(member.session_id.as_deref(), member.org.id);
     let folders_list: Vec<serde_json::Value> = folders::Model::list_for_org(&ctx.db, member.org.id)
         .await?
         .into_iter()
@@ -438,7 +441,7 @@ async fn unlock(
             (sid, Some(cookie))
         }
     };
-    users::Model::unlock_secrets(&ctx.db, user.id, &session_id).await?;
+    users::Model::unlock_secrets(&ctx.db, user.id, &session_id, member.org.id).await?;
     login_events::Model::record(&ctx.db, &client, entry(action::UNLOCK, None)).await?;
     let mut response = plain(StatusCode::OK, "Unlocked")?;
     if let Some(cookie) = cookie {
@@ -475,7 +478,10 @@ async fn prepare_secret(
         field::PASSWORD | "" => field::PASSWORD,
         _ => return Err(Error::NotFound),
     };
-    if !member.user.secrets_unlocked(member.session_id.as_deref()) {
+    if !member
+        .user
+        .secrets_unlocked(member.session_id.as_deref(), member.org.id)
+    {
         // 423: the page asks for the app password, then tries again.
         return Ok(Err(plain(
             StatusCode::LOCKED,
