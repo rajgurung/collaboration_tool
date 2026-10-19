@@ -1,0 +1,8 @@
+{% extends "layouts/app.html" %}
+{% block title %}New organisation · {{ org.name }}{% endblock title %}
+{% block heading %}New organisation{% endblock heading %}
+{% block content %}
+<div class="card org-new-page max-w-[560px] p-5 min-[768px]:p-6">
+  {% include "orgs/_new_form.html" %}
+</div>
+{% endblock content %}

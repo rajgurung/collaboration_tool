@@ -51,6 +51,7 @@ pub mod done_tasks;
 pub mod logins;
 pub mod note_reactions;
 
+pub mod create_org;
 pub mod multi_org;
 pub mod orgs;
 pub mod stale_tab;
