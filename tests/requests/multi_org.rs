@@ -575,6 +575,7 @@ async fn the_waiting_page_shows_only_without_an_active_membership() {
         let res = dashboard(&request, &with_org(&cookie, acme)).await;
         assert_eq!(res.status_code(), 200);
         assert_eq!(org_heading(&res.text()), "Beta");
+        assert!(clears(&res, "current_org"));
 
         set_status(&ctx, in_beta, memberships::status::REMOVED).await;
         let res = dashboard(&request, &with_org(&cookie, acme)).await;
@@ -792,6 +793,23 @@ async fn signing_in_clears_a_leftover_current_org() {
             }))
             .await;
         assert_eq!(res.status_code(), 303);
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+
+        // And so does joining.
+        let res = request
+            .post("/join/acme")
+            .add_header(
+                "cookie",
+                format!("current_org={}; acting_org=1", in_beta.organisation_id),
+            )
+            .form(&json!({
+                "name": "dave",
+                "email": "dave@example.com",
+                "password": USER_PASSWORD,
+            }))
+            .await;
+        assert_eq!(res.status_code(), 303, "{}", res.text());
         assert!(clears(&res, "current_org"));
         assert!(clears(&res, "acting_org"));
     })
