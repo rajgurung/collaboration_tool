@@ -1,8 +1,12 @@
 use collab::{app::App, models::users};
 use loco_rs::{boot::run_task, task, testing::prelude::*};
+use sea_orm::IntoActiveModel;
 use serial_test::serial;
 
-use super::prepare_data::{login, sign_up};
+use super::{
+    multi_org::{clears, set_cookie},
+    prepare_data::{login, sign_up},
+};
 
 #[tokio::test]
 #[serial]
@@ -182,6 +186,119 @@ async fn the_acting_cookie_means_nothing_to_normal_users() {
                 .await;
             assert_eq!(res.status_code(), 404, "{path}");
         }
+    })
+    .await;
+}
+
+async fn org_id(ctx: &loco_rs::app::AppContext, slug: &str) -> i64 {
+    collab::models::organisations::Model::find_by_slug(&ctx.db, slug)
+        .await
+        .unwrap()
+        .id
+}
+
+#[tokio::test]
+#[serial]
+async fn acting_wins_over_current_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let (acme, own) = (
+            org_id(&ctx, "acme").await,
+            org_id(&ctx, "himalayan-ritual").await,
+        );
+        let both = format!(
+            "{}; current_org={own}; acting_org={acme}",
+            admin.1.to_str().unwrap()
+        );
+        let page = request.get("/dashboard").add_header("cookie", both).await;
+        assert_eq!(page.status_code(), 200);
+        let body = page.text();
+        assert!(body.contains("as platform admin"));
+        assert!(body.contains("Acme"));
+        assert!(set_cookie(&page, "current_org").is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn acting_with_a_stale_current_org_sends_no_clearing_cookie() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let (acme, globex) = (org_id(&ctx, "acme").await, org_id(&ctx, "globex").await);
+        // The admin is not a member of Globex, so current_org is stale.
+        let both = format!(
+            "{}; current_org={globex}; acting_org={acme}",
+            admin.1.to_str().unwrap()
+        );
+        let page = request.get("/dashboard").add_header("cookie", both).await;
+        assert_eq!(page.status_code(), 200);
+        assert!(page.text().contains("as platform admin"));
+        assert!(set_cookie(&page, "current_org").is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_ends_acting() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let (acme, own) = (
+            org_id(&ctx, "acme").await,
+            org_id(&ctx, "himalayan-ritual").await,
+        );
+        let acting = format!("{}; acting_org={acme}", admin.1.to_str().unwrap());
+        let res = request
+            .post(&format!("/orgs/{own}/switch"))
+            .add_header("cookie", acting)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(clears(&res, "acting_org"));
+        let set = set_cookie(&res, "current_org").unwrap();
+        assert!(set.starts_with(&format!("current_org={own};")), "{set}");
+
+        // Acting does not make the admin a member: switching into Acme is a 404.
+        let res = request
+            .post(&format!("/orgs/{acme}/switch"))
+            .add_header(admin.0.clone(), admin.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 404);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_super_admin_without_a_membership_gets_the_clearing_cookie_on_the_htmx_redirect() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let acme = org_id(&ctx, "acme").await;
+        super::prepare_data::create_user(&ctx, "root@example.com", "root")
+            .await
+            .into_active_model()
+            .make_super_admin(&ctx.db)
+            .await
+            .unwrap();
+        let root = login(
+            &request,
+            "root@example.com",
+            super::prepare_data::USER_PASSWORD,
+        )
+        .await;
+        let stale = format!("{}; current_org={acme}", root.1.to_str().unwrap());
+        let res = request
+            .get("/dashboard")
+            .add_header("cookie", stale)
+            .add_header("HX-Request", "true")
+            .await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(res.headers()["HX-Redirect"], "/admin");
+        assert!(clears(&res, "current_org"));
     })
     .await;
 }
