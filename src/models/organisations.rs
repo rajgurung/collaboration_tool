@@ -22,6 +22,15 @@ pub struct OrgSummary {
 
 pub type Organisations = Entity;
 
+/// How many organisations one person can create, ever, counting the one
+/// from signup. Counted from `created_by_id`, so leaving one frees nothing.
+pub const MAX_ORGS_CREATED: u64 = 10;
+/// How many organisations one person can create in any 24 hours.
+pub const ORGS_PER_DAY: u64 = 3;
+/// The error key `create_for_user` uses for the cap, so the form can show
+/// the at-cap state instead of its fields.
+pub const AT_CAP: &str = "at_cap";
+
 /// Everything needed to create an organisation and its owner in one step.
 #[derive(Debug, Deserialize, Validate)]
 pub struct SignupParams {
@@ -175,9 +184,91 @@ impl Model {
         Ok((user, org))
     }
 
-    /// Creates an organisation with `owner` as its active owner, the
-    /// `general` channel and the starter document folders. Run it inside a
-    /// transaction.
+    /// How many organisations this person has created, ever.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn created_count<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .filter(Column::CreatedById.eq(user_id))
+            .count(db)
+            .await?)
+    }
+
+    /// "New organisation": another organisation for someone who already has
+    /// an account, with them as its active owner under the username they
+    /// chose. It copies `timezone` when given (the caller passes the current
+    /// org's, except while acting). The welcome pop-up is marked seen, as
+    /// they already use the app. Nothing else is taken from anywhere.
+    ///
+    /// The user's row is locked first, so two creates at once run one after
+    /// the other and the limits and the duplicate check see both.
+    ///
+    /// # Errors
+    /// Field errors for bad input, a name they already have and the daily
+    /// limit; a field error on [`AT_CAP`] at the cap; database errors.
+    pub async fn create_for_user(
+        db: &DatabaseConnection,
+        user: &users::Model,
+        params: &NewOrgParams,
+        timezone: Option<&str>,
+    ) -> ModelResult<Self> {
+        ValidatorTrait::validate(params)?;
+        let txn = db.begin().await?;
+        // FOR NO KEY UPDATE, so inserts elsewhere that point at this user
+        // (their FOR KEY SHARE checks) don't wait on it.
+        users::Entity::find_by_id(user.id)
+            .lock(sea_orm::sea_query::LockType::NoKeyUpdate)
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        if Self::created_count(&txn, user.id).await? >= MAX_ORGS_CREATED {
+            return Err(super::field_error(
+                AT_CAP,
+                "That's the most one account can set up for now.",
+            ));
+        }
+        let today = Entity::find()
+            .filter(Column::CreatedById.eq(user.id))
+            .filter(Column::CreatedAt.gt(chrono::Utc::now() - chrono::Duration::hours(24)))
+            .count(&txn)
+            .await?;
+        if today >= ORGS_PER_DAY {
+            return Err(super::field_error(
+                "organisation_name",
+                &format!("You've set up {ORGS_PER_DAY} organisations today. Try again tomorrow."),
+            ));
+        }
+        let wanted = comparable(&params.organisation_name);
+        let taken = memberships::Model::for_user_with_orgs(&txn, user.id)
+            .await?
+            .into_iter()
+            .find(|(m, org)| m.is_active() && comparable(&org.name) == wanted);
+        if let Some((_, org)) = taken {
+            return Err(super::field_error(
+                "organisation_name",
+                &format!(
+                    "You already have an organisation called {}. Pick a name you can tell apart.",
+                    org.name
+                ),
+            ));
+        }
+
+        let mut org =
+            Self::create_with_owner(&txn, &params.organisation_name, user, params.name.trim())
+                .await?;
+        if let Some(zone) = timezone {
+            org = org.set_timezone(&txn, zone).await?;
+        }
+        memberships::Model::mark_welcomed(&txn, org.id, user.id).await?;
+        txn.commit().await?;
+        Ok(org)
+    }
+
+    /// Creates an organisation with `owner` as its active owner, known there
+    /// as `username`, the `general` channel and the starter document
+    /// folders. Signup, "New organisation" and the super admin task all use
+    /// it. Run it inside a transaction.
     ///
     /// # Errors
     /// On database errors.
@@ -201,6 +292,15 @@ impl Model {
         folders::Model::create_starters(db, org.id, owner.id).await?;
         Ok(org)
     }
+}
+
+/// A name as the duplicate check compares it: trimmed, runs of whitespace
+/// as one space, lowercase.
+fn comparable(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// "Acme Ltd!" becomes "acme-ltd". Falls back to "org" when nothing usable is left.
@@ -244,7 +344,14 @@ async fn unique_slug<C: ConnectionTrait>(db: &C, name: &str) -> ModelResult<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::slugify;
+    use super::{comparable, slugify};
+
+    #[test]
+    fn comparable_ignores_case_and_spacing() {
+        assert_eq!(comparable("  acme   studio "), "acme studio");
+        assert_eq!(comparable("ACME\tSTUDIO"), "acme studio");
+        assert_eq!(comparable("ÉCOLE"), comparable("école"));
+    }
 
     #[test]
     fn slugify_cleans_names() {

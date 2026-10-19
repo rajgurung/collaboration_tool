@@ -61,8 +61,8 @@ impl Task for SuperAdmin {
                     &user,
                     &user.name,
                 )
-                    .await?
-                    .name
+                .await?
+                .name
             }
         };
         txn.commit().await?;
