@@ -38,3 +38,5 @@ pub mod claude;
 pub mod documents;
 
 pub mod logins;
+
+pub mod orgs;
