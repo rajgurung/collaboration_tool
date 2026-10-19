@@ -743,3 +743,79 @@ async fn an_acme_unlock_does_not_reveal_beta_logins() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn logout_clears_current_org_and_acting_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let res = request
+            .post("/logout")
+            .add_header(in_beta_cookie.0, in_beta_cookie.1)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(clears(&res, "auth_token"));
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn signing_in_clears_a_leftover_current_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (_, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = request
+            .post("/login")
+            .add_header(
+                "cookie",
+                format!("current_org={}; acting_org=1", in_beta.organisation_id),
+            )
+            .form(&json!({ "email": "alice@example.com", "password": USER_PASSWORD }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(set_cookie(&res, "auth_token").is_some());
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+
+        // Signing up on a shared browser clears them too.
+        let res = request
+            .post("/signup")
+            .add_header("cookie", format!("current_org={}", in_beta.organisation_id))
+            .form(&json!({
+                "organisation_name": "Globex",
+                "name": "carol",
+                "email": "carol@example.com",
+                "password": USER_PASSWORD,
+            }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn sign_out_everywhere_keeps_this_browsers_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let beta = in_beta.organisation_id;
+        let in_beta_cookie = with_org(&cookie, beta);
+        let res = request
+            .post("/account/sign-out-everywhere")
+            .add_header(in_beta_cookie.0, in_beta_cookie.1)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert_eq!(set_cookie(&res, "current_org"), None);
+
+        let fresh = super::prepare_data::cookie_from(&res.headers().clone());
+        let res = dashboard(&request, &with_org(&fresh, beta)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Beta");
+    })
+    .await;
+}

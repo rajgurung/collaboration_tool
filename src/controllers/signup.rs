@@ -2,7 +2,7 @@ use loco_rs::prelude::*;
 use serde::Serialize;
 
 use crate::{
-    extractors::{current_user::CurrentUser, session::session_cookie},
+    extractors::{current_user::CurrentUser, session::signed_in_cookies},
     models::organisations::{self, SignupParams},
     views::forms::{field_errors, FieldErrors},
 };
@@ -40,7 +40,7 @@ async fn create(
     };
     match organisations::Model::sign_up(&ctx.db, &params).await {
         Ok((user, _org)) => format::render()
-            .cookies(&[session_cookie(&ctx, &user)?])?
+            .cookies(&signed_in_cookies(&ctx, &user)?)?
             .redirect("/dashboard"),
         Err(ModelError::EntityAlreadyExists) => {
             let errors = FieldErrors::from([(
