@@ -28,7 +28,9 @@ pub mod status {
 
 /// `status = 'active'`, for ordering active memberships first (descending).
 fn active_first() -> sea_orm::sea_query::SimpleExpr {
-    Expr::col(Column::Status).eq(status::ACTIVE)
+    // Qualified, so a query that joins another table with a status column
+    // still means this one.
+    Expr::col((Entity, Column::Status)).eq(status::ACTIVE)
 }
 
 #[async_trait::async_trait]
@@ -94,11 +96,17 @@ impl Model {
         let counts = Entity::find()
             .select_only()
             .column_as(
-                Expr::cust("count(*) FILTER (WHERE status = 'active')"),
+                Expr::cust(format!(
+                    "count(*) FILTER (WHERE status = '{}')",
+                    status::ACTIVE
+                )),
                 "active",
             )
             .column_as(
-                Expr::cust("count(*) FILTER (WHERE status = 'pending')"),
+                Expr::cust(format!(
+                    "count(*) FILTER (WHERE status = '{}')",
+                    status::PENDING
+                )),
                 "pending",
             )
             .filter(Column::UserId.eq(user_id))
