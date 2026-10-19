@@ -96,7 +96,8 @@ someone can be in two orgs, removal from one would sign them out of every org.
 - In the same migration, add `UNIQUE (organisation_id, user_id)` and a plain
   index on `user_id`.
 - Rolling back is only safe until a user has two memberships, that is before
-  join with an existing account ships. The PR must say so.
+  PR 4 (create another organisation) ships. PR 4 makes the first second
+  membership in production. The PR must say so.
 
 **PR 2: the `current_org` cookie.**
 
@@ -111,10 +112,23 @@ someone can be in two orgs, removal from one would sign them out of every org.
 - Sockets and SSE streams for the old org close, or are re-checked, on
   switch.
 
-**PR 3: switcher.** Pin the org on the OAuth consent form first. Put a hidden
-org id in the form and check it on POST in `authorize` in
-`src/controllers/oauth.rs`. This must land before any switcher exists, so a
-switch in another tab can't bind a Claude token to the wrong org.
+**PR 2: pin the org on the OAuth consent form.** Moved from PR 3, because
+PR 2 adds the switch endpoint. Put a hidden org id in the form and check it
+on POST in `authorize` in `src/controllers/oauth.rs`, so a switch in another
+tab can't bind a Claude token to the wrong org. The personal token form is
+pinned the same way. See `docs/plans/multi-org-2.md`.
+
+**PR 3: stale-tab org check (hard gate before PR 4 ships).** A page left open
+on one org can post into another after a switch, and a login, document,
+message or token typed for Acme would land in Beta. PR 3 must add:
+
+- `hx-headers` on `<body>` with the page's org id, and a submit listener in
+  `frontend/app.ts` that adds a hidden `_org` field to plain forms, multipart
+  included.
+- `CurrentMember` answers 409 with `HX-Refresh` when the value differs from
+  the resolved org. This applies while acting and to HTMX GETs too.
+- Once every form carries it, a missing value fails closed for non-GET
+  requests.
 
 **Join with an existing account.**
 
