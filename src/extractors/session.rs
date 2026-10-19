@@ -2,7 +2,7 @@
 //! `auth.jwt.location` setting, so the cookie name must match the config.
 use loco_rs::prelude::{cookie::Cookie, *};
 
-use super::current_member::ACTING_ORG_COOKIE;
+use super::current_member::{ACTING_ORG_COOKIE, CURRENT_ORG_COOKIE};
 use crate::{data::settings::Settings, models::users};
 
 pub const SESSION_COOKIE: &str = "auth_token";
@@ -38,6 +38,20 @@ pub fn session_cookie_for(
         .build())
 }
 
+/// The cookies for a fresh sign-in: the session, plus cleared `current_org`
+/// and `acting_org`. Each sign-in starts in the default organisation, so a
+/// cookie left by someone else on a shared browser never carries over.
+///
+/// # Errors
+/// When the JWT config is missing or the token cannot be signed.
+pub fn signed_in_cookies(ctx: &AppContext, user: &users::Model) -> Result<Vec<Cookie<'static>>> {
+    Ok(vec![
+        session_cookie(ctx, user)?,
+        cleared_current_org_cookie(ctx)?,
+        cleared_acting_org_cookie(ctx)?,
+    ])
+}
+
 /// A cookie that overwrites the session with an expired, empty value.
 ///
 /// # Errors
@@ -59,6 +73,25 @@ pub fn acting_org_cookie(ctx: &AppContext, org_id: i64) -> Result<Cookie<'static
 /// When settings cannot be read.
 pub fn cleared_acting_org_cookie(ctx: &AppContext) -> Result<Cookie<'static>> {
     cleared_cookie(ctx, ACTING_ORG_COOKIE)
+}
+
+/// Which organisation this browser is working in. Only a hint:
+/// `CurrentMember` checks the membership again on every request. Lasts as
+/// long as a session, so it survives a browser restart like the session does.
+///
+/// # Errors
+/// When the JWT config or settings cannot be read.
+pub fn current_org_cookie(ctx: &AppContext, org_id: i64) -> Result<Cookie<'static>> {
+    let max_age = i64::try_from(ctx.config.get_jwt_config()?.expiration).unwrap_or(i64::MAX);
+    Ok(base_cookie(ctx, CURRENT_ORG_COOKIE, org_id.to_string())?
+        .max_age(::cookie::time::Duration::seconds(max_age))
+        .build())
+}
+
+/// # Errors
+/// When settings cannot be read.
+pub fn cleared_current_org_cookie(ctx: &AppContext) -> Result<Cookie<'static>> {
+    cleared_cookie(ctx, CURRENT_ORG_COOKIE)
 }
 
 fn cleared_cookie(ctx: &AppContext, name: &'static str) -> Result<Cookie<'static>> {

@@ -117,6 +117,7 @@ impl Hooks for App {
         Ok(vec![
             Box::new(initializers::view_engine::ViewEngineInitializer),
             Box::new(initializers::origin_check::OriginCheckInitializer),
+            Box::new(initializers::current_org::CurrentOrgInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
         ])
     }
