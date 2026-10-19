@@ -809,3 +809,46 @@ async fn org_names_are_escaped_everywhere() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn the_page_form_keeps_its_page_buttons_after_a_422() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = alice(&request).await;
+        let page = get(&request, &alice, "/orgs/new").await.text();
+        assert!(page.contains(r#"<input type="hidden" name="as_page" value="1">"#));
+        let dialog = htmx_get(&request, &alice, "/orgs/new").await.text();
+        assert!(!dialog.contains(r#"name="as_page""#));
+        // The page's form, sent over HTMX, refused.
+        let res = request
+            .post("/orgs")
+            .as_member(&alice)
+            .add_header("HX-Request", "true")
+            .form(&[
+                ("organisation_name", "L"),
+                ("name", "ali"),
+                ("as_page", "1"),
+            ])
+            .await;
+        assert_eq!(res.status_code(), 422);
+        assert!(!res.text().contains("<html"), "the form alone");
+        assert!(!res.text().contains("data-dialog-close"));
+        assert!(res.text().contains(r#"name="as_page" value="1""#));
+        // At the cap, the same: Back to Home, not a dead Close.
+        created_up_to(&ctx, &user(&ctx, "alice@example.com").await, 10).await;
+        let res = request
+            .post("/orgs")
+            .as_member(&alice)
+            .add_header("HX-Request", "true")
+            .form(&[
+                ("organisation_name", "Lumen"),
+                ("name", "ali"),
+                ("as_page", "1"),
+            ])
+            .await;
+        assert_eq!(res.status_code(), 422);
+        assert!(!res.text().contains("data-dialog-close"));
+        assert!(res.text().contains("Back to Home"));
+    })
+    .await;
+}

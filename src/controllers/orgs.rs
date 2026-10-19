@@ -80,17 +80,29 @@ async fn switch(
     Ok(response)
 }
 
+/// The create form's fields, plus `as_page`, which the `/orgs/new` page
+/// form sends so its redrawn form keeps the page's buttons.
+#[derive(Debug, serde::Deserialize)]
+struct CreateForm {
+    #[serde(flatten)]
+    params: NewOrgParams,
+    #[serde(default)]
+    as_page: Option<String>,
+}
+
 /// What the "New organisation" form shows: the typed values and their
 /// errors, or the at-cap state in place of the fields. Over HTMX the form
-/// alone, for the dialog and the phone sheet; otherwise the `/orgs/new`
-/// page.
+/// alone, for the dialog, the phone sheet or the page's own form (which
+/// says so with `on_page`); otherwise the `/orgs/new` page.
 fn new_form(
     member: &CurrentMember,
     headers: &HeaderMap,
+    on_page: bool,
     values: (&str, &str),
     errors: &FieldErrors,
 ) -> (&'static str, serde_json::Value) {
-    let as_page = !headers.contains_key("hx-request");
+    let fragment = headers.contains_key("hx-request");
+    let as_page = on_page || !fragment;
     let data = member.page(
         "orgs",
         data!({
@@ -101,10 +113,10 @@ fn new_form(
             "as_page": as_page,
         }),
     );
-    let template = if as_page {
-        "orgs/new.html"
-    } else {
+    let template = if fragment {
         "orgs/_new_form.html"
+    } else {
+        "orgs/new.html"
     };
     (template, data)
 }
@@ -129,7 +141,7 @@ async fn new(
     if organisations::Model::created_count(&ctx.db, member.user.id).await? >= MAX_ORGS_CREATED {
         errors.insert(AT_CAP.to_string(), String::new());
     }
-    let (template, data) = new_form(&member, &headers, ("", &member.username), &errors);
+    let (template, data) = new_form(&member, &headers, false, ("", &member.username), &errors);
     Ok(no_store(format::render().view(&v, template, data)?))
 }
 
@@ -144,7 +156,7 @@ async fn create(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     headers: HeaderMap,
-    Form(params): Form<NewOrgParams>,
+    Form(CreateForm { params, as_page }): Form<CreateForm>,
 ) -> Result<Response> {
     let timezone = (!member.acting).then_some(member.org.timezone.as_str());
     match organisations::Model::create_for_user(&ctx.db, &member.user, &params, timezone).await {
@@ -162,7 +174,7 @@ async fn create(
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             let values = (params.organisation_name.as_str(), params.name.as_str());
-            let (template, data) = new_form(&member, &headers, values, &errors);
+            let (template, data) = new_form(&member, &headers, as_page.is_some(), values, &errors);
             if template == "orgs/new.html" {
                 Ok(no_store(
                     format::render().status(422).view(&v, template, data)?,
