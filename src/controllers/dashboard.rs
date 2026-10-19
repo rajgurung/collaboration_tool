@@ -23,6 +23,9 @@ struct HomeQuery {
     switched: Option<String>,
     /// Set by a stale-tab refusal: the org the tab was drawn for, if known.
     from: Option<String>,
+    /// Set by "New organisation". Like `switched`, only says "show the
+    /// toast"; the name comes from the org this request resolved.
+    created: Option<String>,
 }
 
 /// The card shown after a stale tab was sent here. It names the old org only
@@ -187,9 +190,16 @@ async fn index(
     let welcome = membership.as_ref().is_some_and(|m| m.welcomed_at.is_none());
 
     let stale = stale_notice(&ctx, &member, query.from.as_deref()).await;
-    let flash = query.switched.as_ref().map(
-        |_| data!({ "kind": "info", "message": format!("You're now in {}", member.org.name) }),
-    );
+    let flash = if query.created.is_some() {
+        Some(data!({
+            "kind": "info",
+            "message": format!("{} is ready. You're the owner.", member.org.name),
+        }))
+    } else {
+        query.switched.as_ref().map(
+            |_| data!({ "kind": "info", "message": format!("You're now in {}", member.org.name) }),
+        )
+    };
 
     let mut response = format::render().view(
         &v,
@@ -214,7 +224,7 @@ async fn index(
             }),
         ),
     )?;
-    if query.switched.is_some() || query.from.is_some() {
+    if query.switched.is_some() || query.from.is_some() || query.created.is_some() {
         response.headers_mut().insert(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-store"),

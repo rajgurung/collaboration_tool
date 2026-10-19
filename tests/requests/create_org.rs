@@ -185,7 +185,7 @@ async fn the_form_at_the_cap_shows_the_limit_instead_of_fields() {
 
 #[tokio::test]
 #[serial]
-async fn creating_lands_on_home_in_the_new_org() {
+async fn creating_lands_on_home_in_the_new_org_with_a_toast() {
     request::<App, _, _>(|request, ctx| async move {
         let alice = alice(&request).await;
         let res = create(&request, &alice, "Lumen Café", "ali").await;
@@ -194,8 +194,30 @@ async fn creating_lands_on_home_in_the_new_org() {
         let id = created_id(&res);
         let org = organisations::Model::find_by_id(&ctx.db, id).await.unwrap();
         assert_eq!(org.name, "Lumen Café");
-        let home = get(&request, &with_org(&alice, id), "/dashboard").await;
+        let home = get(&request, &with_org(&alice, id), "/dashboard?created=1").await;
         assert_eq!(page_org_id(&home.text()), Some(id));
+        assert_eq!(home.headers()["cache-control"], "no-store");
+        assert!(home
+            .text()
+            .contains(r#"data-flash="info">Lumen Café is ready. You&#39;re the owner.</div>"#));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_created_flag_alone_changes_nothing() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = alice(&request).await;
+        let before = org_count(&ctx).await;
+        let res = get(&request, &alice, "/dashboard?created=1").await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(set_cookie(&res, "current_org"), None);
+        assert!(
+            res.text().contains("Acme Studio is ready."),
+            "names the org it resolved"
+        );
+        assert_eq!(org_count(&ctx).await, before);
     })
     .await;
 }

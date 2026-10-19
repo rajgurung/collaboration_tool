@@ -205,13 +205,14 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted || nav?.type === "back_forward") probeOrg();
 });
 
-// After a switch or a stale-tab move, drop ?switched= and ?from= from Home's
-// address, so a reload doesn't repeat the toast or the notice.
+// After a switch, a create or a stale-tab move, drop ?switched=, ?created=
+// and ?from= from Home's address, so a reload doesn't repeat the toast or
+// the notice.
 {
   const here = new URL(window.location.href);
-  if (here.searchParams.has("switched") || here.searchParams.has("from")) {
-    here.searchParams.delete("switched");
-    here.searchParams.delete("from");
+  const flags = ["switched", "created", "from"];
+  if (flags.some((flag) => here.searchParams.has(flag))) {
+    flags.forEach((flag) => here.searchParams.delete(flag));
     history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
   }
 }
