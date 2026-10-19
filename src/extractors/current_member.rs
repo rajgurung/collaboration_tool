@@ -341,7 +341,7 @@ fn stale_tab_refusal(headers: &HeaderMap, claim: OrgClaim) -> Response {
     };
     // Raw `fetch` calls send the org header but not HX-Request, and need the
     // same answer: a redirect they can see instead of one they follow.
-    let mut response = if headers.contains_key("hx-request") || headers.contains_key(ORG_HEADER) {
+    let mut response = if is_htmx(headers) || headers.contains_key(ORG_HEADER) {
         (StatusCode::CONFLICT, [("HX-Redirect", to)]).into_response()
     } else {
         (StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response()
