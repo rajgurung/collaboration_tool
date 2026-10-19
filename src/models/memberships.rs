@@ -54,17 +54,19 @@ impl Model {
     /// # Errors
     /// On database errors.
     pub async fn default_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
-        let mut by_user = HashMap::new();
-        for m in Entity::find()
+        // DISTINCT ON keeps the first row per user in this order, so the
+        // database returns one membership per person, not every membership.
+        Ok(Entity::find()
+            .distinct_on([Column::UserId])
+            .order_by_asc(Column::UserId)
             .order_by_desc(active_first())
             .order_by_asc(Column::CreatedAt)
             .order_by_asc(Column::Id)
             .all(db)
             .await?
-        {
-            by_user.entry(m.user_id).or_insert(m);
-        }
-        Ok(by_user)
+            .into_iter()
+            .map(|m| (m.user_id, m))
+            .collect())
     }
 
     /// Every membership of the user, in any status, oldest first.
