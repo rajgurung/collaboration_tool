@@ -53,7 +53,15 @@ Rules:
 - While acting, the admin's own membership is ignored. Their username in that
   organisation is their `users.name`.
 - Signing out (`POST /logout`) clears the cookie too.
+- Signing in also clears it, so a new sign-in ends acting. `acting_org` has
+  no `Max-Age`, so it already ended when the browser closed.
+- `acting_org` wins over `current_org`. While acting, `current_org` is
+  ignored and left alone, so leaving returns to it if it is still valid.
+- Switching organisation (`POST /orgs/{id}/switch`) clears `acting_org`. A
+  super admin can only switch to orgs they belong to. Entering any other org
+  stays on `/admin/orgs/{id}/enter`.
 - A super admin with no membership and no acting cookie is sent to `/admin`.
+  A stray `current_org` is cleared on the way.
 
 The decision happens in `CurrentMember::from_request_parts`
 (`src/extractors/current_member.rs:135`).

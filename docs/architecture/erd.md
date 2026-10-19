@@ -77,6 +77,7 @@ erDiagram
         int session_version "default 0"
         timestamptz secrets_unlocked_until "nullable"
         string secrets_unlocked_sid "nullable"
+        bigint secrets_unlocked_org_id FK "nullable, SET NULL"
         timestamptz locked_at "nullable"
     }
     organisations {
@@ -89,7 +90,7 @@ erDiagram
     memberships {
         bigint id PK
         bigint organisation_id FK "CASCADE"
-        bigint user_id FK "CASCADE, unique today"
+        bigint user_id FK "CASCADE, one per org"
         string username "unique per org, case-insensitive"
         string role "owner, admin, member"
         string status "pending, active, rejected, removed"
@@ -128,9 +129,12 @@ erDiagram
 Unique indexes:
 
 - `users.email`, `users.api_key`, `organisations.slug`.
-- `idx-memberships-user_id` on `memberships (user_id)`: one membership per
-  user. This is what makes a user belong to one organisation.
+- `idx-memberships-org-user` on `memberships (organisation_id, user_id)`: one
+  membership per user per organisation. A user can belong to several.
 - `idx-memberships-org-username` on `memberships (organisation_id, lower(username))`.
+
+Other indexes: `idx-memberships-user` on `memberships (user_id)`, for finding
+a user's memberships.
 
 Rules:
 
@@ -147,7 +151,9 @@ Rules:
 - Usernames: a letter, then letters or numbers, 3 to 30 characters, and never
   `everyone` (`src/models/users.rs:29`).
 - `session_version` goes into every session token. Adding 1 to it ends every
-  session at once.
+  session at once, and ends any logins unlock.
+- A logins unlock (`secrets_unlocked_*`) counts for one sign-in, in one
+  organisation, for 5 minutes.
 - `auth_attempts` never stores an email, only its SHA-256. Rows older than a
   day are deleted as new ones are written.
 - Several `users` columns (`email_verification_*`, `magic_link_*`) are left
@@ -155,10 +161,11 @@ Rules:
 
 Multi-org is in progress (seven PRs). PR #41, merged on 19 October 2026,
 stopped the code assuming one membership per user: `memberships::for_user`
-returns them all and `default_for_user` picks the oldest active one. The
-unique index on `memberships.user_id` still allows one membership per user
-until the next PR replaces it with one per user per organisation. The plan is
-`docs/plans/multi-org-1.md`.
+returns them all and `default_for_user` picks the oldest active one. PR 2
+allows one membership per user per organisation, and adds the `current_org`
+cookie that picks between them. Nothing creates a second membership until
+PR 4. The plans are `docs/plans/multi-org-1.md` and
+`docs/plans/multi-org-2.md`.
 
 ## Work: projects, tasks and meetings
 

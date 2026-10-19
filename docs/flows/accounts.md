@@ -116,6 +116,44 @@ What each state sees on any app page (`src/extractors/current_member.rs:174`):
 There is no route that moves `rejected` or `removed` back to `pending` or
 `active`.
 
+A person with an active membership anywhere never sees these pages. They go
+to their active organisation instead (see "Choosing an organisation").
+
+## Choosing an organisation
+
+A user can have one membership per organisation. The `current_org` cookie says
+which organisation this browser is working in. It is only a hint: every
+request checks it again.
+
+`CurrentMember` picks the organisation in this order
+(`src/extractors/current_member.rs`, `chosen_org`):
+
+1. A super admin with a valid `acting_org`: that org (see
+   [super-admin.md](super-admin.md)).
+2. A `current_org` where the user has an `active` membership: that org.
+3. Otherwise the default: the oldest active membership, else the oldest one.
+   If a `current_org` cookie was sent (not a number, no access, a deleted
+   org, any status but active), the response clears it
+   (`src/initializers/current_org.rs`).
+
+`POST /orgs/{id}/switch` is the only thing that sets the cookie
+(`src/controllers/orgs.rs`). There is no button for it yet.
+
+- It answers 404 unless the user has an active membership in that org, so it
+  does not reveal whether the org exists.
+- It sets `current_org` (`HttpOnly`, `SameSite=Lax`, 7 days like the session)
+  and clears `acting_org`.
+- It ends any logins unlock and closes the user's chat sockets and
+  notification streams on every device. They reconnect in the new org.
+- There is no GET that changes the org.
+
+The Claude Allow page and the personal token form carry the org they were
+shown for in a hidden `org_id`. If the browser has switched since, they are
+refused and no code or token is made.
+
+Until the stale-tab check ships (multi-org PR 3), a tab left open on one org
+posts into whichever org the cookie names. Nobody has two orgs before PR 4.
+
 ### Removing a member
 
 `POST /members/<id>/remove` (`src/models/memberships.rs:268`). In one
@@ -186,6 +224,9 @@ Rules:
 - A locked account (`users.locked_at` set) cannot sign in until it resets its
   password. Accounts lock after 5 wrong app passwords when unlocking logins;
   see [documents.md](documents.md).
+- Signing in clears `current_org` and `acting_org`, so each sign-in starts
+  in the default organisation. Signing up and joining do the same. A cookie
+  left by someone else on a shared browser never carries over.
 - CSRF guard: a non-GET request that carries an `Origin` header must match
   `APP_URL`, or it gets 403. Requests with no `Origin` pass; browsers always
   send one on POST (`src/initializers/origin_check.rs`).
@@ -234,13 +275,16 @@ Files: `src/controllers/auth.rs:181` (forgot) and `:222` (reset),
 
 ## Sign out, and sign out everywhere
 
-- `POST /logout` clears the session cookie and the super admin's
-  `acting_org` cookie on this browser. It does not change `session_version`,
-  so it does not end other sessions (`src/controllers/auth.rs:130`).
+- `POST /logout` clears the session cookie, `current_org` and the super
+  admin's `acting_org` cookie on this browser. It does not change
+  `session_version`, so it does not end other sessions
+  (`src/controllers/auth.rs:130`).
 - `POST /account/sign-out-everywhere` adds 1 to `session_version`. Every
   session token stops working, including this one. Open chat sockets and
   notification streams close. This browser then gets a fresh cookie and lands
-  on `/more?signed_out=1`. A `sign_out_everywhere` row goes into the login
+  on `/more?signed_out=1`. It keeps its `current_org`, so it stays in the
+  same organisation. Other browsers' `current_org` cookies do nothing without
+  a session, and their next sign-in clears them. A `sign_out_everywhere` row goes into the login
   activity log (`src/controllers/auth.rs:143`).
 
 ```mermaid
