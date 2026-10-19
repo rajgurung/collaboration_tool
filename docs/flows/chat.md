@@ -59,6 +59,13 @@ Rules:
   checks and reloads the feed from `GET /chat/<id>/feed`.
 - When the user is signed out everywhere, removed or locked, a `SignedOut`
   event closes their sockets.
+- The socket needs no stale-tab check. Its org is fixed at upgrade, and the
+  upgrade only succeeds for a conversation in the cookie's org, the one the
+  page names. A switch closes the socket and its reconnect is refused. The
+  `X-Org-Id` in each message's headers is ignored.
+- When a socket closes, `app.ts` asks `GET /orgs/current`. A tab left on the
+  old org gets the refusal and moves to Home, instead of sitting there with
+  no new messages.
 - HTTP fallback: `POST /chat/<id>/messages` saves, publishes and notifies the
   same way (`src/controllers/chat.rs:664`).
 

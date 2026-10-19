@@ -62,9 +62,20 @@ Rules:
   stays on `/admin/orgs/{id}/enter`.
 - A super admin with no membership and no acting cookie is sent to `/admin`.
   A stray `current_org` is cleared on the way.
+- The stale-tab check compares against the acting org (see
+  [accounts.md](accounts.md), "Stale tabs"). A tab drawn for the admin's own
+  org is stale while they are inside another, and goes to Home. Home offers
+  "Back" only to orgs they are an active member of, so a tab drawn while
+  acting gets no Back; they enter again from `/admin`.
+- The switcher shows while acting only if they have a membership of their
+  own. It reads "Acting in" with the acting org, ticked, as "Platform admin",
+  then "Your organisations", then "Switching ends acting in Acme Studio."
+  Leave stays in the banner. With no membership of their own the name is
+  plain text.
 
-The decision happens in `CurrentMember::from_request_parts`
-(`src/extractors/current_member.rs:151`).
+The decision happens in `resolve_org`
+(`src/extractors/current_member.rs:219`), which both `CurrentMember` and
+`PinnedMember` run.
 
 ## What acting allows and blocks
 
@@ -84,7 +95,7 @@ check `acting` and refuse.
 | Chat | Only conversations they are a member of. They are not added to the organisation's `#general`. |
 
 The blocks come from `CurrentMember::require_own_membership`
-(`src/extractors/current_member.rs:116`) and direct `member.acting` checks in
+(`src/extractors/current_member.rs:133`) and direct `member.acting` checks in
 `src/controllers/members.rs:48`, `src/controllers/tasks.rs:910`,
 `src/controllers/notifications.rs:192`, `src/controllers/claude.rs:105`,
 `src/controllers/oauth.rs:324` and `:363`, and `src/models/logins.rs:451`.

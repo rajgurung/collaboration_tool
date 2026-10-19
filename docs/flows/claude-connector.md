@@ -46,7 +46,9 @@ Rules:
 - The Allow form is checked again on POST (`src/controllers/oauth.rs:352`).
 - The Allow form carries the organisation it was shown for. If the browser
   switched organisation since, Allow is refused and no code is issued. Deny
-  still goes through.
+  still goes through. The handler takes `PinnedMember`, so it skips the
+  generic stale-tab check (see [accounts.md](accounts.md), "Stale tabs"),
+  which would answer first and lose the `access_denied` to Claude.
 - A super admin acting inside another organisation sees a "leave first" page
   instead (`src/controllers/oauth.rs:270`).
 - Codes and tokens are stored only as SHA-256 hashes.
@@ -63,7 +65,9 @@ Rules:
 - Made at More, Connect Claude (`POST /settings/claude/tokens`,
   `src/controllers/claude.rs:98`). Shown once, prefixed `collab_pat_`.
 - The form carries the organisation it was shown for. After a switch it is
-  refused with a 409 and no token is made.
+  refused with a 409 and no token is made. It keeps the typed name and shows
+  its own message: it takes `PinnedMember`, which skips the generic
+  stale-tab check.
 - They do not expire. At most 10 live ones per person.
 - Not available while a super admin is acting in another organisation.
 - Revoke at `POST /settings/claude/grants/<grant_id>/revoke`. Revoking ends

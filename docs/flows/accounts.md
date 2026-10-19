@@ -8,7 +8,7 @@ Background: a session is a 7-day JWT in an `HttpOnly` cookie called
 `session_version` (claim `sv`) and a random sign-in id (claim `sid`).
 `CurrentUser` refuses a token whose version no longer matches
 (`src/models/users.rs`, `is_current_session`). `CurrentMember` then requires an
-`active` membership (`src/extractors/current_member.rs:151`).
+`active` membership (`src/extractors/current_member.rs:219`).
 
 ## Sign up a new organisation
 
@@ -103,7 +103,7 @@ stateDiagram-v2
     removed --> [*]
 ```
 
-What each state sees on any app page (`src/extractors/current_member.rs:211`):
+What each state sees on any app page (`src/extractors/current_member.rs:277`):
 
 | Status | Page | HTTP |
 |---|---|---|
@@ -137,7 +137,7 @@ request checks it again.
    (`src/initializers/current_org.rs`).
 
 `POST /orgs/{id}/switch` is the only thing that sets the cookie
-(`src/controllers/orgs.rs`). There is no button for it yet.
+(`src/controllers/orgs.rs`). The switcher calls it (see "The switcher").
 
 - It answers 404 unless the user has an active membership in that org, so it
   does not reveal whether the org exists.
@@ -145,14 +145,62 @@ request checks it again.
   and clears `acting_org`.
 - It ends any logins unlock and closes the user's chat sockets and
   notification streams on every device. They reconnect in the new org.
+- It lands on `/dashboard?switched=1`, a constant: it ignores any `next`.
+  Home then shows "You're now in Northwind Bakery", named from the org the
+  request resolved, never from the URL.
 - There is no GET that changes the org.
 
 The Claude Allow page and the personal token form carry the org they were
 shown for in a hidden `org_id`. If the browser has switched since, they are
 refused and no code or token is made.
 
-Until the stale-tab check ships (multi-org PR 3), a tab left open on one org
-posts into whichever org the cookie names. Nobody has two orgs before PR 4.
+### The switcher
+
+With two or more active orgs, or one plus a pending request, the org name
+at the top of the sidebar opens a menu of your organisations. On phones,
+Home's header name and a row at the top of More open the same list in a
+sheet. With one org it stays plain text. `CurrentMember.org_menu` decides
+this, on full page loads only (`memberships::Model::switcher_counts`, one
+indexed query).
+
+The rows come from `GET /orgs` (`memberships::Model::for_user_with_orgs`):
+active A to Z, then pending, greyed. Declined and removed are not listed.
+Over HTMX it is a fragment for the menu or sheet; without JavaScript it is a
+page, and each row is a plain form button. Both are `no-store`.
+
+### Stale tabs
+
+The cookie is per browser, so a switch in one tab moves every tab. A tab
+left on the old org must not write into the new one.
+
+- Every app page says which org it was drawn for: `data-org-id` and
+  `hx-headers='{"X-Org-Id": <id>}'` on `<body>` (`layouts/base.html`).
+- HTMX sends the header. Plain forms get a hidden `_org` from a submit
+  listener in `frontend/app.ts`. The raw `fetch` calls add the header
+  through `orgHeaders()`.
+- The `current-org` layer (`src/initializers/current_org.rs`) reads the
+  header, or `_org` from a signed-in urlencoded body, into an `OrgClaim`. It
+  puts the body back for `Form`. Over 2 MB is a 413, as `Form` would.
+- `CurrentMember` compares the claim with the org it resolved (the acting
+  org while acting). Plain GET page loads are never checked. HTMX GETs with
+  no claim pass, so tabs from before the deploy keep polling. Anything else
+  that is missing, garbage or another org is refused: 409 with
+  `HX-Redirect: /dashboard?from=<id>` for HTMX and `fetch`, 303 for a plain
+  form. Only a parsed number goes into that address.
+- Home then shows a notice: "This tab was showing Acme Studio. You're now in
+  Northwind Bakery." It names the old org, with "Back to Acme Studio", only
+  if you are an active member there. Nothing was saved.
+- A tab holding typed text or an upload does not move. It shows one banner
+  in place, keeps the text, and offers "Back to Acme Studio" (which switches
+  the browser back without leaving the page) and "Go to Home".
+- `app.ts` also asks `GET /orgs/current` when the chat socket closes, when
+  the notification stream comes back, on a back-forward cache restore and
+  before each upload, so a stale tab moves within seconds.
+
+The Claude Allow page and the token form keep their own `org_id` pin and
+skip this check (`PinnedMember`), so they can answer better than the generic
+refusal. The route walk in `tests/requests/stale_tab.rs` lists every route
+that skips the check.
 
 ### Removing a member
 
