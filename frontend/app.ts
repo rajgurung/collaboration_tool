@@ -1329,8 +1329,9 @@ async function startNextUpload() {
   }
   currentUpload = next;
   // Ask first, so a stale tab is caught before it sends a large body. The
-  // file then waits at the front of the queue, behind the banner.
-  const stale = await fetch("/orgs/current", { headers: orgHeaders(), credentials: "same-origin" }).then(staleRefusal, () => false);
+  // file then waits at the front of the queue, behind the banner. HX-Request,
+  // because the server only checks the claim on HTMX GETs.
+  const stale = await fetch("/orgs/current", { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).then(staleRefusal, () => false);
   if (stale) {
     currentUpload = null;
     uploadQueue.unshift(next);
