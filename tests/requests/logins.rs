@@ -1131,3 +1131,129 @@ async fn the_rotate_list_stays_inside_its_organisation() {
     })
     .await;
 }
+
+/// A Claude token and an unused OAuth code for this person in this org.
+async fn claude_access(
+    ctx: &AppContext,
+    client: &collab::models::oauth_clients::Model,
+    org_id: i64,
+    user_id: i64,
+) -> (String, String) {
+    use collab::models::{access_tokens, oauth_codes};
+    let token = access_tokens::Model::create_personal(
+        &ctx.db,
+        org_id,
+        user_id,
+        &access_tokens::PersonalParams {
+            name: "Laptop".to_string(),
+        },
+        super::mcp::RESOURCE,
+    )
+    .await
+    .unwrap()
+    .1;
+    let (_, code) = oauth_codes::Model::issue(
+        &ctx.db,
+        &oauth_codes::Consent {
+            client,
+            org_id,
+            user_id,
+            redirect_uri: super::oauth::CLAUDE,
+            code_challenge: &oauth_codes::challenge_for(&"v".repeat(43)),
+            resource: super::mcp::RESOURCE,
+            scope: "mcp",
+        },
+    )
+    .await
+    .unwrap();
+    (token, code)
+}
+
+#[tokio::test]
+#[serial]
+async fn locking_revokes_claude_tokens_in_every_org() {
+    use collab::models::{access_tokens, oauth_clients, oauth_codes};
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let carol = users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap();
+        let lumen = organisations::Model::create_for_user(
+            &ctx.db,
+            &carol,
+            &organisations::NewOrgParams {
+                organisation_name: "Lumen Café".to_string(),
+                name: "carol".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let client = oauth_clients::Model::register(
+            &ctx.db,
+            &oauth_clients::RegisterParams {
+                client_name: None,
+                redirect_uris: vec![super::oauth::CLAUDE.to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        let in_acme = claude_access(&ctx, &client, acme.org.id, carol.id).await;
+        let in_lumen = claude_access(&ctx, &client, lumen.id, carol.id).await;
+        let usable = |token: String| {
+            let db = ctx.db.clone();
+            async move {
+                access_tokens::Model::find_usable(&db, &token, super::mcp::RESOURCE)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+        assert!(usable(in_acme.0.clone()).await && usable(in_lumen.0.clone()).await);
+
+        for _ in 0..5 {
+            unlock(&request, &acme.carol, "wrong").await;
+        }
+        assert!(users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap()
+            .is_locked());
+        for (token, code) in [&in_acme, &in_lumen] {
+            let row = access_tokens::Entity::find()
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|t| t.token_hash == access_tokens::hash(token))
+                .unwrap();
+            assert!(row.revoked_at.is_some(), "revoked in org {}", row.organisation_id);
+            let code_row = oauth_codes::Entity::find()
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|c| c.code_hash == access_tokens::hash(code))
+                .unwrap();
+            assert!(code_row.used_at.is_some(), "code used in org {}", code_row.organisation_id);
+        }
+
+        // After a reset, neither old token works.
+        request
+            .post("/forgot")
+            .form(&serde_json::json!({ "email": "carol@example.com" }))
+            .await;
+        let token = users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap()
+            .reset_token
+            .unwrap();
+        let res = request
+            .post(&format!("/reset/{token}"))
+            .form(&serde_json::json!({ "password": "new-password-1", "password_confirmation": "new-password-1" }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(!usable(in_acme.0).await, "Acme's token");
+        assert!(!usable(in_lumen.0).await, "the created org's token");
+    })
+    .await;
+}
