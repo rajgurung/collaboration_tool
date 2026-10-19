@@ -205,8 +205,8 @@ impl Model {
     /// the other and the limits and the duplicate check see both.
     ///
     /// # Errors
-    /// Field errors for bad input, a name they already have and the daily
-    /// limit; a field error on [`AT_CAP`] at the cap; database errors.
+    /// Field errors for bad input, a locked account, a name they already
+    /// have and the daily limit; a field error on [`AT_CAP`] at the cap; database errors.
     pub async fn create_for_user(
         db: &DatabaseConnection,
         user: &users::Model,
@@ -217,11 +217,18 @@ impl Model {
         let txn = db.begin().await?;
         // FOR NO KEY UPDATE, so inserts elsewhere that point at this user
         // (their FOR KEY SHARE checks) don't wait on it.
-        users::Entity::find_by_id(user.id)
+        let locked = users::Entity::find_by_id(user.id)
             .lock(sea_orm::sea_query::LockType::NoKeyUpdate)
             .one(&txn)
             .await?
             .ok_or(ModelError::EntityNotFound)?;
+        // A lock in another request may have landed after this one signed in.
+        if locked.is_locked() {
+            return Err(super::field_error(
+                "organisation_name",
+                "Your account is locked. Reset your password to unlock it.",
+            ));
+        }
         if Self::created_count(&txn, user.id).await? >= MAX_ORGS_CREATED {
             return Err(super::field_error(
                 AT_CAP,

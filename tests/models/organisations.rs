@@ -414,3 +414,20 @@ async fn sign_up_still_uses_the_account_name_as_the_username_and_the_default_zon
     assert_eq!(acme.timezone, "Europe/London");
     assert_eq!(acme.created_by_id, Some(alice.id));
 }
+
+#[tokio::test]
+#[serial]
+async fn a_locked_account_cannot_create() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _) = sign_up(ctx, "Acme Studio", "alice").await;
+    users::Model::lock_account(ctx, alice.id).await.unwrap();
+    let before = org_count(ctx).await;
+    // The model passed in is from before the lock, as a request's would be.
+    let err = create(ctx, &alice, "Lumen Café").await.unwrap_err();
+    assert_eq!(
+        error_on(&err, "organisation_name").as_deref(),
+        Some("Your account is locked. Reset your password to unlock it.")
+    );
+    assert_eq!(org_count(ctx).await, before);
+}
