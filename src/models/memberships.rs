@@ -26,6 +26,11 @@ pub mod status {
     pub const REMOVED: &str = "removed";
 }
 
+/// `status = 'active'`, for ordering active memberships first (descending).
+fn active_first() -> sea_orm::sea_query::SimpleExpr {
+    Expr::col(Column::Status).eq(status::ACTIVE)
+}
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
@@ -51,6 +56,7 @@ impl Model {
     pub async fn default_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
         let mut by_user = HashMap::new();
         for m in Entity::find()
+            .order_by_desc(active_first())
             .order_by_asc(Column::CreatedAt)
             .order_by_asc(Column::Id)
             .all(db)
@@ -75,8 +81,10 @@ impl Model {
     }
 
     /// The membership to use when no organisation has been chosen: the
-    /// oldest, in any status. To check access to a given organisation, use
-    /// [`Self::active_in`] with that organisation's id instead.
+    /// oldest active one, else the oldest in any status (so the person sees
+    /// their pending or removed page). To check access to a given
+    /// organisation, use [`Self::active_in`] with that organisation's id
+    /// instead.
     ///
     /// # Errors
     /// On database errors.
@@ -86,6 +94,7 @@ impl Model {
     ) -> ModelResult<Option<Self>> {
         Ok(Entity::find()
             .filter(Column::UserId.eq(user_id))
+            .order_by_desc(active_first())
             .order_by_asc(Column::CreatedAt)
             .order_by_asc(Column::Id)
             .one(db)
