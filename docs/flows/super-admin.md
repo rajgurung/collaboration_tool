@@ -72,6 +72,13 @@ Rules:
   then "Your organisations", then "Switching ends acting in Acme Studio."
   Leave stays in the banner. With no membership of their own the name is
   plain text.
+- There is no "New organisation" row while acting, in the menu, the sheet or
+  More: that menu is about where they are acting and the way back. A typed
+  `/orgs/new` still works. The form first says "You're acting in Acme
+  Studio. Creating this ends acting. The new organisation is yours, with you
+  as owner." Creating clears `acting_org`, makes the admin the owner of the
+  new org, and copies nothing from the acting org: it keeps `Europe/London`.
+  The log line names the acting org as `acting_org`.
 
 The decision happens in `resolve_org`
 (`src/extractors/current_member.rs:219`), which both `CurrentMember` and

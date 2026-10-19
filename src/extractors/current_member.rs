@@ -56,8 +56,9 @@ pub struct CurrentMember {
     /// The session's sign-in id. `None` for bearer tokens, and for cookies
     /// issued before sign-ins had ids.
     pub session_id: Option<String>,
-    /// Whether the layout shows the organisation switcher. Only worked out
-    /// for full page loads; `false` on HTMX requests and posts.
+    /// Whether the layout shows the organisation switcher: always for a
+    /// member, and while acting only with an org of their own. Only worked
+    /// out for full page loads; `false` on HTMX requests and posts.
     pub org_menu: bool,
 }
 
@@ -192,7 +193,8 @@ pub struct PinnedMember(pub CurrentMember);
 
 /// Picks the organisation in this order: a super admin's `acting_org`, then a
 /// `current_org` the user is active in, then their default membership. On a
-/// full page load it also works out whether the layout shows the switcher.
+/// full page load it also works out whether the layout shows the switcher
+/// (see [`CurrentMember::org_menu`]).
 impl FromRequestParts<AppContext> for PinnedMember {
     type Rejection = Response;
 
@@ -202,13 +204,18 @@ impl FromRequestParts<AppContext> for PinnedMember {
     ) -> std::result::Result<Self, Self::Rejection> {
         let mut member = resolve_org(parts, ctx).await.map_err(|refused| *refused)?;
         if is_safe(&parts.method) && !is_htmx(&parts.headers) {
-            let (active, pending) = memberships::Model::switcher_counts(&ctx.db, member.user.id)
-                .await
-                .map_err(|e| Error::from(e).into_response())?;
-            // Acting: anything of their own to switch to. Otherwise: a second
-            // org, or a request still waiting.
-            let own = active + pending;
-            member.org_menu = if member.acting { own >= 1 } else { own >= 2 };
+            // A member always has the switcher, if only for "New
+            // organisation". Acting, it is about their way back, so it needs
+            // an org of their own: the only case that costs a query.
+            member.org_menu = if member.acting {
+                let (active, pending) =
+                    memberships::Model::switcher_counts(&ctx.db, member.user.id)
+                        .await
+                        .map_err(|e| Error::from(e).into_response())?;
+                active + pending >= 1
+            } else {
+                true
+            };
         }
         Ok(Self(member))
     }

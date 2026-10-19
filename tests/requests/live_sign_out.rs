@@ -238,3 +238,40 @@ async fn a_chat_socket_for_the_old_org_is_refused_after_a_switch() {
     let acme_cookie = format!("{cookie}; current_org={}", acme.id);
     assert!(connect(acme_cookie).await.is_ok());
 }
+
+#[tokio::test]
+#[serial]
+async fn creating_an_org_closes_the_chat_socket_and_notification_stream() {
+    let (ctx, addr, cookie, _alice, mut socket) = open_general_socket().await;
+    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap();
+    let mut stream = reqwest::Client::new()
+        .get(format!("http://{addr}/notifications/stream"))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stream.status(), 200);
+
+    let res = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(format!("http://{addr}/orgs"))
+        .header("cookie", &cookie)
+        .header("x-org-id", acme.id.to_string())
+        .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 303);
+
+    let closed = tokio::time::timeout(WAIT, socket.next()).await.unwrap();
+    assert!(
+        matches!(closed, None | Some(Ok(Message::Close(_)))),
+        "{closed:?}"
+    );
+    let ended = tokio::time::timeout(WAIT, stream.chunk()).await.unwrap();
+    assert!(matches!(ended, Ok(None)), "{ended:?}");
+}

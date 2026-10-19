@@ -349,7 +349,7 @@ async fn lock(
     client: &Client,
     login: Option<(i64, &str)>,
 ) -> Result<Response> {
-    if users::Model::lock_account(ctx, member.org.id, member.user.id).await? {
+    if users::Model::lock_account(ctx, member.user.id).await? {
         login_events::Model::record(
             &ctx.db,
             client,

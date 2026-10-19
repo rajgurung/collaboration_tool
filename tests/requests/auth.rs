@@ -217,3 +217,41 @@ async fn cross_origin_posts_are_blocked() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn sign_out_everywhere_logs_in_the_created_org_too() {
+    use super::prepare_data::AsMember;
+    use collab::models::login_events;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    request::<App, _, _>(|request, ctx| async move {
+        let alice =
+            super::prepare_data::sign_up_member(&request, "Acme", "alice", "alice@example.com")
+                .await;
+        let res = request
+            .post("/orgs")
+            .as_member(&alice)
+            .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let lumen = collab::models::organisations::Model::find_by_slug(&ctx.db, "lumen-caf")
+            .await
+            .unwrap();
+        let res = request
+            .post("/account/sign-out-everywhere")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let mut orgs: Vec<i64> = login_events::Entity::find()
+            .filter(login_events::Column::Action.eq(login_events::action::SIGN_OUT_EVERYWHERE))
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.organisation_id)
+            .collect();
+        orgs.sort_unstable();
+        assert_eq!(orgs, [alice.org_id, lumen.id]);
+    })
+    .await;
+}

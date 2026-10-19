@@ -157,7 +157,12 @@ Rules:
 - Removing a member never deletes the row. It sets `status = removed`,
   `removed_at` and `removed_by_id`.
 - `users.name` is the name chosen at sign-up. `memberships.username` is the
-  name shown inside the organisation; it starts as a copy.
+  name shown inside the organisation. At signup it is a copy; "New
+  organisation" lets the person choose it.
+- `organisations.created_by_id` backs the creation limits: 10 per person,
+  ever, and 3 in any 24 hours, counted from it and `created_at`. It is set to
+  `NULL` if the user is deleted, which frees their count. It has no index;
+  the table is small and the counts run once per create.
 - Usernames: a letter, then letters or numbers, 3 to 30 characters, and never
   `everyone` (`src/models/users.rs:29`).
 - `session_version` goes into every session token. Adding 1 to it ends every
@@ -173,9 +178,9 @@ Multi-org is in progress (seven PRs). PR #41, merged on 19 October 2026,
 stopped the code assuming one membership per user: `memberships::for_user`
 returns them all and `default_for_user` picks the oldest active one. PR 2
 allows one membership per user per organisation, and adds the `current_org`
-cookie that picks between them. Nothing creates a second membership until
-PR 4. The plans are `docs/plans/multi-org-1.md` and
-`docs/plans/multi-org-2.md`.
+cookie that picks between them. PR 4 lets a signed-in person create another
+organisation, which gives them a second membership, as its owner. The plans
+are `docs/plans/multi-org-1.md` to `docs/plans/multi-org-4.md`.
 
 ## Work: projects, tasks and meetings
 

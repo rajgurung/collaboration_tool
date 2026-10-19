@@ -1,7 +1,8 @@
 # Accounts and membership
 
-How people get in: sign up a new organisation, join one by link, wait for
-approval, sign in, reset a password and sign out everywhere.
+How people get in: sign up a new organisation, create another one, join one
+by link, wait for approval, sign in, reset a password and sign out
+everywhere.
 
 Background: a session is a 7-day JWT in an `HttpOnly` cookie called
 `auth_token` (`src/extractors/session.rs`). Each token carries the user's
@@ -35,17 +36,93 @@ sequenceDiagram
 Rules:
 
 - Everything is in one transaction. If any step fails, nothing is saved
-  (`src/models/organisations.rs:131`).
-- Organisation name: 2 to 80 characters. Username: a letter, then letters or
-  numbers, 3 to 30 characters, not `everyone`. Password: 8 to 128 characters.
+  (`organisations::Model::sign_up`).
+- The organisation and its owner membership, `#general` and the starter
+  folders come from `create_with_owner`, which "Create another organisation"
+  uses too (see below). Anything signup sets up later is set up there too.
+- Organisation name: 2 to 80 characters once trimmed, so a name of only
+  spaces is refused (`organisations::trimmed_name_length`). Username: a
+  letter, then letters or numbers, 3 to 30 characters, not `everyone`.
+  Password: 8 to 128 characters.
 - The slug comes from the name: "Acme Ltd!" becomes `acme-ltd`. A taken slug
-  gets `-2`, `-3` and so on (`src/models/organisations.rs:179`).
+  gets `-2`, `-3` and so on (`unique_slug`). Accents are dropped today:
+  "Lumen Café" becomes `lumen-caf`.
 - An email that already has an account gets "An account with this email
   already exists. Sign in instead." (status 422).
 - A signed-in visitor to `/signup` is sent to `/dashboard`.
 
-Files: `src/controllers/signup.rs:31`, `src/models/organisations.rs:131` and
-`:157` (`create_with_owner`), `src/models/memberships.rs:75` (`create_owner`).
+Files: `src/controllers/signup.rs`, `src/models/organisations.rs`
+(`sign_up`, `create_with_owner`), `src/models/memberships.rs`
+(`create_owner`). The owner's username is the account's name here; the
+create below passes the one chosen for the new org.
+
+## Create another organisation
+
+Anyone with an active membership can create another organisation from the
+switcher's "New organisation" row, or at `/orgs/new`. They become its owner,
+under a username they choose for it. Same account, same email and password.
+
+```mermaid
+sequenceDiagram
+    actor P as Person
+    participant C as orgs controller
+    participant O as organisations model
+    participant DB as Postgres
+    P->>C: POST /orgs (organisation_name, name), with the tab's org claim
+    Note over C: CurrentMember: a stale tab is refused here
+    C->>O: create_for_user(user, params, time zone unless acting)
+    O->>O: validate, as signup
+    O->>DB: BEGIN
+    O->>DB: SELECT the user's row FOR NO KEY UPDATE
+    O->>DB: count orgs created by them, ever, then in the last 24 hours
+    O->>DB: their active orgs' names (the duplicate check)
+    O->>DB: create_with_owner: organisation, owner membership, #general, folders
+    O->>DB: copy the time zone, mark the welcome pop-up seen
+    O->>DB: COMMIT
+    C-->>P: current_org = new org, acting_org cleared, redirect to /dashboard?created=1
+    Note over C: ends any logins unlock, closes chat sockets and streams
+```
+
+Rules:
+
+- `CurrentMember` on `GET /orgs/new` and `POST /orgs`, inside the stale-tab
+  check. A pending, declined or removed person sees their waiting or removed
+  page instead. The page form renders its own `_org`, so it works without
+  JavaScript.
+- Fields and messages are signup's: `organisations::NewOrgParams`. The form
+  starts with your username in the current org.
+- A name that matches one of your active orgs is refused: "You already have
+  an organisation called Acme Studio. Pick a name you can tell apart." It
+  compares trimmed, with runs of spaces as one, lowercase. Other people's
+  names don't count, nor do orgs you are only waiting for.
+- Limits: 10 organisations created per person, ever, counting the signup one
+  (`MAX_ORGS_CREATED`), and 3 in any 24 hours (`ORGS_PER_DAY`). Both are
+  counted from `organisations.created_by_id` and `created_at`, so leaving an
+  org frees nothing. At 10 the form says so instead of showing its fields; a
+  `POST` gets the same as a 422. Over the daily limit: a 422 with "You've
+  set up 3 organisations today. Try again tomorrow."
+- The user-row lock makes two creates at once run one after the other, so
+  both limits and the duplicate check see each other. `FOR NO KEY UPDATE`
+  doesn't block inserts elsewhere that point at the user.
+- The time zone is copied from the current org. Not while acting: the new org
+  keeps `Europe/London`, as at signup.
+- The new membership has `welcomed_at` set, so Home skips the welcome
+  pop-up. The "Getting started" checklist still shows, with the owner's
+  steps.
+- After creating, the browser moves in the way a switch does (the shared
+  `enter_org` in `src/controllers/orgs.rs`). It lands on
+  `/dashboard?created=1`, a constant, where Home shows "Lumen Café is ready.
+  You're the owner.", named from the org the request resolved. The page is
+  `no-store` and `app.ts` drops `?created=1` from the address.
+- No email or notification is sent. The log line "created organisation"
+  has numbers only: `user_id`, `org_id`, `from_org` and, while acting,
+  `acting_org`.
+- There is no delete or leave yet. A mistaken org stays until removed by
+  hand; the cap bounds how many.
+
+Files: `src/controllers/orgs.rs` (`new`, `create`, `enter_org`),
+`src/models/organisations.rs` (`create_for_user`, `created_count`),
+`assets/views/orgs/_new_form.html`.
 
 ## Join by link, then owner approval
 
@@ -136,8 +213,10 @@ request checks it again.
    org, any status but active), the response clears it
    (`src/initializers/current_org.rs`).
 
-`POST /orgs/{id}/switch` is the only thing that sets the cookie
-(`src/controllers/orgs.rs`). The switcher calls it (see "The switcher").
+`POST /orgs/{id}/switch` sets the cookie (`src/controllers/orgs.rs`). The
+switcher calls it (see "The switcher"). `POST /orgs` sets it too, to the org
+it just created, through the same `enter_org` (see "Create another
+organisation").
 
 - It answers 404 unless the user has an active membership in that org, so it
   does not reveal whether the org exists.
@@ -156,12 +235,19 @@ refused and no code or token is made.
 
 ### The switcher
 
-With two or more active orgs, or one plus a pending request, the org name
-at the top of the sidebar opens a menu of your organisations. On phones,
-Home's header name and a row at the top of More open the same list in a
-sheet. With one org it stays plain text. `CurrentMember.org_menu` decides
-this, on full page loads only (`memberships::Model::switcher_counts`, one
-indexed query).
+For every member who is not acting, even with one org, the org name at the
+top of the sidebar opens a menu of your organisations. On phones, Home's
+header name opens the same list in a sheet. The list ends with "New
+organisation", a link to `/orgs/new` outside the switch form, which opens the
+form as a dialog on desktop and in place of the list on a phone.
+`CurrentMember.org_menu` decides this, on full page loads only. For members
+it costs no query. While acting it needs an org of their own
+(`memberships::Model::switcher_counts`, one indexed query), and the menu has
+no "New organisation" row.
+
+More's "Organisation" section shows for everyone: the current org, with
+"Switch" only when there is another org (or a pending request) to switch to,
+then "New organisation" (not while acting).
 
 The rows come from `GET /orgs` (`memberships::Model::for_user_with_orgs`):
 active A to Z, then pending, greyed. Declined and removed are not listed.
@@ -276,8 +362,9 @@ Rules:
   password. Accounts lock after 5 wrong app passwords when unlocking logins;
   see [documents.md](documents.md).
 - Signing in clears `current_org` and `acting_org`, so each sign-in starts
-  in the default organisation. Signing up and joining do the same. A cookie
-  left by someone else on a shared browser never carries over.
+  in the default organisation: the oldest active one, not the newest
+  created. Signing up and joining do the same. A cookie left by someone else
+  on a shared browser never carries over.
 - CSRF guard: a non-GET request that carries an `Origin` header must match
   `APP_URL`, or it gets 403. Requests with no `Origin` pass; browsers always
   send one on POST (`src/initializers/origin_check.rs`).

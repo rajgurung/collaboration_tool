@@ -1131,3 +1131,194 @@ async fn the_rotate_list_stays_inside_its_organisation() {
     })
     .await;
 }
+
+/// A Claude token and an unused OAuth code for this person in this org.
+async fn claude_access(
+    ctx: &AppContext,
+    client: &collab::models::oauth_clients::Model,
+    org_id: i64,
+    user_id: i64,
+) -> (String, String) {
+    use collab::models::{access_tokens, oauth_codes};
+    let token = access_tokens::Model::create_personal(
+        &ctx.db,
+        org_id,
+        user_id,
+        &access_tokens::PersonalParams {
+            name: "Laptop".to_string(),
+        },
+        super::mcp::RESOURCE,
+    )
+    .await
+    .unwrap()
+    .1;
+    let (_, code) = oauth_codes::Model::issue(
+        &ctx.db,
+        &oauth_codes::Consent {
+            client,
+            org_id,
+            user_id,
+            redirect_uri: super::oauth::CLAUDE,
+            code_challenge: &oauth_codes::challenge_for(&"v".repeat(43)),
+            resource: super::mcp::RESOURCE,
+            scope: "mcp",
+        },
+    )
+    .await
+    .unwrap();
+    (token, code)
+}
+
+#[tokio::test]
+#[serial]
+async fn locking_revokes_claude_tokens_in_every_org() {
+    use collab::models::{access_tokens, oauth_clients, oauth_codes};
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let carol = users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap();
+        let lumen = organisations::Model::create_for_user(
+            &ctx.db,
+            &carol,
+            &organisations::NewOrgParams {
+                organisation_name: "Lumen Café".to_string(),
+                name: "carol".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let client = oauth_clients::Model::register(
+            &ctx.db,
+            &oauth_clients::RegisterParams {
+                client_name: None,
+                redirect_uris: vec![super::oauth::CLAUDE.to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        let in_acme = claude_access(&ctx, &client, acme.org.id, carol.id).await;
+        let in_lumen = claude_access(&ctx, &client, lumen.id, carol.id).await;
+        let usable = |token: String| {
+            let db = ctx.db.clone();
+            async move {
+                access_tokens::Model::find_usable(&db, &token, super::mcp::RESOURCE)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+        assert!(usable(in_acme.0.clone()).await && usable(in_lumen.0.clone()).await);
+
+        for _ in 0..5 {
+            unlock(&request, &acme.carol, "wrong").await;
+        }
+        assert!(users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap()
+            .is_locked());
+        for (token, code) in [&in_acme, &in_lumen] {
+            let row = access_tokens::Entity::find()
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|t| t.token_hash == access_tokens::hash(token))
+                .unwrap();
+            assert!(row.revoked_at.is_some(), "revoked in org {}", row.organisation_id);
+            let code_row = oauth_codes::Entity::find()
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|c| c.code_hash == access_tokens::hash(code))
+                .unwrap();
+            assert!(code_row.used_at.is_some(), "code used in org {}", code_row.organisation_id);
+        }
+
+        // After a reset, neither old token works.
+        request
+            .post("/forgot")
+            .form(&serde_json::json!({ "email": "carol@example.com" }))
+            .await;
+        let token = users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap()
+            .reset_token
+            .unwrap();
+        let res = request
+            .post(&format!("/reset/{token}"))
+            .form(&serde_json::json!({ "password": "new-password-1", "password_confirmation": "new-password-1" }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(!usable(in_acme.0).await, "Acme's token");
+        assert!(!usable(in_lumen.0).await, "the created org's token");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_creator_resetting_their_password_gets_no_owner_notice_from_their_own_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        // carol becomes a second owner of Acme, so Acme has someone to tell.
+        let carol_id = user_id(&ctx, "carol@example.com").await;
+        let mut carol = memberships::Model::active_in(&ctx.db, acme.org.id, carol_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        carol.role = ActiveValue::Set(memberships::role::OWNER.to_string());
+        carol.update(&ctx.db).await.unwrap();
+        add(&request, &acme.alice, acme.folder.id, &[]).await;
+
+        let res = request
+            .post("/orgs")
+            .as_member(&acme.alice)
+            .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let lumen = organisations::Model::find_by_slug(&ctx.db, "lumen-caf")
+            .await
+            .unwrap();
+        let lumen_logins = folders::Model::list_for_org(&ctx.db, lumen.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.folder.name == "Logins")
+            .unwrap()
+            .folder;
+        let in_lumen = super::multi_org::with_org(&acme.alice, lumen.id);
+        assert_eq!(
+            add(&request, &in_lumen, lumen_logins.id, &[]).await.status_code(),
+            303
+        );
+
+        let before = deliveries(&ctx).len();
+        request
+            .post("/forgot")
+            .form(&serde_json::json!({ "email": "alice@example.com" }))
+            .await;
+        let token = users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap()
+            .reset_token
+            .unwrap();
+        let res = request
+            .post(&format!("/reset/{token}"))
+            .form(&serde_json::json!({ "password": "new-password-1", "password_confirmation": "new-password-1" }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let notices: Vec<String> = deliveries(&ctx)[before..]
+            .iter()
+            .filter(|m| m.contains("alice's password was changed"))
+            .cloned()
+            .collect();
+        assert_eq!(notices.len(), 1, "Acme's other owner only");
+        assert!(notices[0].contains("To: carol@example.com"));
+        assert!(!notices.iter().any(|m| m.contains("To: alice@example.com")));
+    })
+    .await;
+}

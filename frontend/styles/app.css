@@ -825,6 +825,44 @@
     .org-sheet-head { padding: 12px 12px 4px 24px; }
     .org-sheet .sheet-body { padding: 0 12px 16px; }
   }
+  /* "New organisation" (docs/designs/create-org.html): the dashed row, and the form in the org sheet or on /orgs/new. */
+  .org-logo-new { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; box-sizing: border-box; border: 1.5px dashed color-mix(in srgb, var(--muted) 65%, transparent); border-radius: 10px; color: var(--muted); }
+  .org-logo-new-lg, .org-sheet .org-logo-new { width: 36px; height: 36px; border-radius: 11px; }
+  .org-new:hover .org-logo-new, .org-new:focus-visible .org-logo-new { border-color: var(--muted); color: var(--text); }
+  .org-sheet-back { margin-left: -12px; }
+  .org-sheet-form .org-sheet-head { padding-left: 20px; }
+  .org-sheet-form .org-sheet-head:has(.org-sheet-back:not([hidden])) { padding-left: 8px; }
+  .org-sheet.org-sheet-form .sheet-body { padding: 0 20px 20px; }
+  .org-form-lead { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+  .org-new-form .field-error { display: flex; align-items: flex-start; gap: 5px; }
+  .org-new-form .field-error svg { flex-shrink: 0; margin-top: 1px; }
+  .org-new-form .input[disabled] { opacity: 0.6; }
+  .org-new-alert { margin: 0 0 16px; }
+  .org-acting-note { display: flex; gap: 10px; margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: var(--active-bg); font-size: 14px; }
+  .org-acting-note svg { flex-shrink: 0; margin-top: 2px; color: var(--link); }
+  .org-facts { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; list-style: none; }
+  .org-facts li { display: flex; align-items: flex-start; gap: 10px; }
+  .org-facts svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }
+  .org-new-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+  .org-new-foot .btn { flex: 1; min-height: 48px; padding: 0 20px; font-size: 16px; }
+  .org-new-cancel { display: none !important; }
+  .org-new-submit[disabled] { opacity: 0.75; cursor: default; }
+  .org-new-busy { display: none; align-items: center; gap: 6px; }
+  .htmx-request .org-new-busy, .htmx-request.org-new-form .org-new-busy { display: inline-flex; }
+  .htmx-request .org-new-idle { display: none; }
+  .org-limit-box { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 8px 4px; text-align: center; }
+  .org-limit-tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 14px; background: var(--chip); color: var(--muted); }
+  .org-limit-box h3 { margin: 0; font-size: 17px; font-weight: 700; }
+  .org-limit-box p { max-width: 360px; margin: 0; color: var(--muted); font-size: 14.5px; }
+  .org-new-page .org-new-foot { position: static; margin: 22px 0 0; padding: 0; border: 0; }
+  @media (min-width: 768px) {
+    .org-sheet.org-sheet-form .sheet-body { padding: 8px 24px 24px; }
+    .org-sheet-form .org-sheet-head { padding: 18px 12px 0 24px; }
+    .org-sheet-form .org-sheet-head h2 { font-size: 20px; letter-spacing: -0.015em; }
+    .org-new-foot { margin-top: 22px; }
+    .org-new-foot .btn { flex: none; min-height: 44px; padding: 0 14px; font-size: 15px; }
+    .org-new-cancel { display: inline-flex !important; }
+  }
   .notice { display: flex; align-items: flex-start; gap: 12px; padding: 14px 4px 14px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
   @media (min-width: 900px) { .notice { max-width: 760px; } }
   .notice-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 999px; background: var(--active-bg); color: var(--link); }

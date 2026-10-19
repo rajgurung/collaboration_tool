@@ -1,0 +1,37 @@
+{# "New organisation" (docs/designs/create-org.html): the desktop dialog, the phone sheet and the /orgs/new page share it. A 422 over HTMX replaces the whole form. The server renders _org, so it also works without JavaScript. #}
+<form id="org-new-form" method="post" action="/orgs" hx-post="/orgs" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find .org-new-cancel, find [name=organisation_name], find [name=name]" class="org-new-form" data-org-new-form>
+  <input type="hidden" name="_org" value="{{ current_org_id }}">
+  {% if as_page %}<input type="hidden" name="as_page" value="1">{% endif %}
+  {% if at_cap %}
+  <div class="org-limit-box">
+    <span class="org-limit-tile">{{<icon name="lock" class="h-[26px] w-[26px]"/>}}</span>
+    <h3>You've set up {{ max_orgs }} organisations</h3>
+    <p>That's the most one account can set up for now. You can keep using the ones you have.</p>
+  </div>
+  <div class="org-new-foot sheet-sticky-foot">{% if as_page %}<a href="/dashboard" class="btn btn-secondary btn-tall">Back to Home</a>{% else %}<button type="button" class="btn btn-secondary btn-tall org-new-close" data-dialog-close>Close</button>{% endif %}</div>
+  {% else %}
+  {% if me.acting %}<div class="org-acting-note">{{<icon name="shield" class="h-4 w-4"/>}}<span>You're acting in <strong>{{ org.name }}</strong>. Creating this ends acting. The new organisation is yours, with you as owner.</span></div>{% endif %}
+  <p class="alert alert-error org-new-alert" role="alert" data-org-new-alert hidden>Something went wrong, and nothing was created. Try again.</p>
+  <p class="org-form-lead">A separate space with its own people, tasks and chat. You'll be its owner.</p>
+  <div class="grid gap-[18px]">
+    <label class="field">
+      <span class="field-label">Organisation name</span>
+      <input class="input" name="organisation_name" value="{{ form.organisation_name }}" autocomplete="organization" maxlength="80" required {% if errors.organisation_name or not errors.name %}autofocus{% endif %} {% if errors.organisation_name %}aria-invalid="true"{% endif %}>
+      {% if errors.organisation_name %}<span class="field-error">{{<icon name="circle-alert" class="h-3.5 w-3.5"/>}}{{ errors.organisation_name }}</span>{% endif %}
+    </label>
+    <label class="field">
+      <span class="field-label">Your username</span>
+      <input class="input" name="name" value="{{ form.name }}" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="30" required {% if errors.name and not errors.organisation_name %}autofocus{% endif %} {% if errors.name %}aria-invalid="true"{% endif %}>
+      {% if errors.name %}<span class="field-error">{{<icon name="circle-alert" class="h-3.5 w-3.5"/>}}{{ errors.name }}</span>{% endif %}<span class="field-hint" {% if errors.name %}hidden{% endif %}>How people in this organisation see you. Start with a letter, then 3 to 30 letters or numbers.</span>
+    </label>
+  </div>
+  <ul class="org-facts">
+    <li>{{<icon name="lock" class="h-4 w-4"/>}}<span>Nothing from {{ org.name }} is shared with it.</span></li>
+    <li>{{<icon name="mail" class="h-4 w-4"/>}}<span>You'll sign in with the same email and password.</span></li>
+  </ul>
+  <div class="org-new-foot sheet-sticky-foot">
+    {% if not as_page %}<button type="button" class="btn btn-secondary btn-tall org-new-cancel" data-dialog-close>Cancel</button>{% endif %}
+    <button type="submit" class="btn btn-primary btn-tall org-new-submit"><span class="org-new-idle">Create organisation</span><span class="org-new-busy">{{<icon name="loader-circle" class="spin h-[18px] w-[18px]"/>}}Creating…</span></button>
+  </div>
+  {% endif %}
+</form>

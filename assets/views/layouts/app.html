@@ -47,7 +47,7 @@
 {% if org_menu %}
 <dialog id="org-sheet" class="sheet org-sheet" aria-labelledby="org-sheet-title">
   <div class="sheet-handle"></div>
-  <div class="org-sheet-head"><h2 id="org-sheet-title">Your organisations</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+  <div class="org-sheet-head"><button type="button" class="icon-btn org-sheet-back" data-org-back aria-label="Back to your organisations" hidden>{{<icon name="chevron-left" class="h-[22px] w-[22px]"/>}}</button><h2 id="org-sheet-title">Your organisations</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
   <div id="org-sheet-body" class="sheet-body" role="menu" aria-label="Your organisations"></div>
 </dialog>
 {% endif %}

@@ -1,10 +1,18 @@
 use async_trait::async_trait;
+use axum::{
+    http::{header, Method, StatusCode},
+    response::{IntoResponse, Response},
+    Router as AxumRouter,
+};
 use loco_rs::{
     app::{AppContext, Hooks, Initializer},
     bgworker::{BackgroundWorker, Queue},
     boot::{create_app, BootResult, StartMode},
     config::Config,
-    controller::AppRoutes,
+    controller::{
+        views::{engines::TeraView, ViewEngine, ViewRenderer},
+        AppRoutes,
+    },
     db::{self, truncate_table},
     environment::Environment,
     storage::{drivers, Storage},
@@ -29,6 +37,54 @@ use crate::{
     tasks,
     workers::downloader::DownloadWorker,
 };
+
+/// A 404 for a browser page load (a GET, not HTMX, asking for HTML) becomes
+/// a page instead of Loco's JSON body: inside the app shell for a member,
+/// naming only the org this request resolved. It never looks up where the
+/// item is. HTMX and API 404s are left alone.
+async fn not_found_page(
+    ctx: &AppContext,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let wants_page = req.method() == Method::GET
+        && !req.headers().contains_key("hx-request")
+        && req
+            .headers()
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|accept| accept.contains("text/html"));
+    if !wants_page {
+        return next.run(req).await;
+    }
+    let (parts, body) = req.into_parts();
+    let mut saved = parts.clone();
+    let response = next
+        .run(axum::extract::Request::from_parts(parts, body))
+        .await;
+    if response.status() != StatusCode::NOT_FOUND {
+        return response;
+    }
+    let Some(ViewEngine(view)) = saved.extensions.get::<ViewEngine<TeraView>>().cloned() else {
+        return response;
+    };
+    use axum::extract::FromRequestParts;
+    let html =
+        match crate::extractors::current_member::PinnedMember::from_request_parts(&mut saved, ctx)
+            .await
+        {
+            Ok(crate::extractors::current_member::PinnedMember(member)) => view.render(
+                "errors/not_found.html",
+                member.page("not_found", serde_json::json!({})),
+            ),
+            // Signed out, or no active membership: the plain page.
+            Err(_) => view.render("errors/not_found_public.html", serde_json::json!({})),
+        };
+    match html {
+        Ok(html) => (StatusCode::NOT_FOUND, axum::response::Html(html)).into_response(),
+        Err(_) => response,
+    }
+}
 
 /// Where uploaded documents live: R2 in production, memory in tests, and
 /// `tmp/storage` on disk in development.
@@ -123,6 +179,17 @@ impl Hooks for App {
             Box::new(initializers::origin_check::OriginCheckInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
         ])
+    }
+
+    /// A 404 on a page load is drawn as a page (see [`not_found_page`]).
+    async fn after_routes(router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
+        let ctx = ctx.clone();
+        Ok(router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let ctx = ctx.clone();
+                async move { not_found_page(&ctx, req, next).await }
+            },
+        )))
     }
 
     fn routes(ctx: &AppContext) -> AppRoutes {

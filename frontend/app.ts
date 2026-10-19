@@ -205,13 +205,14 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted || nav?.type === "back_forward") probeOrg();
 });
 
-// After a switch or a stale-tab move, drop ?switched= and ?from= from Home's
-// address, so a reload doesn't repeat the toast or the notice.
+// After a switch, a create or a stale-tab move, drop ?switched=, ?created=
+// and ?from= from Home's address, so a reload doesn't repeat the toast or
+// the notice.
 {
   const here = new URL(window.location.href);
-  if (here.searchParams.has("switched") || here.searchParams.has("from")) {
-    here.searchParams.delete("switched");
-    here.searchParams.delete("from");
+  const flags = ["switched", "created", "from"];
+  if (flags.some((flag) => here.searchParams.has(flag))) {
+    flags.forEach((flag) => here.searchParams.delete(flag));
     history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
   }
 }
@@ -1488,36 +1489,64 @@ document.body.addEventListener("htmx:xhr:progress", (event) => {
   }
 });
 
-document.body.addEventListener("htmx:afterRequest", (event) => {
-  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
-  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload") || !currentUpload) return;
-  const { file, row } = currentUpload;
-  currentUpload = null;
-  elt.reset();
-  // Refused as a stale tab: the banner is up, and the file waits for "Back".
-  if (xhr.status === 409) {
-    delete row.dataset.sent;
-    row.querySelector<HTMLElement>(".bar > span")!.style.width = "0%";
-    row.querySelector("[data-progress-text]")!.textContent = "Waiting";
-    uploadQueue.unshift({ file, row });
-    return;
-  }
+// A stale-tab refusal: the banner is up, and the file waits at the front of
+// the queue for "Back".
+function requeueUpload({ file, row }: Upload) {
+  delete row.dataset.sent;
+  row.querySelector<HTMLElement>(".bar > span")!.style.width = "0%";
+  row.querySelector("[data-progress-text]")!.textContent = "Waiting";
+  uploadQueue.unshift({ file, row });
+}
+
+function uploadFinished({ file, row }: Upload, successful: boolean, status: number) {
   row.remove();
   // htmx still holds this form's request until the handler returns, so start the next one after.
   setTimeout(startNextUpload);
   // A refusal comes back as its own error row.
-  if (successful || xhr.status === 422) return;
+  if (successful || status === 422) return;
   // Status 0: the connection dropped. Keep the file so Try again can resend it.
-  const dropped = xhr.status === 0;
+  const dropped = status === 0;
   const message = dropped
     ? "Stopped part way. Check your connection."
-    : xhr.status === 413
+    : status === 413
       ? "Too big. The limit is 25 MB. Try saving a smaller copy."
       : "Couldn't add it. Try again, or reload the page.";
   const failed = uploadRow(file.name, message, dropped);
   if (!failed) return;
   if (dropped) failedFiles.set(failed, file);
   document.getElementById("uploads")?.prepend(failed);
+}
+
+// Railway's edge answers the app's early refusal of a large body with a 502,
+// or the connection drops, so the 409 never arrives. Ask whether the tab went
+// stale before calling it a failed upload. The upload stays current
+// meanwhile, so nothing else starts and leaving still warns.
+async function recheckUpload(upload: Upload, status: number) {
+  const probe = await fetch("/orgs/current", { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).catch(() => null);
+  currentUpload = null;
+  if (probe?.status === 409 && probe.headers.get("HX-Redirect")) {
+    requeueUpload(upload);
+    staleRefusal(probe);
+    return;
+  }
+  uploadFinished(upload, false, status);
+}
+
+document.body.addEventListener("htmx:afterRequest", (event) => {
+  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
+  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload") || !currentUpload) return;
+  const upload = currentUpload;
+  elt.reset();
+  if (xhr.status === 502 || xhr.status === 0) {
+    void recheckUpload(upload, xhr.status);
+    return;
+  }
+  currentUpload = null;
+  if (xhr.status === 409) {
+    requeueUpload(upload);
+    return;
+  }
+  uploadFinished(upload, successful, xhr.status);
 });
 
 // <button data-copy-text="..."> copies its own text, such as a login's username.
@@ -1844,8 +1873,16 @@ function orgListKeys(list: HTMLElement, event: KeyboardEvent) {
   else if (event.key === "End") go(items.length - 1);
   else if (event.key === "Enter" || event.key === " ") {
     // Rows are buttons, and the browser clicks them itself: a switch, or the
-    // current org closing the list. Only a pending row is not, and does nothing.
-    if (!(items[i] instanceof HTMLButtonElement)) event.preventDefault();
+    // current org closing the list. "New organisation" is a link, which the
+    // browser follows on Enter only, so Space clicks it here. A pending row
+    // does nothing.
+    const item = items[i];
+    if (item instanceof HTMLButtonElement) return;
+    if (!(item instanceof HTMLAnchorElement)) event.preventDefault();
+    else if (event.key === " ") {
+      event.preventDefault();
+      item.click();
+    }
   } else if (list === orgMenu && event.key === "Escape") {
     event.preventDefault();
     closeOrgMenu();
@@ -1924,5 +1961,122 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
     if (list) void loadOrgs(list, true).then(() => focusOrg(list, "current"));
   } else {
     showToast({ kind: "error", message: `Couldn't switch to ${name}. Check your connection and try again.` });
+  }
+});
+
+// "New organisation" (docs/designs/create-org.html) opens its form in the org
+// sheet: a centred dialog on desktop, and on a phone in place of the list,
+// with a back arrow to it. Without JavaScript the rows are links to /orgs/new.
+const orgSheetTitle = document.getElementById("org-sheet-title");
+const orgSheetBack = orgSheet?.querySelector<HTMLButtonElement>("[data-org-back]");
+// Where focus goes when the form closes: the switcher button, if it opened from the menu.
+let newOrgReturn: HTMLElement | null = null;
+
+function sheetMode(form: boolean) {
+  if (!orgSheet || !orgSheetBody || !orgSheetTitle) return;
+  orgSheet.classList.toggle("org-sheet-form", form);
+  orgSheetTitle.textContent = form ? "New organisation" : "Your organisations";
+  if (form) {
+    orgSheetBody.removeAttribute("role");
+  } else {
+    orgSheetBody.setAttribute("role", "menu");
+    if (orgSheetBack) orgSheetBack.hidden = true;
+  }
+}
+
+function focusNewOrg() {
+  orgSheetBody?.querySelector<HTMLInputElement>('#org-new-form [aria-invalid="true"], #org-new-form input[name=organisation_name]')?.focus();
+}
+
+// Set when loading the form fails: a server error or no connection.
+let newOrgFailed = false;
+for (const name of ["htmx:responseError", "htmx:sendError"]) {
+  document.body.addEventListener(name, (event) => {
+    const detail = (event as CustomEvent<{ pathInfo?: { requestPath?: string }; xhr?: XMLHttpRequest }>).detail;
+    if (detail.pathInfo?.requestPath === "/orgs/new" && detail.xhr?.status !== 409) newOrgFailed = true;
+  });
+}
+
+async function openNewOrg(fromList: boolean) {
+  if (!orgSheet || !orgSheetBody) return void (window.location.href = "/orgs/new");
+  newOrgReturn = orgMenuOpen() ? orgMenuButton : null;
+  closeOrgMenu(false);
+  newOrgFailed = false;
+  await htmx.ajax("GET", "/orgs/new", { target: "#org-sheet-body", swap: "innerHTML" }).catch(() => (newOrgFailed = true));
+  if (newOrgFailed) {
+    // Outside any dialog, where a toast can be seen.
+    orgSheet.close();
+    showToast({ kind: "error", message: "Couldn't open the form. Check your connection and try again." });
+    return;
+  }
+  // A stale tab is sent Home instead, and its list was never replaced.
+  if (!orgSheetBody.querySelector("#org-new-form")) return;
+  sheetMode(true);
+  if (orgSheetBack) orgSheetBack.hidden = !fromList;
+  if (!orgSheet.open) orgSheet.showModal();
+  focusNewOrg();
+}
+
+document.addEventListener("click", (event) => {
+  const row = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[data-org-new]");
+  if (!row || !orgSheet) return;
+  event.preventDefault();
+  void openNewOrg(!!row.closest("#org-sheet-body"));
+});
+
+orgSheetBack?.addEventListener("click", () => {
+  sheetMode(false);
+  void loadOrgs(orgSheetBody!, true).then(() => focusOrg(orgSheetBody!, "current"));
+});
+
+orgSheet?.addEventListener("close", () => {
+  if (!orgSheet.classList.contains("org-sheet-form")) return;
+  // The list loads again the next time the sheet opens.
+  orgSheetBody?.replaceChildren();
+  sheetMode(false);
+  newOrgReturn?.focus();
+  newOrgReturn = null;
+});
+
+// A 422 swaps the form in again; htmx focuses its first problem (autofocus).
+// A server error or no connection keeps what was typed and shows the alert
+// at the top of the form (a toast would sit under the modal sheet). The
+// transaction means nothing was saved either way.
+function clearFieldError(input: HTMLInputElement) {
+  input.removeAttribute("aria-invalid");
+  const field = input.closest(".field");
+  field?.querySelector(".field-error")?.remove();
+  const hint = field?.querySelector<HTMLElement>(".field-hint");
+  if (hint) hint.hidden = false;
+}
+document.addEventListener("input", (event) => {
+  const input = event.target;
+  if (input instanceof HTMLInputElement && input.matches('#org-new-form [aria-invalid="true"]')) clearFieldError(input);
+});
+function showNewOrgAlert(form: HTMLFormElement, message: string) {
+  const alert = form.querySelector<HTMLElement>("[data-org-new-alert]");
+  if (!alert) return;
+  alert.textContent = message;
+  alert.hidden = false;
+  alert.scrollIntoView({ block: "nearest" });
+}
+document.body.addEventListener("htmx:beforeRequest", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  if (elt instanceof HTMLFormElement && elt.matches("[data-org-new-form]")) {
+    const alert = elt.querySelector<HTMLElement>("[data-org-new-alert]");
+    if (alert) alert.hidden = true;
+    // Old 422 errors never sit next to a new answer.
+    elt.querySelectorAll<HTMLInputElement>('[aria-invalid="true"]').forEach(clearFieldError);
+  }
+});
+document.body.addEventListener("htmx:responseError", (event) => {
+  const { elt, xhr } = (event as CustomEvent<{ elt: Element; xhr: XMLHttpRequest }>).detail;
+  if (!(elt instanceof HTMLFormElement) || !elt.matches("[data-org-new-form]") || xhr.status === 422 || xhr.status === 409) return;
+  showNewOrgAlert(elt, "Something went wrong, and nothing was created. Try again.");
+});
+document.body.addEventListener("htmx:sendError", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  if (elt instanceof HTMLFormElement && elt.matches("[data-org-new-form]")) {
+    showNewOrgAlert(elt, "Couldn't create the organisation. Check your connection and try again.");
   }
 });
