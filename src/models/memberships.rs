@@ -26,6 +26,11 @@ pub mod status {
     pub const REMOVED: &str = "removed";
 }
 
+/// `status = 'active'`, for ordering active memberships first (descending).
+fn active_first() -> sea_orm::sea_query::SimpleExpr {
+    Expr::col(Column::Status).eq(status::ACTIVE)
+}
+
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
     async fn before_save<C>(self, _db: &C, insert: bool) -> std::result::Result<Self, DbErr>
@@ -43,12 +48,20 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
-    /// Every user's membership (if any), for the platform admin.
+    /// Each user's default membership (see [`Self::default_for_user`]), for
+    /// the platform admin.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn all_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
+    pub async fn default_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
+        // DISTINCT ON keeps the first row per user in this order, so the
+        // database returns one membership per person, not every membership.
         Ok(Entity::find()
+            .distinct_on([Column::UserId])
+            .order_by_asc(Column::UserId)
+            .order_by_desc(active_first())
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
             .all(db)
             .await?
             .into_iter()
@@ -56,16 +69,36 @@ impl Model {
             .collect())
     }
 
-    /// A user belongs to at most one organisation.
+    /// Every membership of the user, in any status, oldest first.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn find_for_user<C: ConnectionTrait>(
+    pub async fn for_user<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<Vec<Self>> {
+        Ok(Entity::find()
+            .filter(Column::UserId.eq(user_id))
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
+            .all(db)
+            .await?)
+    }
+
+    /// The membership to use when no organisation has been chosen: the
+    /// oldest active one, else the oldest in any status (so the person sees
+    /// their pending or removed page). To check access to a given
+    /// organisation, use [`Self::active_in`] with that organisation's id
+    /// instead.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn default_for_user<C: ConnectionTrait>(
         db: &C,
         user_id: i64,
     ) -> ModelResult<Option<Self>> {
         Ok(Entity::find()
             .filter(Column::UserId.eq(user_id))
+            .order_by_desc(active_first())
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
             .one(db)
             .await?)
     }

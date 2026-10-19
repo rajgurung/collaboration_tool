@@ -21,7 +21,7 @@ pub const RESOURCE: &str = "http://localhost:5150/mcp";
 /// A personal token for the user with this email, made through the model.
 pub async fn token_for(ctx: &AppContext, email: &str) -> String {
     let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
-    let membership = memberships::Model::find_for_user(&ctx.db, user.id)
+    let membership = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .unwrap()
         .unwrap();
@@ -191,7 +191,7 @@ async fn tokens_stop_working_without_an_active_membership() {
         sign_up(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let alice = user_id(&ctx, "alice@example.com").await;
-        let membership = memberships::Model::find_for_user(&ctx.db, alice)
+        let membership = memberships::Model::default_for_user(&ctx.db, alice)
             .await
             .unwrap()
             .unwrap();

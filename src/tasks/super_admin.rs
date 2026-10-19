@@ -48,7 +48,7 @@ impl Task for SuperAdmin {
             user.into_active_model().make_super_admin(&txn).await?
         };
 
-        let org_name = match memberships::Model::find_for_user(&txn, user.id).await? {
+        let org_name = match memberships::Model::default_for_user(&txn, user.id).await? {
             Some(membership) => {
                 organisations::Model::find_by_id(&txn, membership.organisation_id)
                     .await?

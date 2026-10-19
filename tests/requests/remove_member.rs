@@ -32,12 +32,12 @@ async fn member(
     let email = format!("{name}@example.com");
     let cookie = join(request, "acme", name, &email).await;
     let user = users::Model::find_by_email(&ctx.db, &email).await.unwrap();
-    let pending = memberships::Model::find_for_user(&ctx.db, user.id)
+    let pending = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .unwrap()
         .unwrap();
     pending.approve(&ctx.db, user.id).await.unwrap();
-    let approved = memberships::Model::find_for_user(&ctx.db, user.id)
+    let approved = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .unwrap()
         .unwrap();
@@ -122,7 +122,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             "{page}"
         );
         // The name comes from the database: a member id that was not removed shows nothing.
-        let alice_m = memberships::Model::find_for_user(&ctx.db, org.created_by_id.unwrap())
+        let alice_m = memberships::Model::default_for_user(&ctx.db, org.created_by_id.unwrap())
             .await
             .unwrap()
             .unwrap();
@@ -305,7 +305,7 @@ async fn removing_someone_locks_them_out_of_everything() {
 async fn removal_rules() {
     request::<App, _, _>(|request, ctx| async move {
         let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let alice_m = memberships::Model::find_for_user(
+        let alice_m = memberships::Model::default_for_user(
             &ctx.db,
             users::Model::find_by_email(&ctx.db, "alice@example.com")
                 .await
@@ -373,7 +373,7 @@ async fn removal_rules() {
         let fay = users::Model::find_by_email(&ctx.db, "fay@example.com")
             .await
             .unwrap();
-        let fay_m = memberships::Model::find_for_user(&ctx.db, fay.id)
+        let fay_m = memberships::Model::default_for_user(&ctx.db, fay.id)
             .await
             .unwrap()
             .unwrap();

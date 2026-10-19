@@ -10,7 +10,7 @@ use super::prepare_data::{join, sign_up};
 
 async fn membership_of(ctx: &AppContext, email: &str) -> memberships::Model {
     let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
-    memberships::Model::find_for_user(&ctx.db, user.id)
+    memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .unwrap()
         .unwrap()

@@ -46,7 +46,7 @@ async fn acme(request: &TestServer, ctx: &AppContext) -> Acme {
         let email = format!("{name}@example.com");
         let cookie = join(request, "acme", name, &email).await;
         let id = user_id(ctx, &email).await;
-        let pending = memberships::Model::find_for_user(&ctx.db, id)
+        let pending = memberships::Model::default_for_user(&ctx.db, id)
             .await
             .unwrap()
             .unwrap();
@@ -476,7 +476,7 @@ async fn only_owners_admins_and_named_members_can_see_secrets() {
 
         // A bearer token is not a session, even for an owner.
         let alice_id = user_id(&ctx, "alice@example.com").await;
-        let membership = memberships::Model::find_for_user(&ctx.db, alice_id).await.unwrap().unwrap();
+        let membership = memberships::Model::default_for_user(&ctx.db, alice_id).await.unwrap().unwrap();
         let alice = users::Model::find_by_id(&ctx.db, alice_id).await.unwrap();
         let bearer = CurrentMember::from_membership(alice, acme.org.clone(), membership);
         let login = only_login(&ctx).await;
@@ -726,7 +726,7 @@ async fn removing_someone_lists_the_logins_to_change() {
         );
         assert_eq!(reveal(&request, &acme.dave, id).await.status_code(), 200);
 
-        let dave_m = memberships::Model::find_for_user(&ctx.db, dave_id)
+        let dave_m = memberships::Model::default_for_user(&ctx.db, dave_id)
             .await
             .unwrap()
             .unwrap();
@@ -768,7 +768,7 @@ async fn removing_someone_lists_the_logins_to_change() {
 
         // Removing an admin lists every login, mailbox first.
         let carol_m =
-            memberships::Model::find_for_user(&ctx.db, user_id(&ctx, "carol@example.com").await)
+            memberships::Model::default_for_user(&ctx.db, user_id(&ctx, "carol@example.com").await)
                 .await
                 .unwrap()
                 .unwrap();
@@ -790,7 +790,7 @@ async fn removing_someone_lists_the_logins_to_change() {
 
         // Someone who could see nothing gets the empty state.
         let bob_m =
-            memberships::Model::find_for_user(&ctx.db, user_id(&ctx, "bob@example.com").await)
+            memberships::Model::default_for_user(&ctx.db, user_id(&ctx, "bob@example.com").await)
                 .await
                 .unwrap()
                 .unwrap();
@@ -1053,7 +1053,7 @@ async fn editing_a_login_keeps_what_removed_people_could_see() {
         )
         .await;
         let login = only_login(&ctx).await;
-        let dave_m = memberships::Model::find_for_user(&ctx.db, dave_id)
+        let dave_m = memberships::Model::default_for_user(&ctx.db, dave_id)
             .await
             .unwrap()
             .unwrap();
@@ -1097,7 +1097,7 @@ async fn the_rotate_list_stays_inside_its_organisation() {
     request::<App, _, _>(|request, ctx| async move {
         let acme = acme(&request, &ctx).await;
         let dave_m =
-            memberships::Model::find_for_user(&ctx.db, user_id(&ctx, "dave@example.com").await)
+            memberships::Model::default_for_user(&ctx.db, user_id(&ctx, "dave@example.com").await)
                 .await
                 .unwrap()
                 .unwrap();

@@ -26,7 +26,7 @@ async fn acme(request: &TestServer, ctx: &AppContext) -> (Cookie, Cookie, Cookie
         let email = format!("{name}@example.com");
         let cookie = join(request, "acme", name, &email).await;
         let user = users::Model::find_by_email(&ctx.db, &email).await.unwrap();
-        let pending = memberships::Model::find_for_user(&ctx.db, user.id)
+        let pending = memberships::Model::default_for_user(&ctx.db, user.id)
             .await
             .unwrap()
             .unwrap();

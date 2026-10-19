@@ -43,7 +43,7 @@ async fn joining_leaves_the_user_pending_on_every_page() {
         let user = users::Model::find_by_email(&ctx.db, "maya@example.com")
             .await
             .unwrap();
-        let membership = memberships::Model::find_for_user(&ctx.db, user.id)
+        let membership = memberships::Model::default_for_user(&ctx.db, user.id)
             .await
             .unwrap()
             .unwrap();
@@ -73,7 +73,7 @@ async fn rejected_members_see_the_declined_page() {
         let bob = users::Model::find_by_email(&ctx.db, "bob@example.com")
             .await
             .unwrap();
-        let mut membership = memberships::Model::find_for_user(&ctx.db, bob.id)
+        let mut membership = memberships::Model::default_for_user(&ctx.db, bob.id)
             .await
             .unwrap()
             .unwrap()

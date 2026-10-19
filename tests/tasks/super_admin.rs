@@ -33,7 +33,7 @@ async fn super_admin_task_is_idempotent() {
     assert!(admin.is_super_admin);
     assert_eq!(admin.name, "raj");
 
-    let membership = memberships::Model::find_for_user(&ctx.db, admin.id)
+    let membership = memberships::Model::default_for_user(&ctx.db, admin.id)
         .await
         .unwrap()
         .unwrap();
