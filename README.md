@@ -108,7 +108,7 @@ cargo test
 | `frontend` | Tailwind styles and TypeScript helpers |
 | `migration` | Database migrations |
 | `tests` | Request, model and view tests, including `tests/requests/tenancy.rs` |
-| `docs` | Deployment guide, design notes and screenshots |
+| `docs` | Docs hub: data model, business flows, deployment guide and design notes. Start at [`docs/README.md`](docs/README.md) |
 
 `SPEC.md` and `TASKS.md` record the plan this was built from. Deployment is covered in [`docs/deploy.md`](docs/deploy.md).
 
