@@ -186,8 +186,9 @@ Rules:
 - A locked account (`users.locked_at` set) cannot sign in until it resets its
   password. Accounts lock after 5 wrong app passwords when unlocking logins;
   see [documents.md](documents.md).
-- Every non-GET request must have an `Origin` equal to `APP_URL`, or it gets
-  403. That is the CSRF guard (`docs/notes/auth.md`).
+- CSRF guard: a non-GET request that carries an `Origin` header must match
+  `APP_URL`, or it gets 403. Requests with no `Origin` pass; browsers always
+  send one on POST (`src/initializers/origin_check.rs`).
 
 Files: `src/controllers/auth.rs:81`, `src/models/auth_attempts.rs:19` (limits).
 

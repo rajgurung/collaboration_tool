@@ -34,7 +34,7 @@ sequenceDiagram
     participant WS2 as other members' sockets
     participant N as notifications::message_sent
     A->>WS: open /chat/ID/ws
-    WS->>WS: CurrentMember, member of conversation, Origin = APP_URL
+    WS->>WS: CurrentMember, member of conversation, Origin (if sent) = APP_URL
     A->>WS: {"body": "hi @sam"}
     WS->>DB: check membership again, insert message (1 to 1,000 chars)
     WS->>Hub: publish Message
