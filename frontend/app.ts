@@ -1489,36 +1489,64 @@ document.body.addEventListener("htmx:xhr:progress", (event) => {
   }
 });
 
-document.body.addEventListener("htmx:afterRequest", (event) => {
-  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
-  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload") || !currentUpload) return;
-  const { file, row } = currentUpload;
-  currentUpload = null;
-  elt.reset();
-  // Refused as a stale tab: the banner is up, and the file waits for "Back".
-  if (xhr.status === 409) {
-    delete row.dataset.sent;
-    row.querySelector<HTMLElement>(".bar > span")!.style.width = "0%";
-    row.querySelector("[data-progress-text]")!.textContent = "Waiting";
-    uploadQueue.unshift({ file, row });
-    return;
-  }
+// A stale-tab refusal: the banner is up, and the file waits at the front of
+// the queue for "Back".
+function requeueUpload({ file, row }: Upload) {
+  delete row.dataset.sent;
+  row.querySelector<HTMLElement>(".bar > span")!.style.width = "0%";
+  row.querySelector("[data-progress-text]")!.textContent = "Waiting";
+  uploadQueue.unshift({ file, row });
+}
+
+function uploadFinished({ file, row }: Upload, successful: boolean, status: number) {
   row.remove();
   // htmx still holds this form's request until the handler returns, so start the next one after.
   setTimeout(startNextUpload);
   // A refusal comes back as its own error row.
-  if (successful || xhr.status === 422) return;
+  if (successful || status === 422) return;
   // Status 0: the connection dropped. Keep the file so Try again can resend it.
-  const dropped = xhr.status === 0;
+  const dropped = status === 0;
   const message = dropped
     ? "Stopped part way. Check your connection."
-    : xhr.status === 413
+    : status === 413
       ? "Too big. The limit is 25 MB. Try saving a smaller copy."
       : "Couldn't add it. Try again, or reload the page.";
   const failed = uploadRow(file.name, message, dropped);
   if (!failed) return;
   if (dropped) failedFiles.set(failed, file);
   document.getElementById("uploads")?.prepend(failed);
+}
+
+// Railway's edge answers the app's early refusal of a large body with a 502,
+// or the connection drops, so the 409 never arrives. Ask whether the tab went
+// stale before calling it a failed upload. The upload stays current
+// meanwhile, so nothing else starts and leaving still warns.
+async function recheckUpload(upload: Upload, status: number) {
+  const probe = await fetch("/orgs/current", { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).catch(() => null);
+  currentUpload = null;
+  if (probe?.status === 409 && probe.headers.get("HX-Redirect")) {
+    requeueUpload(upload);
+    staleRefusal(probe);
+    return;
+  }
+  uploadFinished(upload, false, status);
+}
+
+document.body.addEventListener("htmx:afterRequest", (event) => {
+  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
+  if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload") || !currentUpload) return;
+  const upload = currentUpload;
+  elt.reset();
+  if (xhr.status === 502 || xhr.status === 0) {
+    void recheckUpload(upload, xhr.status);
+    return;
+  }
+  currentUpload = null;
+  if (xhr.status === 409) {
+    requeueUpload(upload);
+    return;
+  }
+  uploadFinished(upload, successful, xhr.status);
 });
 
 // <button data-copy-text="..."> copies its own text, such as a login's username.
