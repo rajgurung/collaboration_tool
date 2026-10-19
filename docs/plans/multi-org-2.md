@@ -350,10 +350,13 @@ PR 5.
   - Before PR 4 nobody has two orgs, so this cannot happen in production.
     **The org check in PR 3 is a hard gate before PR 4 ships:**
     - `hx-headers` on `<body>` with the page's org id, and a submit listener
-      in `frontend/app.ts` that adds a hidden `_org` field to plain forms,
-      multipart included.
-    - `CurrentMember` answers 409 with `HX-Refresh` when the value differs
-      from the resolved org. This applies while acting and to HTMX GETs too.
+      in `frontend/app.ts` that adds a hidden `_org` field to plain
+      urlencoded forms. Multipart forms are HTMX and carry the header; a
+      no-JS multipart form fails closed.
+    - When the value differs from the resolved org, `CurrentMember` sends
+      the tab to `/dashboard?from=<id>`: 409 with `HX-Redirect` for HTMX and
+      `fetch`, 303 for plain forms. Home says what happened. This applies
+      while acting and to HTMX GETs too. See `docs/plans/multi-org-3.md`.
     - Once every form carries it, a missing value fails closed for non-GET
       requests.
   - The Claude consent and personal token forms are pinned in PR 2, so they

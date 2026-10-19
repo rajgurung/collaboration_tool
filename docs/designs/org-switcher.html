@@ -418,6 +418,7 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
       <div class="q"><b>Question for Raj: offer "Back to Acme Studio"?</b>Recommended yes. It is what Priya wanted in this tab. The cost: tab B now becomes the stale one and gets the same notice next time it loads anything.</div>
     </div>
     <div class="ann">
+      <p><b>Superseded after review (19 October).</b> Drafts are not copied into <code>sessionStorage</code>. When a tab holding typed text or an upload is refused, it does not move: the text stays in the form and one banner appears in place, with "Back to Acme Studio" and "Go to Home". See <code>docs/plans/multi-org-3.md</code>, "The typed-text guard".</p>
       <h3>Can the draft be kept? Yes, the text, in this tab.</h3>
       <p>What is feasible in PR 3, all in <code>frontend/app.ts</code> with no server change:</p>
       <ul>
