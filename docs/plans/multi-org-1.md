@@ -82,14 +82,14 @@ already scopes by `member.org.id`.
 2. Migration and `current_org` cookie.
 3. Switcher UI.
 4. Create another organisation.
-5. Join with an existing account.
-6. Org-scoped removal.
+5. Org-scoped removal.
+6. Join with an existing account.
 7. Links and the Claude connector.
 
-**Order (proposed, waiting on Raj).** Reviewers recommend org-scoped removal
-(6) before join with an existing account (5). Today removal bumps the user's
-session version and closes all their live connections. Once someone can be in
-two orgs, removal from one would sign them out of every org.
+**Order (Raj decided on 19 October).** Org-scoped removal (5) comes before
+join with an existing account (6), as the reviewers recommended. Today removal
+bumps the user's session version and closes all their live connections. Once
+someone can be in two orgs, removal from one would sign them out of every org.
 
 **PR 2: dropping `idx-memberships-user_id`.**
 
