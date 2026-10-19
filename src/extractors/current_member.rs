@@ -1,7 +1,10 @@
 //! The single gate for tenant pages. A handler that takes `CurrentMember` only
 //! runs for an approved member of an organisation (or the platform super admin
 //! acting inside one), and `member.org.id` is the only tenant id it should use.
-use axum::{extract::FromRequestParts, http::request::Parts, http::StatusCode};
+use axum::{
+    extract::FromRequestParts,
+    http::{header, request::Parts, HeaderMap, HeaderValue, Method, StatusCode},
+};
 use loco_rs::prelude::*;
 
 use super::{
@@ -9,7 +12,7 @@ use super::{
     session::redirect_response,
 };
 use crate::{
-    initializers::current_org::StaleCurrentOrg,
+    initializers::current_org::{OrgClaim, StaleCurrentOrg},
     models::{
         memberships::{self, role},
         organisations, users,
@@ -23,6 +26,13 @@ pub const ACTING_ORG_COOKIE: &str = "acting_org";
 /// Cookie that says which organisation this browser is working in. Only a
 /// hint: every request checks the membership again.
 pub const CURRENT_ORG_COOKIE: &str = "current_org";
+
+/// The header HTMX and the raw `fetch` calls use to say which organisation
+/// their page was drawn for.
+pub const ORG_HEADER: &str = "x-org-id";
+
+/// The hidden field `app.ts` adds to plain forms, for the same claim.
+pub const ORG_FIELD: &str = "_org";
 
 /// Shown when the Claude Allow page is posted in another organisation.
 pub const SWITCHED_ORG: &str =
@@ -46,6 +56,9 @@ pub struct CurrentMember {
     /// The session's sign-in id. `None` for bearer tokens, and for cookies
     /// issued before sign-ins had ids.
     pub session_id: Option<String>,
+    /// Whether the layout shows the organisation switcher. Only worked out
+    /// for full page loads; `false` on HTMX requests and posts.
+    pub org_menu: bool,
 }
 
 impl CurrentMember {
@@ -65,6 +78,7 @@ impl CurrentMember {
             acting: false,
             via_session: false,
             session_id: None,
+            org_menu: false,
         }
     }
 
@@ -132,6 +146,10 @@ impl CurrentMember {
         let mut base = serde_json::json!({
             "active": active,
             "org": { "name": self.org.name, "slug": self.org.slug },
+            // Its own key, not `org.id`: the join and waiting pages pass an
+            // `org` of their own, and must not carry a claim.
+            "current_org_id": self.org.id,
+            "org_menu": self.org_menu,
             "me": {
                 "id": self.user.id,
                 "username": self.username,
@@ -149,8 +167,8 @@ impl CurrentMember {
     }
 }
 
-/// Picks the organisation in this order: a super admin's `acting_org`, then a
-/// `current_org` the user is active in, then their default membership.
+/// Picks the organisation (see [`PinnedMember`]), then checks the tab's claim
+/// against it (see [`check_claim`]).
 impl FromRequestParts<AppContext> for CurrentMember {
     type Rejection = Response;
 
@@ -158,76 +176,188 @@ impl FromRequestParts<AppContext> for CurrentMember {
         parts: &mut Parts,
         ctx: &AppContext,
     ) -> std::result::Result<Self, Self::Rejection> {
-        let CurrentUser(user) = CurrentUser::from_request_parts(parts, ctx).await?;
-        let session_id = parts.extensions.get::<SessionId>().map(|sid| sid.0.clone());
+        let PinnedMember(member) = PinnedMember::from_request_parts(parts, ctx).await?;
+        check_claim(parts, &member).map_err(|claim| stale_tab_refusal(&parts.headers, claim))?;
+        Ok(member)
+    }
+}
 
+/// [`CurrentMember`] without the claim check. Only for forms that pin their
+/// org with a hidden `org_id` and call `shown_for_this_org` themselves, so
+/// they can answer a stale tab better than the generic refusal: the Claude
+/// Allow page and the personal token form. Every use is listed in the route
+/// walk test (`tests/requests/stale_tab.rs`); a third needs a deliberate
+/// change to that list.
+pub struct PinnedMember(pub CurrentMember);
+
+/// Picks the organisation in this order: a super admin's `acting_org`, then a
+/// `current_org` the user is active in, then their default membership. On a
+/// full page load it also works out whether the layout shows the switcher.
+impl FromRequestParts<AppContext> for PinnedMember {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        ctx: &AppContext,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        let mut member = resolve_org(parts, ctx).await.map_err(|refused| *refused)?;
+        if is_safe(&parts.method) && !is_htmx(&parts.headers) {
+            let (active, pending) = memberships::Model::switcher_counts(&ctx.db, member.user.id)
+                .await
+                .map_err(|e| Error::from(e).into_response())?;
+            // Acting: anything of their own to switch to. Otherwise: a second
+            // org, or a request still waiting.
+            let own = active + pending;
+            member.org_menu = if member.acting { own >= 1 } else { own >= 2 };
+        }
+        Ok(Self(member))
+    }
+}
+
+/// The member, or the page or redirect that stands in for one (boxed, as
+/// it is large).
+async fn resolve_org(
+    parts: &mut Parts,
+    ctx: &AppContext,
+) -> std::result::Result<CurrentMember, Box<Response>> {
+    let CurrentUser(user) = CurrentUser::from_request_parts(parts, ctx).await?;
+    let session_id = parts.extensions.get::<SessionId>().map(|sid| sid.0.clone());
+
+    if user.is_super_admin {
+        if let Some(org) = acting_org(parts, ctx).await {
+            return Ok(CurrentMember {
+                username: user.name.clone(),
+                user,
+                org,
+                role: role::OWNER.to_string(),
+                acting: true,
+                via_session: true,
+                session_id,
+                org_menu: false,
+            });
+        }
+    }
+
+    let chosen = chosen_org(parts, ctx, user.id)
+        .await
+        .map_err(|e| e.into_response())?;
+    if let Some((org, membership)) = chosen {
+        return Ok(CurrentMember {
+            via_session: true,
+            session_id,
+            ..CurrentMember::from_membership(user, org, membership)
+        });
+    }
+
+    let membership = memberships::Model::default_for_user(&ctx.db, user.id)
+        .await
+        .map_err(|e| Error::from(e).into_response())?;
+    let Some(membership) = membership else {
         if user.is_super_admin {
-            if let Some(org) = acting_org(parts, ctx).await {
-                return Ok(Self {
-                    username: user.name.clone(),
-                    user,
-                    org,
-                    role: role::OWNER.to_string(),
-                    acting: true,
-                    via_session: true,
-                    session_id,
-                });
-            }
+            return Err(Box::new(redirect_response(&parts.headers, "/admin")));
         }
-
-        let chosen = chosen_org(parts, ctx, user.id)
-            .await
-            .map_err(|e| e.into_response())?;
-        if let Some((org, membership)) = chosen {
-            return Ok(Self {
-                via_session: true,
-                session_id,
-                ..Self::from_membership(user, org, membership)
-            });
-        }
-
-        let membership = memberships::Model::default_for_user(&ctx.db, user.id)
-            .await
-            .map_err(|e| Error::from(e).into_response())?;
-        let Some(membership) = membership else {
-            if user.is_super_admin {
-                return Err(redirect_response(&parts.headers, "/admin"));
-            }
-            return Err(render(
-                parts,
-                StatusCode::FORBIDDEN,
-                "tenancy/no_org.html",
-                serde_json::json!({}),
-            ));
-        };
-        let org = organisations::Model::find_by_id(&ctx.db, membership.organisation_id)
-            .await
-            .map_err(|e| Error::from(e).into_response())?;
-
-        if membership.is_active() {
-            return Ok(Self {
-                via_session: true,
-                session_id,
-                ..Self::from_membership(user, org, membership)
-            });
-        }
-        let template = if membership.is_pending() {
-            "tenancy/waiting.html"
-        } else if membership.is_removed() {
-            "tenancy/removed.html"
-        } else {
-            "tenancy/declined.html"
-        };
-        Err(render(
+        return Err(Box::new(render(
             parts,
             StatusCode::FORBIDDEN,
-            template,
-            serde_json::json!({
-                "org": { "name": org.name },
-                "username": membership.username,
-            }),
-        ))
+            "tenancy/no_org.html",
+            serde_json::json!({}),
+        )));
+    };
+    let org = organisations::Model::find_by_id(&ctx.db, membership.organisation_id)
+        .await
+        .map_err(|e| Error::from(e).into_response())?;
+
+    if membership.is_active() {
+        return Ok(CurrentMember {
+            via_session: true,
+            session_id,
+            ..CurrentMember::from_membership(user, org, membership)
+        });
     }
+    let template = if membership.is_pending() {
+        "tenancy/waiting.html"
+    } else if membership.is_removed() {
+        "tenancy/removed.html"
+    } else {
+        "tenancy/declined.html"
+    };
+    Err(Box::new(render(
+        parts,
+        StatusCode::FORBIDDEN,
+        template,
+        serde_json::json!({
+            "org": { "name": org.name },
+            "username": membership.username,
+        }),
+    )))
+}
+
+/// Refuses a request from a tab drawn for another organisation, or one that
+/// does not say (fails closed), with the claim it refused. Plain page loads
+/// are never checked, so links from emails, bookmarks and downloads keep
+/// working. A pure comparison: no database call decides it.
+fn check_claim(parts: &Parts, member: &CurrentMember) -> std::result::Result<(), OrgClaim> {
+    let safe = is_safe(&parts.method);
+    if safe && !is_htmx(&parts.headers) {
+        return Ok(());
+    }
+    let claim = parts
+        .extensions
+        .get::<OrgClaim>()
+        .copied()
+        .unwrap_or(OrgClaim::Missing);
+    let allowed = match claim {
+        OrgClaim::Org(id) => id == member.org.id,
+        // Tabs drawn before the claim existed keep polling.
+        OrgClaim::Missing => safe,
+        OrgClaim::Garbage => false,
+    };
+    if allowed {
+        return Ok(());
+    }
+    // Only numbers are logged, as in the switch log.
+    let claimed = match claim {
+        OrgClaim::Org(id) => id.to_string(),
+        OrgClaim::Missing => "missing".to_string(),
+        OrgClaim::Garbage => "garbage".to_string(),
+    };
+    tracing::info!(
+        user_id = member.user.id,
+        claimed_org = %claimed,
+        resolved_org = member.org.id,
+        method = %parts.method,
+        "refused a request from a tab drawn for another organisation"
+    );
+    Err(claim)
+}
+
+/// Sends a stale tab to Home in the org it is really in, which names the org
+/// the tab was showing. Only a parsed `i64` from the request goes into the
+/// address, so it can't be turned into an open redirect.
+fn stale_tab_refusal(headers: &HeaderMap, claim: OrgClaim) -> Response {
+    let to = match claim {
+        OrgClaim::Org(id) => format!("/dashboard?from={id}"),
+        OrgClaim::Missing | OrgClaim::Garbage => "/dashboard?from=".to_string(),
+    };
+    // Raw `fetch` calls send the org header but not HX-Request, and need the
+    // same answer: a redirect they can see instead of one they follow.
+    let mut response = if headers.contains_key("hx-request") || headers.contains_key(ORG_HEADER) {
+        (StatusCode::CONFLICT, [("HX-Redirect", to)]).into_response()
+    } else {
+        (StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response()
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn is_safe(method: &Method) -> bool {
+    matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+}
+
+fn is_htmx(headers: &HeaderMap) -> bool {
+    headers.get("hx-request").is_some_and(|v| v == "true")
 }
 
 /// A 403 with a message for the person.
