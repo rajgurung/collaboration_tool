@@ -1,6 +1,12 @@
-use collab::{app::App, models::_entities::memberships};
-use loco_rs::testing::prelude::*;
-use sea_orm::EntityTrait;
+use collab::{
+    app::App,
+    models::{
+        memberships,
+        organisations::{self, SignupParams},
+    },
+};
+use loco_rs::{app::AppContext, prelude::TenantActiveModelExt, testing::prelude::*};
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
 use serial_test::serial;
 
 macro_rules! configure_insta {
@@ -34,4 +40,59 @@ async fn can_query_memberships() {
         .all(&boot.app_context.db)
         .await
         .expect("`memberships` should be queryable — entity and migration must agree");
+}
+
+async fn sign_up(ctx: &AppContext, org: &str, owner: &str) -> (i64, i64) {
+    let (user, org) = organisations::Model::sign_up(
+        &ctx.db,
+        &SignupParams {
+            organisation_name: org.to_string(),
+            name: owner.to_string(),
+            email: format!("{owner}@example.com"),
+            password: "correct-horse".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    (user.id, org.id)
+}
+
+async fn add_member(
+    ctx: &AppContext,
+    org_id: i64,
+    user_id: i64,
+    username: &str,
+) -> Result<memberships::Model, sea_orm::DbErr> {
+    memberships::ActiveModel {
+        user_id: ActiveValue::Set(user_id),
+        username: ActiveValue::Set(username.to_string()),
+        role: ActiveValue::Set(memberships::role::MEMBER.to_string()),
+        status: ActiveValue::Set(memberships::status::ACTIVE.to_string()),
+        ..Default::default()
+    }
+    .set_tenant(org_id)
+    .unwrap()
+    .insert(&ctx.db)
+    .await
+}
+
+#[tokio::test]
+#[serial]
+async fn one_membership_per_organisation_per_user() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, acme) = sign_up(ctx, "Acme", "alice").await;
+    let (_, beta) = sign_up(ctx, "Beta", "bob").await;
+
+    // A different username, so only the (organisation, user) index can object.
+    let err = add_member(ctx, acme, alice, "alice2").await.unwrap_err();
+    assert!(
+        err.to_string().contains("idx-memberships-org-user"),
+        "{err}"
+    );
+
+    let in_beta = add_member(ctx, beta, alice, "alice").await.unwrap();
+    assert_eq!(in_beta.organisation_id, beta);
+    let all = memberships::Model::for_user(&ctx.db, alice).await.unwrap();
+    assert_eq!(all.len(), 2);
 }

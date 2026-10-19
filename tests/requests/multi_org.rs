@@ -1,6 +1,4 @@
-//! A person with memberships in two organisations. The database still allows
-//! only one membership per user, so each test drops that unique index first.
-//! Every test boots a freshly migrated database, so this does not leak.
+//! A person with memberships in two organisations.
 use collab::{
     app::App,
     models::{
@@ -9,9 +7,7 @@ use collab::{
     },
 };
 use loco_rs::{app::AppContext, prelude::*};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, IntoActiveModel, QueryFilter};
 use serde_json::json;
 use serial_test::serial;
 
@@ -34,10 +30,6 @@ async fn alice_in_two_orgs(
 ) {
     let cookie = sign_up(request, "Acme", "alice", "alice@example.com").await;
     sign_up(request, "Beta", "bob", "bob@example.com").await;
-    ctx.db
-        .execute_unprepared(r#"DROP INDEX "idx-memberships-user_id""#)
-        .await
-        .unwrap();
     let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
         .await
         .unwrap();
