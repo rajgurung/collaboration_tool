@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::{
     data::settings::Settings,
     extractors::{
-        current_member::{CurrentMember, SWITCHED_ORG},
+        current_member::{CurrentMember, SWITCHED_ORG_TOKEN},
         session::redirect_response,
     },
     models::access_tokens::{self, PersonalParams, MAX_PERSONAL},
@@ -107,7 +107,8 @@ async fn create_token(
     }
     if !member.shown_for_this_org(form.org_id.as_deref()) {
         let extra = Extra {
-            error: Some(SWITCHED_ORG),
+            error: Some(SWITCHED_ORG_TOKEN),
+            name: form.name,
             ..Extra::default()
         };
         return page(&ctx, &member, &v, StatusCode::CONFLICT, extra).await;

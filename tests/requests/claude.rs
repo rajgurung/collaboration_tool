@@ -243,7 +243,11 @@ async fn a_token_for_another_org_is_refused() {
                 .await;
             assert_eq!(res.status_code(), 409, "{org_id:?}");
             let page = res.text();
-            assert!(page.contains("You switched organisation while this page was open."));
+            assert!(page.contains(
+                "You switched organisation while this page was open. Check the organisation, then create the token again."
+            ));
+            assert!(!page.contains("Start again from Claude"));
+            assert!(page.contains(r#"value="Laptop""#), "the name is kept");
             assert!(!page.contains("collab_pat_"));
         }
         let res = request

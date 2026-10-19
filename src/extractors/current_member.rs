@@ -24,9 +24,12 @@ pub const ACTING_ORG_COOKIE: &str = "acting_org";
 /// hint: every request checks the membership again.
 pub const CURRENT_ORG_COOKIE: &str = "current_org";
 
-/// Shown when a form pinned to one organisation is posted in another.
+/// Shown when the Claude Allow page is posted in another organisation.
 pub const SWITCHED_ORG: &str =
     "You switched organisation while this page was open. Start again from Claude.";
+
+/// Shown when the personal token form is posted in another organisation.
+pub const SWITCHED_ORG_TOKEN: &str = "You switched organisation while this page was open. Check the organisation, then create the token again.";
 
 #[derive(Clone)]
 pub struct CurrentMember {
