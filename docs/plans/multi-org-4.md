@@ -1,131 +1,184 @@
 # Multi-org 4: create another organisation
 
-Status: Draft · PR 4 of 7 · Owner: Raj · 19 October 2026
+Status: Approved by Raj 19 Oct; reviews folded in (staff: approve with changes, applied; security: approve with changes, applied) · PR 4 of 7 · Owner: Raj · 19 October 2026
 
 ## Summary
 
-PR 3 (#44) added the switcher and the stale-tab check. Nobody can have two
-organisations yet, except by SQL. This PR lets a signed-in person create
-another organisation from the switcher.
+PR 3 (#44, merged as `44db5ab`) added the switcher and the stale-tab check.
+Nobody can have two organisations yet, except by SQL. This PR lets a signed-in
+person create another organisation from the switcher.
 
 - `GET /orgs/new` shows the form. `POST /orgs` creates the organisation with
   the person as its active owner, under the username they choose for it.
-- It uses signup's own code to set the organisation up: the slug, `#general`
-  with the owner in it, and the "Company" and "Logins" folders. One code path.
-- The form asks for the organisation name and your username there. Both are
-  checked exactly as on `/signup`.
-- After creating, the browser switches into the new organisation, the way
-  `POST /orgs/{id}/switch` does: `current_org` is set, `acting_org` cleared,
-  any logins unlock ended, and live connections closed. It lands on Home with
-  a toast, and the "Getting started" checklist shows for the new org.
-- The switcher shows for everyone now, even with one organisation, and ends
-  with a "New organisation" row.
-- Limits: at most 10 organisations created per person, and 3 per 24 hours.
-  Both are counted from `organisations.created_by_id`.
+- It uses signup's code to set the organisation up: the slug, `#general` with
+  the owner in it, and the "Company" and "Logins" folders. One code path.
+- Two fields, the organisation name and your username there, checked as on
+  `/signup`.
+- After creating, the browser switches into the new organisation the way
+  `POST /orgs/{id}/switch` does. It lands on Home with "Lumen Café is ready.
+  You're the owner." The "Getting started" checklist shows. The welcome
+  pop-up does not.
+- The switcher shows for every member who is not acting, even with one
+  organisation, and ends with a "New organisation" row.
+- Limits: 10 organisations created per person, ever, and 3 per 24 hours.
+- An account lock now revokes the person's Claude tokens in every org.
 
 No migration. This is the first PR that gives anyone a second membership in
-production, so the rollback window for PR 2's index migration closes when it
-ships (see "Gates").
+production, so PR 2 and PR 3 become forward-only once it ships (see gate 5).
 
-The design is being drawn in parallel at `docs/designs/create-org.html`. The
-plan covers what the server and `app.ts` must do. Layout, wording and the
-choice of page, dialog or sheet are the mockup's. Its sections are named here
-by topic (entry row, form, errors, after creating, acting). Swap in the
-section numbers once it lands.
+The design is `docs/designs/create-org.html` (`d835640`), approved by Raj on
+19 October with every recommendation. This plan covers what the server and
+`app.ts` must do. Layout and copy are the mockup's. Section numbers below are
+the mockup's.
+
+**One deviation from the mockup.** Its question 10 recommends running the
+create as `CurrentUser`, exempt from the stale-tab check. Both reviewers
+recommend `CurrentMember` instead, and Raj agreed. See "Who may create".
 
 ## Who may create
 
-**Any active member, through `CurrentMember`.** That includes a super admin
-while acting.
+**Any active member, through `CurrentMember` on both `GET /orgs/new` and `POST
+/orgs`. Both stay inside the stale-tab check, and neither is added to
+`EXEMPT`.**
 
-- `CurrentMember` on both routes, not `CurrentUser`. The form lives in the app
-  layout, and a 422 has to redraw it there, so it needs the member. It also
-  keeps `POST /orgs` inside the stale-tab check. A stale tab is refused and
-  sent Home (or keeps its typed text behind the banner). That is safe, if
-  slightly annoying, and it needs no new entry in the exempt list.
-- Someone with no active membership (pending, declined, removed) sees their
-  waiting or removed page, as today, so they can't create. Offering "create
-  your own" on those pages is later.
-- **Super admin while acting** (decision 1, recommended: allow). Creating is
-  about their own account, not the org they are acting in. Like a switch, it
-  clears `acting_org`, so acting ends and they land in their new org as its
-  owner. The form says acting will end (mockup, acting section). The
-  alternative, refusing while acting, needs its own message and buys nothing:
-  they can leave and create a moment later.
+Why `CurrentMember`, not the mockup's `CurrentUser`:
+
+- It keeps creation to active members. Someone with no active membership
+  (pending, declined, removed) sees their waiting or removed page, as today.
+- It adds no new exemption to the stale-tab check. Every exemption is a route
+  the walk test has to explain.
+- The claim check is a third CSRF layer, after `SameSite=Lax` and
+  `origin_check`.
+- A 422 redraws the form inside the app layout, which needs the member.
+
+The cost: a stale tab's create is refused and sent Home, or keeps its typed
+text behind the banner. Nothing is lost and nothing is misfiled.
+
+**The no-JS form carries its claim.** The form renders `<input type="hidden"
+name="_org" value="{{ current_org_id }}">` on the server. `app.ts`'s submit
+listener overwrites it, as it does for other forms. Without JavaScript the
+page form at `/orgs/new` still passes the check, instead of failing closed
+like other plain forms. A test pins it.
+
+**Super admin while acting** (mockup section 4):
+
+- No "New organisation" row in the menu, the sheet or More while acting.
+  That menu is about where they are acting and the way back. A create row
+  there could read as "create inside Acme".
+- `org_menu` is true for every member who is not acting. While acting it
+  stays as in PR 3: `switcher_counts` runs only then, and the switcher shows
+  only with a membership of their own.
+- `/orgs/new` typed by hand works. The form first shows the acting note:
+  "You're acting in Acme Studio. Creating this ends acting. The new
+  organisation is yours, with you as owner."
+- Creating clears `acting_org`, as a switch does, and lands them in their own
+  new org as owner.
+- `create_for_user` takes only `member.user` and the params. It never reads
+  `member.org`, `member.role` or `member.username`. The one thing taken from
+  the current org is the time zone, and never while acting (see "What happens
+  on create"). The username prefill on the GET is the only other use of
+  `member`.
 - A super admin with no membership at all still goes to `/admin` from any
-  tenant page. They can only create while acting.
+  tenant page. They can only reach the form while acting.
 
 ## Fields and validation
 
-The same rules as signup, so nobody meets two sets of messages.
+The same rules and messages as signup (mockup section 2, "Validation").
 
 | Field | Form name | Rule | Message |
 |---|---|---|---|
-| Organisation name | `organisation_name` | 2 to 80 characters, trimmed | "Use 2 to 80 characters." |
-| Your username there | `name` | `users::USERNAME_RE` and `users::not_reserved` | "Start with a letter and use 3 to 30 letters or numbers." and the `everyone` message |
+| Organisation name | `organisation_name` | 2 to 80 characters after trimming | "Use 2 to 80 characters." |
+| Your username there | `name` | `users::USERNAME_RE` and `users::not_reserved` | "Start with a letter and use 3 to 30 letters or numbers." and "That name is reserved." |
 
 - `name` matches signup and join, so `field_errors` keys and the templates'
   error slots work the same way.
-- The username is checked against `idx-memberships-org-username`
-  (`organisation_id, lower(username)`) by nature: the new org has only its
-  owner, so it is always free. No extra query.
-- The form starts with the username you use in the current org
-  (`member.username`, which is `user.name` while acting). The mockup decides
-  whether to prefill.
-- **Duplicate names** (decision 3, recommended: refuse). If one of your active
-  organisations already has this name (case-insensitive, trimmed), the
-  create is refused with a field error on `organisation_name`. The switcher
-  shows only initial, name and role, so two "Acme" rows can't be told apart.
-  This also stops a double-click from making two orgs. Other people's orgs
-  may share the name; their slugs differ, as today.
+- The username is always free in the new org, since it has only its owner.
+  `idx-memberships-org-username` still backs that. No extra query.
+- The form starts with the username in the current org (`member.username`;
+  `user.name` while acting), with the hint "How people in this organisation
+  see you."
 
-The params get their own struct, `organisations::NewOrgParams
-{ organisation_name, name }`, with the same `#[validate]` attributes as
-`SignupParams`. The messages move into shared constants so they can't drift.
-A test posts the same bad input to both forms and compares the errors.
-Nesting `NewOrgParams` inside `SignupParams` was considered. Nested validator
-errors come back under prefixed keys (`org.organisation_name`), which would
-need changes in `field_errors`. Not worth it for two fields.
+**The params.** A new `organisations::NewOrgParams { organisation_name, name
+}`. Its `#[validate]` attributes copy `SignupParams`, with the messages
+written out as literals in each struct, as `users.rs` does for
+`RegisterParams`. No shared constants: the validator derive may need literals
+in `message = ...`, and two short copies are easier to read.
+`signup_and_create_give_the_same_errors` keeps the copies honest.
+
+**A spaces-only name.** Today `length(min = 2, max = 80)` counts untrimmed
+characters, so "   " passes validation and is saved as an empty name. Replace
+it with a custom validator, `organisations::trimmed_name_length`, which checks
+2 to 80 characters of `name.trim()` with the same message. Use it in both
+`NewOrgParams` and `SignupParams`. This fixes signup too. Tests cover both.
+
+**Duplicate names** (mockup section 2):
+
+- Refused when the name matches one of your active organisations. Names stay
+  free across the platform; a stranger's "Lumen Café" doesn't count.
+- Matching: trim, collapse runs of whitespace to one space, then Unicode
+  lowercase (`str::to_lowercase`). Done in Rust, after the user-row lock,
+  over `memberships::Model::for_user_with_orgs`, keeping the active rows.
+- The message uses the stored name: "You already have an organisation called
+  Acme Studio. Pick a name you can tell apart."
+- With the lock, this also stops a double submit that gets past the locked
+  button from making a second org.
 
 ## Abuse limits
 
-**The cap and the rate limit come from the `organisations` table, not
+**The cap and the rate limit are counted from `organisations`, not
 `auth_attempts`.**
 
-- Every creation is already a row with `created_by_id` and `created_at`. So
-  "how many has this person made" and "how many in the last day" are two
-  counts on data that exists. No new table, no new row kind.
-- `auth_attempts` is for signed-out flows (sign-in, forgot, app-password
-  reauth). It is keyed by email hash and IP, and rows older than 24 hours are
-  deleted on every write (`KEEP_HOURS`). It could not hold a lifetime cap.
-- **Numbers** (decision 2, recommended): `MAX_ORGS_CREATED = 10` per person,
-  counting the org they signed up with. `ORGS_PER_DAY = 3` in any 24 hours.
-  Constants in `src/models/organisations.rs`. The super admin gets the same
-  limits.
-- **Races.** Inside the create transaction, lock the person's `users` row
-  first (`SELECT ... FOR UPDATE`, Sea-ORM `lock_exclusive()`). Two creates at
-  once from one person then run one after the other, and both counts and the
-  duplicate-name check see the earlier one.
-- **Refusal.** A 422 that redraws the form with the message on
-  `organisation_name` (copy from the mockup's errors section). Not a 429:
-  `base.html`'s `responseHandling` only swaps 422s, so a 429 would show
-  nothing in an HTMX form.
-- **No per-IP limit.** The person is signed in, and `/signup` itself has no
-  rate limit today. Anyone can already make accounts, and with them orgs,
-  without a limit. The cap stops one account piling up orgs. A limit on
-  `/signup` is a separate change (see "Out of scope").
-- `created_by_id` is set to `NULL` if the user is deleted, which frees their
-  count. That is fine: the account is gone.
+- Every creation is already a row with `created_by_id` and `created_at`.
+  Both limits are counts on rows that already exist.
+- `auth_attempts` is for signed-out flows (sign-in, forgot, reauth). It is
+  keyed by email hash and IP, and rows older than 24 hours are deleted on
+  every write (`KEEP_HOURS`), so it could not hold a lifetime cap.
+- `MAX_ORGS_CREATED = 10` per person, counting the signup org.
+  `ORGS_PER_DAY = 3` in any 24 hours. Constants in
+  `src/models/organisations.rs`. The super admin gets the same limits.
+- Counting by `created_by_id` means the cap can't be dodged by leaving an
+  org. It is set to `NULL` if the user is deleted, which frees the count. The
+  account is gone by then.
+
+**The lock.** The first statement in the create transaction locks the
+person's `users` row: `users::Entity::find_by_id(id).lock(LockType::NoKeyUpdate)`
+(`SELECT ... FOR NO KEY UPDATE`; `LockType::NoKeyUpdate` is in sea-query
+1.0.2). `FOR NO KEY UPDATE`, not `FOR UPDATE`, because it doesn't conflict
+with the `FOR KEY SHARE` locks other transactions take when they insert rows
+pointing at this user (messages, notes and so on). Then, as separate
+statements: the all-time count, the 24-hour count and the duplicate check.
+Two creates at once from one person run one after the other, and the second
+sees the first.
+
+**At the cap** (mockup section 4, "A limit"):
+
+- `GET /orgs/new` shows the at-cap state in place of the fields: "You've set
+  up 10 organisations" and "That's the most one account can set up for now.
+  You can keep using the ones you have." No contact is named. The row still
+  shows in the switcher.
+- A `POST` at the cap (a form opened earlier, or a typed request) is a 422
+  with the same state.
+
+**The daily limit** is only checked on `POST`: a 422 with the field error
+"You've set up 3 organisations today. Try again tomorrow." on
+`organisation_name`.
+
+Both are 422s, not 429s. `base.html`'s `responseHandling` only swaps 422s,
+so a 429 would show nothing in the dialog.
+
+**No per-IP limit.** The person is signed in, and `/signup` itself has no
+rate limit today, so anyone can already make accounts and orgs without one.
+The cap stops one account piling up orgs. A `/signup` limit is deferred.
 
 **Emails and notifications on creation: none.**
 
-- Signup sends nothing today: no welcome email and no verification email
+- Signup sends nothing today: no welcome and no verification email
   (`signup::create` and `organisations::Model::sign_up` call no mailer).
   Creating an org sends nothing either.
-- A new org has one member, so there is nobody to mention or notify.
+- A new org has one member, so nobody can be mentioned or notified.
   `SecurityMailer::to_owners` would only reach the creator.
-- Join requests send no email to owners (`docs/flows/accounts.md`), so a new
-  org's join link can't be used to email its owner.
+- Join requests email nobody, so a new org's join link can't be used to
+  email its owner.
 - So there is no per-org email or notification spam path in this PR. The cap
   bounds how many join links and `#general` channels one account can make.
 
@@ -134,283 +187,344 @@ need changes in `field_errors`. Not worth it for two fields.
 `POST /orgs`, in `src/controllers/orgs.rs`:
 
 1. `member: CurrentMember` (the claim check runs here), `Form<NewOrgParams>`.
-2. `organisations::Model::create_for_user(&ctx.db, &member.user, &params)`:
+2. `organisations::Model::create_for_user(&ctx.db, &member.user, &params,
+   timezone)`. `timezone` is `Some(&member.org.timezone)` when not acting,
+   and `None` while acting.
    1. `ValidatorTrait::validate(params)`.
-   2. Begin a transaction. Lock the user row.
-   3. Count orgs with `created_by_id = user.id`, all time and in the last 24
-      hours. Over either limit: a field error.
-   4. Duplicate-name check over the person's active memberships' orgs
-      (decision 3).
+   2. Begin a transaction. Lock the user row (above), as the first statement.
+   3. The all-time count, then the 24-hour count. Over either: the at-cap
+      state or the daily field error.
+   4. The duplicate-name check.
    5. `create_with_owner(&txn, &params.organisation_name, user,
       params.name.trim())`.
-   6. `memberships::Model::mark_welcomed(&txn, org.id, user.id)` (decision 4).
-   7. Commit.
-3. On a field error: 422, the form redrawn with values and errors. Over HTMX,
-   the form fragment; otherwise the full page. The same split as `GET /orgs`.
-4. On success, the same steps as `switch`:
-   - `users::Model::end_unlock(&ctx.db, user.id)`;
-   - `redirect_response(&headers, "/dashboard?created=1")`, which gives
-     `HX-Redirect` over HTMX and a 303 otherwise;
-   - `current_org_cookie(&ctx, org.id)` and `cleared_acting_org_cookie`;
-   - `users::Model::close_live_connections(&ctx, user.id)`;
-   - an info log line: `user_id`, `org_id`, "created organisation". Numbers
-     only.
-5. The target is a constant. No `next`.
+   6. If `timezone` is set, update the new org's `timezone` to it. Otherwise
+      it keeps the column default, `Europe/London`, as signup does.
+   7. `memberships::Model::mark_welcomed(&txn, org.id, user.id)`.
+   8. Commit.
+3. On a field error or the cap: 422, the form redrawn with values and errors.
+   Over HTMX, the fragment `orgs/_new_form.html`; otherwise the page
+   `orgs/new.html`.
+4. On success, the shared private function `enter_org(ctx, headers, user,
+   org_id, target)`, which `switch` also calls:
+   - `users::Model::end_unlock`;
+   - `redirect_response(&headers, target)`: `HX-Redirect` over HTMX, a 303
+     otherwise;
+   - `current_org_cookie(&ctx, org_id)` and `cleared_acting_org_cookie`;
+   - `users::Model::close_live_connections`.
+   The target is the constant `/dashboard?created=1`. There is no `next`.
+5. An info log line, numbers only: `user_id`, `org_id`, `from_org` (the
+   request's `current_org` cookie, logged only if it parses as an `i64`, as
+   in `switch`) and, when acting, `acting_org` (`member.org.id`).
+   "created organisation".
 
 `create_with_owner` gains a `username: &str` and passes it to
 `memberships::Model::create_owner`, which stops copying `user.name`. Signup and
-the super admin task pass `&user.name`, so they behave exactly as today. This
-is the one code path. Anything signup sets up later is set up here too.
+the super admin task pass `&user.name`, so they behave exactly as today.
+Signup keeps the `Europe/London` default. This is the one code path:
+anything signup sets up later is set up here too.
 
-The new org gets the column default time zone, `Europe/London`, as signup
-does. The owner changes it in settings.
+**Why copy the time zone** (mockup section 2): most people start a second org
+in the same place. Owners can change it on Members. Not while acting, because
+the acting org belongs to someone else and its settings shouldn't carry into
+the admin's own org.
 
-### Home after creating
+### Errors in the dialog (mockup section 4, "Failures")
 
-- `dashboard::HomeQuery` gets `created: Option<String>`. The toast is built
-  from `member.org.name`, the org this request resolved, never from the URL.
-  The same pattern as `switched`. Copy from the mockup, for example
-  "Northwind Bakery is ready".
+- 422: the fragment swaps in, keeps what was typed, focuses the first field
+  with a problem and marks it `aria-invalid`.
+- 5xx: `app.ts`, on `htmx:responseError` from the form, shows the mockup's red
+  alert at the top of the form: "Something went wrong, and nothing was
+  created. Try again." The fields stay filled. The transaction means nothing
+  was saved.
+- No connection: on `htmx:sendError`, the toast "Couldn't create the
+  organisation. Check your connection and try again." The form stays open
+  and filled.
+- While the request runs, the button reads "Creating…" with a spinner and
+  both fields lock (`hx-disabled-elt`). A double tap sends once.
+
+### Home after creating (mockup section 3)
+
+- `dashboard::HomeQuery` gets `created: Option<String>`. The toast "Lumen
+  Café is ready. You're the owner." is built from `member.org.name`, the org
+  this request resolved, never from the URL. Tera escapes it.
 - `Cache-Control: no-store` when `created` is set, as for `switched` and
   `from`.
-- `app.ts` drops `?created=` with `history.replaceState`, next to `switched`
-  (`frontend/app.ts` ~line 208).
+- `app.ts` adds `created` to the `replaceState` block next to `switched` and
+  `from` (`frontend/app.ts` ~line 208).
 - `/dashboard?created=1` typed by hand names your current org and changes
   nothing.
 - **Checklist.** Shows by itself: the new membership has `guide_dismissed_at`
-  null, and the owner gets the "sets up team" steps (invite, project, task,
-  hello, tag). Nothing to add.
-- **Welcome pop-up** (decision 4, recommended: skip it). It also keys off the
-  new membership (`welcomed_at` null), so without a change it would show
-  again. The person has already seen the tour in their first org, and it
-  would sit on top of the toast. Step 2.6 marks it seen. Signup and join keep
-  it.
+  null, and the owner gets the five team-setup steps.
+- **Welcome pop-up.** Skipped, because step 2.7 sets `welcomed_at`. The
+  person already uses the app, and the tour would sit on top of the toast.
+  Signup and join keep it.
 
-## The switcher
+## The switcher (mockup section 1)
 
-- **Shows for everyone.** `PinnedMember` stops calling
-  `memberships::Model::switcher_counts`, which saves one query per full page
-  load. `CurrentMember.org_menu` is always true for a resolved member. The
-  `org_menu` key and the template branches stay, because `/admin` renders
-  `app.html` without it and keeps its plain "Platform admin" name.
-- Remove `switcher_counts` and its model test. Nothing else uses it.
-- **"New organisation" row** (mockup, entry row section): after the list in
-  `orgs/_list.html`, under a separator. A link to `/orgs/new`, outside the
-  switch `<form>`, with `role="menuitem"`. `orgItems` in `app.ts` already
-  picks up every `[role^=menuitem]`, so arrow keys reach it. Check the letter
-  jump: "N" now also lands on it.
-- The same row appears in the phone sheet and on the no-JS `/orgs` page,
-  since they share `_list.html`.
-- More's "Organisation" row and Home's phone header button now show for
-  everyone.
-- While acting with no membership of your own, the list has "Acting in",
-  an empty "Your organisations" and the new row. The mockup decides how the
-  empty part looks.
+- **Shows for every member who is not acting.** In `PinnedMember`,
+  `org_menu = true` when not acting, with no query. While acting it keeps
+  PR 3's rule, and `switcher_counts` runs only then. That saves one query per
+  full page load for everyone else.
+- The `org_menu` key and the template branches stay. `/admin` renders
+  `app.html` without it and keeps its plain "Platform admin" name. An acting
+  admin with no membership keeps the plain name too.
+- **"New organisation" row**: after the list and any pending rows, under a
+  hairline, outside the scrolling part, so it stays in view with nine orgs. A
+  dashed square with a plus. A link to `/orgs/new`, outside the switch
+  `<form>`, with `role="menuitem"` (not `menuitemradio`). `orgItems` in
+  `app.ts` already picks up `[role^=menuitem]`, so arrow keys and the letter
+  "N" reach it.
+- Desktop: the row opens the form in the existing `dialog.sheet`, centred at
+  560px. Focus starts in "Organisation name". Esc and Cancel close it and put
+  focus back on the switcher button.
+- Phone: tapping the row swaps the sheet's content to the form, with a back
+  arrow to the list. No second sheet. The button sits in
+  `.sheet-sticky-foot` above the keyboard.
+- More: the "Organisation" section shows for everyone. With one org, the
+  first row names your org and role, with no "Switch". The second row is
+  "New organisation". With two or more, "Switch" comes back.
+- The row is left out while acting (`{% if not me.acting %}`), in
+  `_list.html` and on More.
 
 ### `GET /orgs/new`
 
-- `CurrentMember`. Over HTMX, the form fragment `orgs/_new_form.html`, if the
-  mockup opens it in a dialog or sheet. Otherwise the full page
-  `orgs/new.html`, which also works without JavaScript.
+- `CurrentMember`. Over HTMX, the fragment `orgs/_new_form.html` for the
+  dialog or sheet. Otherwise the full page `orgs/new.html`: the no-JS
+  fallback and the target of a typed link.
 - `Cache-Control: no-store` and `Vary: HX-Request`, like `GET /orgs`.
-- The form posts with `hx-post="/orgs"` (header claim) and has
-  `method="post" action="/orgs"` as the fallback (the submit listener adds
-  `_org`). The submit button uses `hx-disabled-elt` so a double click sends
-  once.
+- Shows the at-cap state instead of the fields when the person is at 10.
+  This is a plain count with no lock. The `POST` checks again.
+- Shows the acting note while acting.
+- The form has `hx-post="/orgs"` and `method="post" action="/orgs"`, with the
+  server-rendered `_org`.
 
 ## What changes, file by file
 
 | File | Change |
 |---|---|
-| `src/models/organisations.rs` | `NewOrgParams`, shared message constants, `MAX_ORGS_CREATED`, `ORGS_PER_DAY`, `create_for_user`. `create_with_owner` takes `username`. `sign_up` passes `&user.name`. |
-| `src/models/memberships.rs` | `create_owner` takes `username`. Remove `switcher_counts`. |
-| `src/tasks/super_admin.rs` | Pass `&user.name` to `create_with_owner`. No other change. |
-| `src/controllers/orgs.rs` | `GET /orgs/new`, `POST /orgs`. Share the redirect-and-cookies steps with `switch` in one private function, so the two can't drift. |
+| `src/models/organisations.rs` | `NewOrgParams`, `trimmed_name_length`, `MAX_ORGS_CREATED`, `ORGS_PER_DAY`, `create_for_user`, a `created_count` helper for the GET. `SignupParams` uses `trimmed_name_length`. `create_with_owner` takes `username`; `sign_up` passes `&user.name`. |
+| `src/models/memberships.rs` | `create_owner` takes `username`. `switcher_counts` stays (used while acting). |
+| `src/models/access_tokens.rs` | `revoke_all_for_user(db, user_id)`: revokes every token and unused OAuth code the person has, in every org. |
+| `src/models/users.rs` | `lock_account` calls `revoke_all_for_user` instead of `revoke_all_for`. Its doc comment says tokens in every org are revoked; who is told is unchanged. |
+| `src/tasks/super_admin.rs` | Passes `&user.name` to `create_with_owner`. |
+| `src/controllers/orgs.rs` | `GET /orgs/new`, `POST /orgs`, and `enter_org`, shared with `switch`. |
 | `src/controllers/dashboard.rs` | `created` in `HomeQuery`, the toast, `no-store`. |
-| `src/extractors/current_member.rs` | `org_menu` always true. Drop the `switcher_counts` call and update the doc comments. |
-| `src/models/users.rs`, `src/models/access_tokens.rs` | Only if decision 5 is yes: `lock_account` revokes the user's tokens in every org (`revoke_all_for_user`). |
-| `assets/views/orgs/_list.html`, `orgs/index.html` | The "New organisation" row. |
-| `assets/views/orgs/new.html`, `orgs/_new_form.html` (new) | The form, per the mockup. |
-| `assets/views/layouts/app.html`, `dashboard/index.html`, `more/index.html` | No logic change. The `org_menu` branches now always take the switcher side. Check the mockup for copy changes. |
-| `frontend/app.ts` | `?created=` in the `replaceState` list. The dialog or sheet for the form, if the mockup has one. |
-| `frontend/styles/app.css` | Styles from the mockup. |
+| `src/extractors/current_member.rs` | `org_menu` true when not acting; `switcher_counts` only while acting. Doc comments. |
+| `assets/views/orgs/_list.html`, `orgs/index.html` | The "New organisation" row, not while acting. |
+| `assets/views/orgs/new.html`, `orgs/_new_form.html` (new) | The form: fields, hints, the two plain facts, the acting note, the at-cap state, the hidden `_org`, the error alert slot. |
+| `assets/views/more/index.html` | The Organisation section for everyone, the one-org row without "Switch", and "New organisation" (not while acting). |
+| `assets/views/layouts/app.html`, `dashboard/index.html` | No logic change. The `org_menu` branches now take the switcher side for members who are not acting. |
+| `frontend/app.ts` | Open the form in the dialog or sheet, the sheet's back arrow, focus handling, the 5xx alert, the offline toast, `?created=` in `replaceState`. Uploads: on a 502 or network error, probe `/orgs/current` and run `staleRefusal` on a 409 before showing the upload error (gate 4). |
+| `frontend/styles/app.css` | Styles from the mockup: the dashed row, the at-cap box, the alert. |
 | `tests/...` | See "Tests". |
-| `docs/flows/accounts.md` | New "Create another organisation" section with a sequence diagram. "Sign up" points to it for the shared steps. "The switcher" says it always shows. |
-| `docs/flows/super-admin.md` | Creating while acting ends acting. |
-| `docs/architecture/erd.md` | `organisations.created_by_id` is used for the cap. Remove "Nothing creates a second membership until ..." (around line 173). |
-| `docs/plans/multi-org-1.md`, `-2.md`, `-3.md` | No change. Their "Later PRs" sections already describe PR 4. |
+| `docs/flows/accounts.md` | A new "Create another organisation" section with a sequence diagram. "Sign up" points to it for the shared steps and notes the trimmed-length fix. "The switcher" says it shows for everyone. Sign-in starts in the oldest org. |
+| `docs/flows/super-admin.md` | No create row while acting; a typed link works and ends acting. |
+| `docs/flows/documents.md` | An account lock revokes Claude tokens in every org. |
+| `docs/architecture/erd.md` | `organisations.created_by_id` backs the cap. Remove "Nothing creates a second membership until ..." (around line 173). |
 
 No new crate. No migration. `organisations.created_by_id` has no index. The
-table is tiny and the counts scan it once per create. Add an index if it
-grows.
+table is tiny and the counts scan it once per create. Add one if it grows.
 
 ## Gates
 
-Each must hold before PR 4 merges.
+**Production checks need a signed-in session.** The production steps in
+gates 1, 3 and 4 are run by Raj, or through Raj's browser. No agent holds
+production session cookies. Never paste a session cookie into the PR, logs
+or screenshots.
 
-**1. The stale-tab check is live (PR 3).** Not yet. #44 is approved and open.
-It must be merged and deployed, and the deploy checked, before this PR
-merges. Rebase this branch onto `main` after #44 merges (it is based on the
-PR 3 branch today).
+**1. The stale-tab check is live (PR 3).** Met. #44 merged as `44db5ab` and
+deployed (Railway: SUCCESS). Production is served at collab.zen-scale.io;
+collab.rajgurung.me 308-redirects there. This branch is rebased onto
+`44db5ab`.
 
-**2. The unlock is bound to an org (PR 2).** Met in code. #43 merged on 19
-October (`main` at `5d6612f`, CI green). `users::Model::secrets_unlocked`
-requires `secrets_unlocked_org_id == Some(org_id)`
-(`src/models/users.rs:411`). The Railway deploy of `5d6612f` is unverified
-here. Check the Railway dashboard before merging.
+Checked on production on 19 October, in Raj's signed-in Chrome:
+
+- A `POST /tasks` with `X-Org-Id: 999999` got a 409, `HX-Redirect:
+  /dashboard?from=999999` and `Cache-Control: no-store`.
+- The `GET /orgs/current` probe gives a 409 with a wrong id and a 204 with
+  the right one, both `no-store`.
+
+**Pass.**
+
+**2. The unlock is bound to an org (PR 2).** Met. #43 merged on 19 October.
+`users::Model::secrets_unlocked` requires `secrets_unlocked_org_id ==
+Some(org_id)` (`src/models/users.rs:411`). The migration is applied:
+production boots with `auto_migrate` on (`config/production.yaml:113`,
+`DB_AUTO_MIGRATE` defaults to true), which runs pending migrations at boot
+and stops the app starting if one fails. A running app on `44db5ab` proves it
+ran.
 
 **3. Safari and Firefox store the cookie from the banner's `redirect:
-"manual"` switch.** Not done. #44 lists it under "Not verified". Raj and the
-reviewers require a hand check before merge.
+"manual"` switch.** Required before merge.
 
-How:
-
-- Playwright 1.55.0 matches the browsers already installed in
-  `~/Library/Caches/ms-playwright` (`webkit-2203`, `firefox-1490`). Run it
-  with `npx -y playwright@1.55.0`. Do not add it to the repo. The script goes
-  in the scratchpad.
-- Local app, seeded: Alice in Acme Studio and Northwind Bakery. With this PR
-  that can be done through the real form instead of SQL.
-- For each of `webkit` and `firefox`, headed so it can be watched:
-  1. Sign in. Open page A on Acme `/tasks` and open the new task dialog.
-     Type a title.
-  2. In page B (same context), switch to Northwind from the menu.
-  3. In page A, trigger a request (`htmx.ajax("GET", "/orgs/current")` from
-     `page.evaluate`, or wait for the 60-second poll). Expect one banner and
-     the title still typed.
+- Locally, Playwright 1.55.0, which matches the browsers already in
+  `~/Library/Caches/ms-playwright` (`webkit-2203`, `firefox-1490`). Run with
+  `npx -y playwright@1.55.0`. Not added to the repo; the script lives in the
+  scratchpad.
+- Local app, seeded: Alice in Acme Studio and Northwind Bakery, the second
+  made through the new form.
+- For each of `webkit` and `firefox`, headed:
+  1. Sign in. Page A on Acme `/tasks`; open the new task dialog and type a
+     title.
+  2. Page B in the same context: switch to Northwind from the menu.
+  3. Page A: `htmx.ajax("GET", "/orgs/current")` through `page.evaluate`, or
+     wait for the 60-second poll. Expect one banner, with the title still
+     typed.
   4. Click "Back to Acme Studio". Expect the banner to go.
-  5. Read `context.cookies()`: `current_org` must equal Acme's id.
-  6. Save the task. Expect it in Acme and not in Northwind (open `/tasks` in
-     each org).
-- Then by hand in real Safari (installed): the same steps, and check step 5
-  in Web Inspector's Storage tab.
-- Real Firefox is not installed. Playwright's Firefox is patched but close.
-  Decision 7: accept it, or install Firefox for a hand run.
-- Record the results in the PR under "Checks", with a screenshot of each
-  browser's banner and the cookie.
+  5. `context.cookies()`: `current_org` equals Acme's id.
+  6. Save the task. Expect the save to be accepted (no refusal, no banner),
+     and the task in Acme and not in Northwind (open `/tasks` in each org).
+- Then by hand in real Safari (installed, required): the same six steps,
+  reading step 5 in Web Inspector's Storage tab.
+- Real Firefox is not installed. Playwright's Firefox build counts as the
+  Firefox check.
+- Right after merge, by Raj: one real-Safari pass of the same steps on
+  production, with his own two orgs. Recorded in the PR.
+- Record each result in the PR under "Checks", with a screenshot of the
+  banner and the cookie panel (cookie values hidden).
 
-If a browser does not store the cookie, the banner's Back leaves the tab
-stale. The next save is refused, not misfiled, so it fails safe. The fix
-would be a full navigation for Back in that browser. That would block the
-merge until decided.
+If a browser doesn't store the cookie, the next save is refused, not
+misfiled. It fails safe, but it blocks the merge until decided.
 
-**4. A 20 MB refusal on the deployed app.** Not done. It needs #44 deployed.
-It can't use a real stale tab in production before this PR, because nobody
-there has two orgs. Two checks instead:
+**4. A 20 MB refusal on the deployed app.** Safe, with one gap that this PR
+closes. Checked on production on 19 October, in Raj's signed-in Chrome, with
+wrong-org multipart uploads to `/documents/folders/1/files`:
 
-- **The probe** (browser): on collab.rajgurung.me, in devtools, set
-  `document.body.dataset.orgId` and the `hx-headers` attribute to a wrong
-  number, then drop a ~20 MB file. Expect the probe to refuse and send no
-  bytes (Network tab).
-- **A mid-body refusal** (curl): with your session cookie,
-  `curl -i -X POST -H 'HX-Request: true' -H 'X-Org-Id: 1' -F file=@20mb.bin
-  https://collab.rajgurung.me/documents/folders/<id>/files`, where `1` is not
-  your org. Expect a 409 with `HX-Redirect`. A connection reset instead means
-  the Railway edge drops it. That is acceptable (the browser shows "Stopped
-  part way" and nothing is stored), but record which one happens.
-- Confirm no `documents` row and nothing in storage afterwards.
+- **Nothing stored.** The folder held 6 files before and after every
+  attempt.
+- **At 1 KB** the edge passes the app's 409 with `HX-Redirect` through.
+- **At 256 KB, 2 MB, 8 MB and 20 MB**, Railway's edge (`server:
+  railway-hikari`) returns a **502** within about 50 ms, not the 409. The
+  app refuses before reading the body, and the edge reports the early close
+  as a bad gateway.
+- **The effect.** A stale upload that gets past the pre-upload probe shows
+  the generic upload error ("Stopped part way") instead of the banner. That
+  can only happen in the short window between the probe and the upload
+  starting. Nothing leaks and nothing is stored.
 
-**5. The rollback window closes.** The PR must say so. Text for the PR body:
+**The fix, required in this PR (`frontend/app.ts`).** When an upload fails
+with a 502 or a network error (status 0), run the `GET /orgs/current` probe
+before showing the upload error. If the probe gets a 409 with
+`HX-Redirect`, hand it to `staleRefusal`, which shows the banner (the queue
+counts as unsaved work) or goes Home. Only if the probe passes does the
+upload show "Stopped part way". The probe adds one small request, and only
+after a failure.
 
-> No migration in this PR, and reverting its code is safe. But the first
-> organisation created through it gives someone a second membership. From
-> then on PR 2's index migration (`memberships_one_per_org`) can't be rolled
-> back: its `down` fails with a unique violation and changes nothing. Undoing
-> it would mean deleting memberships. PR 2 and PR 3 become forward-only.
-> Reverting PR 3 alone would bring back the stale-tab cross-org write for
-> anyone with two orgs. The logins unlock migration can still roll back.
+**Rejected: draining the body on the server** so a real 409 gets through the
+edge. The app would have to read and throw away the whole upload before
+answering, up to 25 MB per refusal. That is the cost the early refusal
+exists to avoid.
 
-Before merging, run the PR 2 duplicate check on production once more. It
-should return no rows:
+To re-check after the fix, by Raj on production: in devtools, make the
+probe pass and the upload fail (block `/orgs/current` once with request
+blocking, or edit the claim between the probe and the send), then drop a
+2 MB file. Expect the banner, not "Stopped part way", and still nothing
+stored.
 
-```sql
-SELECT organisation_id, user_id, count(*) FROM memberships
-GROUP BY 1, 2 HAVING count(*) > 1;
-```
+**5. The rollback window closes.** Text for the PR body:
+
+> No migration in this PR. Reverting its code is safe for data. But the first
+> organisation created through it gives someone a second membership, and
+> from then on:
+>
+> - PR 2's index migration (`memberships_one_per_org`) can't be rolled back.
+>   Its `down` fails with a unique violation and changes nothing. Undoing it
+>   would mean deleting memberships.
+> - PR 2's unlock migration (`secrets_unlocked_org_id`) must not be rolled
+>   back either. Without the column, an unlock in one org would count in
+>   another, which brings back the cross-org reveal.
+> - PR 3 must not be reverted. That would bring back the stale-tab cross-org
+>   write for anyone with two orgs. Redeploying any Railway image older than
+>   `44db5ab` is the same as reverting PR 3.
+>
+> PR 2 and PR 3 are forward-only from here.
+
+The PR 2 duplicate-row query is not needed. The live unique index
+`idx-memberships-org-user` on `(organisation_id, user_id)` already guarantees
+there are no duplicates.
 
 **6. Email links 404 between PR 4 and PR 7.** Accepted (PR 2, decision 2).
-What people see, once they have two orgs:
+What people see once they have two orgs:
 
 - A mention email's item link (`/tasks/5`, `/chat/12`), opened while the
   browser is in the other org, gives a 404. They switch from the menu and
   open the link again. Which 404 page they get is unverified. Check it by
-  hand and put it in the PR.
+  hand and screenshot it for the PR.
 - The mention email's "all notifications" link (`/notifications`) opens the
   browser's current org, not the email's, without saying so.
 - A security email's "Login activity" link (`/documents/activity`) also opens
-  the browser's current org.
+  the current org.
 - Who it reaches in PR 4: only people who created a second org. Mentions
-  reach them in that org only after someone joins it by link and tags them.
+  reach them there only after someone joins it by link and tags them.
   Security emails reach them as its owner.
 
 PR 7 fixes the links. Ship its email-link part soon after this one.
 
 ## One-org assumptions that become reachable
 
-PR 1 removed the code assumption. These are the behaviours that real users can
-now meet.
-
-| Place | What happens with two orgs | PR 4 |
+| Place | With two orgs | PR 4 |
 |---|---|---|
-| `/admin` people table (`default_by_user`) | Shows one row per person with their oldest active org. A creator's second org is not shown there. | Accept. The org list above it shows every org, including created ones. Listing every membership is out of scope. |
-| `/admin` org list (`admin_overview`) | Four count queries per org. More orgs, more queries. | Accept. The cap bounds growth. See "Risks". |
-| `cargo loco task super_admin` | Uses `default_for_user`. With several orgs it prints the oldest active one. Creates an org only when there is no membership at all. | Signature change only. |
-| Mention mailer (`mentions::send_due`) | Groups by `(organisation_id, user_id)`, so one email per org, each naming its org. | Correct. Links: gate 6. |
-| Sign out everywhere | Logs `sign_out_everywhere` in every active org, so the created org gets a row too. | Accepted in PR 1. Test it. |
-| Password reset owner notices (`tell_owners_about_reset`) | Checked per active org. `to_owners` skips the person themselves. A creator is the only owner of their new org, so it sends nothing extra. An owner of two orgs gets two emails only when someone in both orgs resets, which can't happen before PR 6. Then each email has its own org's details, as PR 1 accepted. | No change. Test the creator case. |
-| Account lock (`logins::lock`, `users::Model::lock_account`) | Locks the whole account and signs it out everywhere. Only the org where it happened is told, and only that org's Claude tokens are revoked. The bearer extractor refuses a locked account, so tokens in the other org stop working while locked. But they work again after the reset. A token minted in org B by whoever caused the lock in org A survives. | Decision 5 (recommended: revoke in every org). Who is told stays a PR 5 question. |
-| Removal from one org | Still bumps `session_version`, signing the person out of every org. On sign-in they land in their oldest remaining active org. | Accepted until PR 5. |
-| Notification stream | Keyed by user. A notice in any org reloads the badge, which counts the current org only. | Accepted. Unread dots per org are deferred. |
-| Signing in | `signed_in_cookies` clears `current_org`, so each sign-in starts in the oldest active org, not the newest. | Expected. Mention in `accounts.md`. |
+| `/admin` people table (`default_by_user`) | One row per person, with their oldest active org. A creator's second org isn't shown there. | Accept. The org list above shows every org. |
+| `/admin` org list (`admin_overview`) | Four count queries per org. | Accept; the cap bounds growth. A grouped query is deferred. |
+| `cargo loco task super_admin` | `default_for_user`: prints the oldest active org. Creates one only when there is no membership. | Signature change only. |
+| Mention mailer (`mentions::send_due`) | Groups by `(organisation_id, user_id)`: one email per org, each naming its org. | Correct. Links: gate 6. |
+| Sign out everywhere | Logs `sign_out_everywhere` in every active org, the created one too. | Accepted in PR 1. Tested. |
+| Password reset owner notices | Checked per active org. `to_owners` skips the person. A creator is the only owner of their new org, so nothing extra is sent. One owner getting two emails needs someone in both of their orgs, which waits for PR 6. | No change. Tested. |
+| Account lock | Locks the whole account and signs it out everywhere. Before this PR only the lock's org had its Claude tokens revoked. Tokens in the other org were refused while locked, then worked again after the reset, including any minted by whoever caused the lock. | Fixed: revoked in every org. Who is told stays a PR 5 question. |
+| Removal from one org | Still bumps `session_version`, signing the person out of every org. Next sign-in lands in their oldest remaining active org. | Accepted until PR 5. |
+| Notification stream | Keyed by user. A notice in any org reloads the badge, which counts the current org only. | Accepted. Unread dots deferred. |
+| Signing in | `signed_in_cookies` clears `current_org`, so each sign-in starts in the oldest active org, not the newest. | Expected. Written in `accounts.md`. |
 
 **Data: `organisations.created_by_id`.** Nullable, `ON DELETE SET NULL`.
 `create_with_owner` already sets it (`organisations.rs:166`), for signup and
-the super admin task alike. The cap relies on it. Before merging, check
-production for orgs without one, for information only:
+the super admin task alike. The cap relies on it. Rows with a null creator
+count towards nobody's cap. For information before merging (Raj):
 
 ```sql
 SELECT count(*) FROM organisations WHERE created_by_id IS NULL;
 ```
 
-Rows with a null creator just don't count towards anyone's cap.
-
 ## Edge cases
 
-- **Double submit.** `hx-disabled-elt` stops most. The user-row lock plus the
-  duplicate-name check refuse a second one that gets through. Without
-  decision 3, a double submit makes two orgs (`acme`, `acme-2`).
+- **Double submit.** The button locks. One that gets through waits on the
+  user-row lock, then meets the duplicate-name check.
+- **Two tabs create different names at once.** Two orgs, two toasts. The
+  lock makes both counts see each other.
 - **Two people create the same name at the same moment.** `unique_slug`
   checks, then inserts. Both can pick the same slug, and one insert fails on
-  `organisations.slug` with a 500. Signup has the same race today. Rare.
-  Accept, and note it.
-- **A name that is only symbols** ("***"): slug `org`, then `org-2`, as in
-  signup.
-- **A stale tab creates.** The tab was drawn for Acme, and the browser has
-  since switched to Beta. `POST /orgs` is refused like any tenant POST. With
-  text typed in an HTMX form, the banner keeps it. Nothing is created.
-- **Other tabs after creating.** They are on the old org and go stale. Their
-  next request moves them to Home in the new org with the PR 3 notice ("This
-  tab was showing Acme Studio"). The notice says "You switched organisation
-  in another tab". The mockup may want "created" wording here; it is the same
-  card.
-- **Acting.** A super admin acting in X creates Y. `acting_org` is cleared,
-  they land in Y as owner. X's tabs go stale. "Back to X" is not offered in
-  the notice unless they are a member of X (PR 3 rule).
-- **At the cap, or over the daily limit.** 422 with the message. Nothing is
-  saved. The lock means a burst can't slip past.
-- **Pending-only user** posts by hand. `CurrentMember` returns the waiting
-  page (403). Nothing is created.
-- **Locked account.** Has no session (the lock bumps `session_version`), so it
-  can't reach the form.
-- **No way back.** There is no delete and no leave. The last owner can't be
-  removed. A mistaken org stays in the switcher until removed with SQL.
-  Decision 6.
+  `organisations.slug` with a 500. The dialog shows "Something went wrong,
+  and nothing was created. Try again.", and a retry gets `-2`. Signup has the
+  same race today. An advisory lock is deferred.
+- **Accents in the name.** Kept in the name. The slug drops them today:
+  "Lumen Café" becomes `/join/lumen-caf`. Transliteration is deferred.
+- **A name that is only symbols** ("***"): slug `org`, then `org-2`.
+- **A spaces-only name.** Refused with "Use 2 to 80 characters." on both
+  signup and create.
+- **Markup in a name** (`<script>`). Stored as typed. Tera autoescapes it in
+  the toast, the switcher, More and `/admin`. Tested.
+- **A stale tab creates.** Refused like any tenant POST. With text typed in
+  the dialog, the banner keeps it. Nothing is created.
+- **Other tabs after creating.** They are on the old org, go stale, and move
+  to Home in the new org with PR 3's notice. Nothing new to build.
+- **Acting.** No row. A typed `/orgs/new` shows the note. Creating ends
+  acting and makes the org the admin's own, with the default time zone. The
+  acting org's tabs go stale. "Back to X" is offered only if they are a
+  member of X (PR 3 rule).
+- **At the cap.** The GET shows the at-cap state. A POST gets the same, as a
+  422. Nothing saved.
+- **Over the daily limit.** A 422 with the daily message. Nothing saved.
+- **Pending-only user** posting by hand: `CurrentMember` returns the waiting
+  page (403). Nothing created.
+- **Locked account.** No session (the lock bumps `session_version`), so no
+  form.
+- **No way back.** No delete and no leave, and the last owner can't be
+  removed. A mistaken org stays in the switcher until removed with SQL. Raj
+  accepted this for PR 4, with the cap as the bound.
 - **Claude connector.** Tokens are tied to the org they were granted in. The
   new org has none. An existing connector keeps acting in its own org.
-- **No JavaScript.** The page form posts without `_org` and fails closed to
-  Home, like every plain form since PR 3. Accepted.
-- **Tabs open across the deploy.** Their switcher has no "New organisation"
-  row until they reload. Harmless.
+- **No JavaScript.** The `/orgs/new` page form carries its server-rendered
+  `_org` and works.
+- **Tabs open across the deploy.** No row until they reload. Harmless.
 
 ## Tests
 
@@ -421,67 +535,93 @@ Rows with a null creator just don't count towards anyone's cap.
 - `create_for_user_sets_up_general_and_the_starter_folders`: `#general` with
   the owner in it, "Company" and "Logins".
 - `create_for_user_sets_created_by`.
-- `create_for_user_checks_fields_like_signup`: a 1-character and an
-  81-character name, a bad username, `everyone`. Nothing saved.
-- `create_for_user_stops_at_the_cap`: with 10 orgs created (backdated past
-  the daily window), the 11th is refused.
+- `create_for_user_checks_fields_like_signup`: 1 and 81 characters, a bad
+  username, `everyone`. Nothing saved.
+- `a_spaces_only_name_is_refused`: "   " and " a ", for both `NewOrgParams`
+  and `SignupParams`.
+- `create_for_user_stops_at_the_cap`: with 10 created (backdated past the
+  daily window), the 11th is refused.
 - `create_for_user_stops_at_the_daily_limit`: three in the last day refuse a
-  fourth. Backdate one past 24 hours and the next goes through.
-- `create_for_user_refuses_a_name_you_already_have`: "acme " against "Acme".
-  Another person's "Acme" does not count (decision 3).
-- `two_creates_at_once_do_not_pass_the_cap`: at 9, two creates run together
-  with `tokio::join!`. Exactly one succeeds.
-- `the_created_membership_is_already_welcomed` (decision 4).
-- `sign_up_still_uses_the_account_name_as_the_username`.
+  fourth with the daily message. Backdate one past 24 hours and the next goes
+  through.
+- `create_for_user_refuses_a_name_you_already_have`: "  acme   studio " and
+  "ACME STUDIO" against "Acme Studio", and "ÉCOLE" against "école". The
+  message names the stored "Acme Studio". Another person's org doesn't
+  count, nor does one you are only pending in.
+- `two_creates_at_once_do_not_pass_the_cap`: at 9, two creates run with
+  `tokio::join!`, one on `ctx.db` and one on `second_connection(&ctx)`, as in
+  `tests/requests/oauth.rs:511-523`. The test pool has one connection.
+  Exactly one succeeds.
+- `create_for_user_copies_the_given_time_zone`: `Some("Asia/Kathmandu")`
+  gives that zone.
+- `create_for_user_without_a_time_zone_keeps_the_default`: `None` gives
+  `Europe/London`.
+- `the_created_membership_is_already_welcomed`.
+- `sign_up_still_uses_the_account_name_as_the_username_and_the_default_zone`.
 
 `tests/requests/create_org.rs` (new, in `tests/requests/mod.rs`):
 
-- `the_form_renders_with_your_username`.
+- `the_form_renders_with_your_username_and_the_org_field`: prefilled
+  username, and a hidden `_org` with the current org id.
 - `the_form_over_htmx_is_a_fragment`: no `<html>`, `no-store`,
   `Vary: HX-Request`.
+- `the_form_at_the_cap_shows_the_limit_instead_of_fields`.
 - `creating_lands_on_home_in_the_new_org_with_a_toast`: 303 to
-  `/dashboard?created=1`. That page has `data-org-id` of the new org, the
-  toast with its name, and `no-store`.
+  `/dashboard?created=1`. That page has the new org's `data-org-id`, "… is
+  ready. You're the owner." and `no-store`.
 - `creating_over_htmx_sends_hx_redirect_to_home`.
+- `a_plain_form_post_with_org_creates`: a urlencoded POST with `_org` and no
+  header creates the org (the no-JS path).
 - `creating_sets_current_org_and_clears_acting_org`.
 - `creating_ends_an_unlock_of_logins`.
-- `the_new_org_shows_the_owner_checklist`: "Invite your team" is listed, and
-  nothing is done yet.
-- `the_new_org_has_no_welcome_pop_up` (decision 4).
+- `creating_copies_the_current_org_time_zone`: Acme on `Asia/Kathmandu`
+  gives a new org on `Asia/Kathmandu`.
+- `the_new_org_shows_the_owner_checklist`: "Invite your team" listed,
+  nothing done yet.
+- `the_new_org_has_no_welcome_pop_up`.
 - `usernames_are_per_org`: Alice is `alice` in Acme and `ali` in the new org.
   Each org's Members page shows its own.
 - `bad_input_is_422_and_saves_nothing`.
-- `signup_and_create_give_the_same_errors`: the same bad input to `/signup`
-  and `/orgs` gives the same messages.
+- `signup_and_create_give_the_same_errors`: the same bad input, including a
+  spaces-only name, to `/signup` and `/orgs` gives the same messages.
 - `the_cap_is_a_422_and_saves_nothing`.
-- `the_daily_limit_is_a_422`.
+- `the_daily_limit_is_a_422_with_its_message`.
 - `creating_needs_a_signed_in_user`: redirects to `/login`.
 - `a_pending_only_user_cannot_create`: the waiting page, no org.
-- `an_acting_super_admin_can_create_and_acting_ends` (decision 1).
+- `acting_shows_no_new_organisation_row`: the menu fragment and More, while
+  acting.
+- `acting_can_create_from_a_typed_link_and_acting_ends`: the form shows the
+  acting note. The create clears `acting_org`. The new org has the admin as
+  owner, `Europe/London`, and nothing from the acting org. The acting org's
+  members are unchanged.
 - `the_created_flag_alone_changes_nothing`: names the current org, sets no
   cookie.
 - `creating_ignores_a_next_parameter`.
 - `creating_sends_no_email`: the stub mailer has no deliveries.
-- `the_new_org_is_separate_from_the_old_one`: an Acme task is a 404 from the
-  new org. The new org's task list is empty. Switching back shows Acme's.
+- `the_new_org_is_separate_from_the_old_one`: from the new org, an Acme task
+  is a 404 and the task list is empty; documents has only the two starter
+  folders, each empty; logins has none; Members lists only the owner; login
+  activity is empty; chat has only `#general`. Switching back shows Acme's.
+- `org_names_are_escaped_everywhere`: a name with
+  `<script>alert(1)</script>` appears escaped in the toast, the switcher
+  fragment, More and `/admin`, and never raw.
 
 `tests/requests/orgs.rs`:
 
 - `one_org_shows_a_plain_name` becomes `one_org_shows_the_switcher`.
-- `an_acting_admin_with_no_membership_sees_a_plain_name` becomes
-  `an_acting_admin_with_no_membership_sees_the_switcher` (decision 1).
-- `htmx_requests_skip_the_switcher_count` is removed with the count.
+- `an_acting_admin_with_no_membership_sees_a_plain_name`: kept, unchanged.
+- `htmx_requests_skip_the_switcher_count`: kept, since the count still runs
+  while acting.
 - `the_org_list_ends_with_new_organisation`: the fragment and the `/orgs`
   page both have the row, linking to `/orgs/new`, outside the switch form.
 - `the_admin_page_keeps_its_plain_name`.
 
-`tests/models/memberships.rs`: remove
-`switcher_counts_counts_active_and_pending_only`.
+`tests/models/memberships.rs`: `switcher_counts_counts_active_and_pending_only`
+stays.
 
-`tests/requests/stale_tab.rs`: no edits. The route walks pick up `POST /orgs`
-and `GET /orgs/new` by themselves, and must pass with them refused like any
-tenant route. `the_exempt_lists_match_real_routes` stays green, since nothing
-is added to `EXEMPT`.
+`tests/requests/stale_tab.rs`: no edits. The walks pick up `POST /orgs` and
+`GET /orgs/new` and must refuse them like any tenant route. Nothing is added
+to `EXEMPT`.
 
 `tests/requests/live_sign_out.rs` (real server):
 
@@ -491,58 +631,75 @@ is added to `EXEMPT`.
 
 - `sign_out_everywhere_logs_in_the_created_org_too`.
 - `a_creator_resetting_their_password_gets_no_owner_notice_from_their_own_org`.
-- `locking_revokes_claude_tokens_in_every_org` (decision 5).
+- `locking_revokes_claude_tokens_in_every_org`: tokens and an unused OAuth
+  code in Acme and in the created org. Five wrong app passwords in Acme. Both
+  orgs' tokens are revoked and the code is used. After a reset, neither token
+  works.
 
-`tests/requests/multi_org.rs`: `alice_in_two_orgs` keeps inserting by SQL. It
-gives Alice a membership in Bob's org, which this PR can't make (that is
-PR 6). Leave a comment saying so.
+`tests/requests/multi_org.rs`: `alice_in_two_orgs` keeps inserting by SQL.
+It puts Alice in Bob's org, which this PR can't do (that is PR 6). A comment
+says so.
 
-**Not covered by `cargo test`:** the form dialog or sheet in `app.ts`, the
-menu keyboard reaching the new row, and the gate 3 and 4 browser checks.
+**Not covered by `cargo test`:** the dialog and sheet in `app.ts`, focus
+handling, the 5xx alert and offline toast, the keyboard reaching the new row,
+the upload probe after a 502, and the gate 3 and 4 checks.
 
 ## Out of scope (PRs 5-7)
 
 - **PR 5, org-scoped removal.** Events keyed by org and user. Removal stops
   signing people out of every org. Who is told when a lock in one org locks
   the whole account.
-- **PR 6, join with an existing account.** The first way into someone else's
-  org with one email. Until then a created org's only member is its creator,
-  plus anyone who joins by link with a new account.
+- **PR 6, join with an existing account.** Until then a created org's members
+  are its creator plus anyone who joins by link with a new account.
 - **PR 7, links and the Claude connector.** Org-aware links in emails and
   notifications (gate 6). Connector settings per org.
-- **Later, not in a numbered PR:**
-  - delete or leave an organisation (decision 6);
-  - "Create your own organisation" on the waiting, declined and removed
-    pages;
-  - a rate limit on `/signup`;
-  - the `/admin` people table listing every membership;
-  - copying the time zone or other settings from the current org;
-  - transferring ownership;
-  - unread dots per org in the switcher.
+
+**Deferred, written down so they aren't lost:**
+
+- slug transliteration ("Lumen Café" becomes `lumen-caf` today), as a small
+  later PR;
+- a rate limit on `/signup`;
+- an advisory lock for the cross-user slug race (its 500 is now shown as the
+  dialog's error alert);
+- security emails saying "Switch to {org} first" until PR 7;
+- unguessable join tokens instead of the slug;
+- stripping Unicode control and format characters (categories Cc and Cf)
+  from org names and usernames;
+- the creator's email on the `/admin` org list;
+- one grouped query for `admin_overview`;
+- delete or leave an organisation;
+- "Create your own organisation" on the waiting, declined and removed pages;
+- the `/admin` people table listing every membership;
+- transferring ownership;
+- unread dots per org in the switcher.
 
 ## Risks
 
-- **The rollback window closes** (gate 5). After the first create, PR 2 and
-  PR 3 are forward-only. The PR says so.
+- **The rollback window closes** (gate 5). After the first create, PR 2 (both
+  migrations) and PR 3 are forward-only. The PR says so.
 - **This PR turns PR 1 to 3 on for real users.** Everything they built was
-  tested with SQL-made second memberships. The first creators are its first
-  real users. Watch the logs for "refused a request from a tab drawn for
-  another organisation" in the first days. A burst would mean a client path
-  that lost its claim.
+  tested with SQL-made second memberships. Watch the logs for "refused a
+  request from a tab drawn for another organisation" in the first days. A
+  burst would mean a client path that lost its claim.
 - **Browser cookie behaviour** (gate 3). If Safari or Firefox ignores
   `Set-Cookie` on a manual redirect, the banner's Back fails safe but
   confuses people.
 - **Email links** (gate 6) mislead people with two orgs until PR 7.
-- **Shared code with signup.** `create_with_owner` and `create_owner` change
-  signature. The signup tests and a new test pin that signup's behaviour is
-  unchanged.
-- **`admin_overview`** runs four queries per org. Fine at today's size and
-  bounded by the cap. Rewrite it as one grouped query if the org list grows
-  into the hundreds.
-- **No delete.** Test orgs made by mistake pile up in a person's switcher,
-  up to the cap.
-- **The slug race** can give a 500 on a simultaneous same-name create. Rare,
-  and the same as signup today.
+- **Railway's edge turns early refusals of large bodies into 502s** (gate 4).
+  The upload path now probes after a failure. Any other large-body request
+  refused early would show a generic error too. Today only uploads send
+  bodies that big; urlencoded forms are capped at 2 MB and refused before
+  reading only over that.
+- **Shared code with signup.** `create_with_owner`, `create_owner` and the
+  name validator change for signup too. The signup tests and the new ones pin
+  that only the spaces-only case behaves differently.
+- **The lock revocation is account-wide.** A lock now revokes Claude
+  connections in orgs where nothing went wrong. The person reconnects after
+  the reset. That is the point.
+- **`admin_overview`** runs four queries per org, bounded by the cap.
+- **No delete.** Mistaken orgs pile up in a person's switcher, up to 10.
+- **The slug race** can still fail one of two simultaneous same-name creates.
+  Rare, and now shown as a retryable error.
 
 ## Checks
 
@@ -555,62 +712,76 @@ cargo test
 
 By hand, locally:
 
-- create an org from the desktop menu, the phone sheet and the no-JS `/orgs`
-  page;
+- create an org from the desktop menu (dialog), the phone sheet, More, and
+  with JavaScript off (`/orgs/new`);
 - the toast, the checklist and no welcome pop-up on Home;
-- the form's errors: short name, bad username, `everyone`, duplicate name,
-  the cap (set `created_at` back by SQL to reach it quickly);
+- the new org's time zone matches the old one's;
+- the form's errors: short name, spaces-only, bad username, `everyone`,
+  duplicate name, the daily limit and the at-cap state (set `created_at`
+  back by SQL to reach them quickly);
+- the 5xx alert (force an error locally, for example by stopping Postgres
+  mid-request) and the offline toast (devtools offline);
 - a second tab on the old org moves to Home with the notice;
 - the chat socket in another tab closes and reconnects in the new org;
-- create while acting: acting ends, and the banner is gone;
-- the menu keyboard reaches "New organisation";
+- acting: no row; a typed `/orgs/new` shows the note; creating ends acting;
+- the keyboard reaches "New organisation", and "N" jumps to it;
+- a stale upload that fails as a 502 or network error shows the banner, not
+  "Stopped part way": with two tabs, let the probe pass, switch org in the
+  other tab before the send, and make the upload fail (devtools request
+  blocking on the upload URL gives a network error). Then the same with no
+  switch: the plain "Stopped part way" still shows;
 - gate 3 (Playwright WebKit and Firefox, then real Safari);
 - the 404 page an old-org task link gives in the new org (gate 6).
 
-On production, before merging: the duplicate check (gate 5), the
-`created_by_id` count, the Railway deploy of #43 and #44 (gates 1 and 2), and
-gate 4 once #44 is live.
-
-After merging: create one org on production as Raj, switch back and forth,
-and confirm the logs show the create and the switches.
+On production, by Raj: gates 1 and 4 passed on 19 October. Still before
+merging: the `created_by_id` count. After deploying: the gate 4 re-check of
+the upload fix. After merging: the real-Safari pass (gate 3), then
+create one org as Raj, switch back and forth, and confirm the logs show the
+create and the switches.
 
 ## Screenshots needed
 
-From the local app with realistic data: the mockup's people and orgs (Acme
-Studio, Northwind Bakery), with members, tasks and chat in Acme. Store them on
-the `pr-screenshots` branch under `multi-org-4/`. Desktop 1440px and phone
-390px, light and dark:
+From the local app with realistic data: the mockup's people and orgs (Priya
+in Acme Studio, then Lumen Café; Northwind Bakery), with members, tasks and
+chat in Acme. Store them on the `pr-screenshots` branch under `multi-org-4/`.
+Desktop 1440px and phone 390px, light and dark:
 
 - the switcher with one org and "New organisation" (desktop menu, phone
-  sheet, More's row);
+  sheet, More);
 - the switcher with two orgs and the row;
-- the create form, empty and with the username filled in;
-- the form with a field error, and with the cap message;
+- the create form: the desktop dialog and the phone sheet, empty and filled;
+- the form with a field error, and with the duplicate-name error;
+- the at-cap form;
+- the server-error alert;
+- the acting form note, and the acting menu with no row;
 - Home in the new org: the toast and the checklist;
 - another tab's notice after the create;
-- the menu and form while acting, if decision 1 is yes;
-- gate 3: the banner and the stored cookie in WebKit, Firefox and Safari.
+- gate 3: the banner and the cookie panel in WebKit, Firefox and Safari,
+  with cookie values hidden.
 
-## Decisions for Raj
+## Decisions (Raj, 19 October)
 
-Each with a recommendation.
+All approved as recommended in the mockup and the plan's first draft, with
+the reviews folded in:
 
-1. **May a super admin create while acting?** Recommend: yes. Creating ends
-   acting, as a switch does.
-2. **Limits.** Recommend: 10 orgs created per person, ever, including the
-   signup one, and 3 per 24 hours. Counted from `organisations.created_by_id`.
-   The same for the super admin.
-3. **Refuse a name you already have** (among your own active orgs,
-   case-insensitive). Recommend: yes. Two identical rows in the switcher can't
-   be told apart, and it stops double submits.
-4. **Skip the welcome pop-up in a created org,** but keep the checklist.
-   Recommend: skip. The person has seen the tour, and it would cover the
-   toast.
-5. **On an account lock, revoke Claude tokens in every org,** not only the
-   one where the lock happened. Recommend: yes, in this PR. It is one query
-   change, and this PR is what makes a second org's tokens possible.
-6. **No delete or leave for a created org.** Recommend: accept for PR 4, with
-   the cap as the bound. Plan "delete an empty org" as a small later PR.
-7. **Firefox check.** Recommend: Playwright's Firefox 1.55.0 build counts as
-   the Firefox check, with real Safari checked by hand. Or install Firefox
-   for a hand run, if the reviewers insist on a release build.
+1. `CurrentMember` on both routes, inside the stale-tab check. This deviates
+   from mockup question 10.
+2. A server-rendered `_org` on the form, so the no-JS path works.
+3. No create row while acting. A typed link works, shows the note and ends
+   acting.
+4. 10 ever and 3 per 24 hours, from `created_by_id` and `created_at`, under a
+   `FOR NO KEY UPDATE` lock on the user row.
+5. Refuse a name matching one of your active orgs, after trim, whitespace
+   collapse and Unicode lowercase.
+6. Trimmed-length validation for org names, in signup too.
+7. The dialog shows the mockup's 5xx alert and offline toast.
+8. Copy the current org's time zone, except while acting.
+9. A shared `enter_org` with `switch`. Skip the welcome pop-up, keep the
+   guide. Toast "X is ready. You're the owner."
+10. An account lock revokes Claude tokens in every org.
+11. Playwright WebKit and Firefox locally, real Safari by hand (required), and
+    one real-Safari pass on production after merge.
+12. No delete or leave in PR 4.
+13. After the gate 4 finding: an upload that fails with a 502 or a network
+    error probes `/orgs/current` before showing the error. Draining the body
+    on the server was rejected.
