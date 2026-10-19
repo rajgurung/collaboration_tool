@@ -94,7 +94,7 @@ pub(super) fn with_org(cookie: &TestMember, value: impl std::fmt::Display) -> Te
     )
 }
 
-/// The response's `Set-TestMember` for this cookie name, if any.
+/// The response's `Set-Cookie` for this cookie name, if any.
 pub(super) fn set_cookie(res: &axum_test::TestResponse, name: &str) -> Option<String> {
     res.headers()
         .get_all("set-cookie")
