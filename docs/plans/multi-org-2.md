@@ -105,6 +105,9 @@ be able to switch someone.
 `CurrentMember` just before a switch can subscribe just after the close
 event. It then stays on the old org until it next reconnects. This is not a
 leak: the person is still an active member of that org.
+Another tab's chat socket can also reconnect (0 to 1 second jitter) with the
+old cookie before the browser has the new one, and stay on the old org. Also
+not a leak, for the same reason.
 
 ## The migrations
 

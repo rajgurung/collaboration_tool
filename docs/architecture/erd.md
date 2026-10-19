@@ -136,6 +136,16 @@ Unique indexes:
 Other indexes: `idx-memberships-user` on `memberships (user_id)`, for finding
 a user's memberships.
 
+Generated entities (`src/models/_entities/`) are left as `cargo loco db
+entities` writes them, so a few attributes there do not match the schema:
+
+- In `users.rs`, the `Organisations` relation is a `belongs_to` through
+  `secrets_unlocked_org_id`. It means "the org of the current logins
+  unlock", not "the orgs this user created". Nothing in the code uses it.
+- The `unique` and `unique_key` attributes on `memberships.organisation_id`
+  and `memberships.user_id` come from codegen reading the indexes. The real
+  rules are the unique indexes listed above.
+
 Rules:
 
 - Roles are `owner`, `admin` and `member` (`src/models/memberships.rs:17`).
