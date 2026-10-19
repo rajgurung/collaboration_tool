@@ -1830,18 +1830,6 @@ async function openOrgSheet() {
   focusOrg(orgSheetBody, "current");
 }
 
-// Enter or Space on a row: switch, nothing on a pending one, and the current
-// org just closes the list.
-function pickOrg(item: HTMLElement | undefined) {
-  if (!item || item.getAttribute("aria-disabled") === "true") return;
-  if (item.hasAttribute("data-org-current")) {
-    closeOrgMenu();
-    orgSheet?.close();
-    return;
-  }
-  item.click();
-}
-
 function orgListKeys(list: HTMLElement, event: KeyboardEvent) {
   if (event.isComposing) return;
   const items = orgItems(list);
@@ -1855,8 +1843,9 @@ function orgListKeys(list: HTMLElement, event: KeyboardEvent) {
   else if (event.key === "Home") go(0);
   else if (event.key === "End") go(items.length - 1);
   else if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    pickOrg(items[i]);
+    // Rows are buttons, and the browser clicks them itself: a switch, or the
+    // current org closing the list. Only a pending row is not, and does nothing.
+    if (!(items[i] instanceof HTMLButtonElement)) event.preventDefault();
   } else if (list === orgMenu && event.key === "Escape") {
     event.preventDefault();
     closeOrgMenu();
