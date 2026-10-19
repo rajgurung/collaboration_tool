@@ -4,7 +4,13 @@
 {% set tab = "home" if active == "dashboard" else ("tasks" if active == "tasks" else ("chat" if active == "chat" else "more")) %}
 <div class="shell">
   <aside class="sidebar" aria-label="Main">
+    {% if org_menu %}
+    {# A link to /orgs without JavaScript; app.ts turns it into the menu. #}
+    <a href="/orgs" class="org-switch" role="button" aria-haspopup="menu" aria-expanded="false" aria-controls="org-menu" data-org-menu>{{<logo letter={org.name | truncate(length=1, end="")}/>}}<span class="org-btn-text"><strong class="truncate-1">{{ org.name }}</strong>{% if me.acting %}<span class="sub">{{<icon name="shield" class="h-3 w-3"/>}}Platform admin</span>{% endif %}</span>{{<icon name="chevrons-up-down" class="chev h-4 w-4"/>}}</a>
+    <div id="org-menu" class="org-menu" role="menu" aria-label="Your organisations" hidden></div>
+    {% else %}
     <a href="/dashboard" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo letter={org.name | default(value="C") | truncate(length=1, end="")}/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
+    {% endif %}
     <a href="/dashboard" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
     <a href="/notifications" class="side-link" {% if active == "notifications" %}aria-current="page"{% endif %}>{{<icon name="bell" class="h-5 w-5"/>}}<span class="flex-1">Notifications</span><span hx-get="/notifications/unread" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>
     <a href="/tasks" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
@@ -37,6 +43,27 @@
     {% endblock main %}
   </div>
 </div>
+
+{% if org_menu %}
+<dialog id="org-sheet" class="sheet org-sheet" aria-labelledby="org-sheet-title">
+  <div class="sheet-handle"></div>
+  <div class="org-sheet-head"><h2 id="org-sheet-title">Your organisations</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
+  <div id="org-sheet-body" class="sheet-body" role="menu" aria-label="Your organisations"></div>
+</dialog>
+{% endif %}
+{% if current_org_id %}
+{# Shown in place when a tab holding typed text or an upload goes stale (app.ts). It only needs this page's own org. #}
+<template id="stale-banner-template">
+  <div class="notice stale-banner" role="status" data-stale-banner>
+    <span class="notice-icon">{{<icon name="rotate-ccw" class="h-[18px] w-[18px]"/>}}</span>
+    <div class="notice-body">
+      <p class="notice-title">This tab was showing {{ org.name }}. Your browser is now in another organisation.</p>
+      <p class="meta m-0 text-[14px]">You switched organisation in another tab. Nothing was saved, and your work is still here.</p>
+      <div class="notice-actions">{% if not me.acting %}<button type="button" class="btn btn-secondary btn-tall" data-stale-back data-org-name="{{ org.name }}">Back to {{ org.name }}</button>{% endif %}<button type="button" class="btn btn-secondary btn-tall" data-stale-home>Go to Home</button></div>
+    </div>
+  </div>
+</template>
+{% endif %}
 
 {% block tabbar %}
 <nav class="tabbar" aria-label="Main">

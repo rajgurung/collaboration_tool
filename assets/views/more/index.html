@@ -11,6 +11,15 @@
     </div>
   </div>
 
+  {% if org_menu %}
+  <section class="flex flex-col gap-2">
+    <h2 class="section-label">Organisation</h2>
+    <div class="list">
+      <a href="/orgs" class="list-row min-h-[60px]" role="button" aria-haspopup="dialog" data-org-sheet><span class="org-logo org-logo-lg">{{ org.name | truncate(length=1, end="") | upper }}</span><span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-base font-semibold">{{ org.name }}</span><span class="meta {% if not me.acting %}capitalize{% endif %}">{% if me.acting %}Platform admin{% else %}{{ me.role }}{% endif %}</span></span><span class="text-[15px] font-semibold text-link">Switch</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+    </div>
+  </section>
+  {% endif %}
+
   <section class="flex flex-col gap-2">
     <h2 class="section-label">Workspace</h2>
     <div class="list">

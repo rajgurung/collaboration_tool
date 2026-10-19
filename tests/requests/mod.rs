@@ -52,4 +52,5 @@ pub mod logins;
 pub mod note_reactions;
 
 pub mod multi_org;
+pub mod orgs;
 pub mod stale_tab;
