@@ -6,7 +6,7 @@ use loco_rs::{app::AppContext, testing::prelude::*};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serial_test::serial;
 
-use super::prepare_data::sign_up;
+use super::prepare_data::{sign_up_member, AsMember, TestMember};
 
 pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> projects::Model {
     let org = organisations::Model::find_by_slug(&ctx.db, slug)
@@ -44,7 +44,7 @@ pub(super) fn task_form(title: &str, project_id: i64, assignee: &str) -> serde_j
 #[serial]
 async fn creating_a_task_puts_it_in_to_do() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
@@ -52,7 +52,7 @@ async fn creating_a_task_puts_it_in_to_do() {
 
         let res = request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&task_form(
                 "Write the launch email",
@@ -76,7 +76,7 @@ async fn creating_a_task_puts_it_in_to_do() {
         // It shows under "Mine" (alice is assigned) in the To do group, with its due date.
         let body = request
             .get("/tasks")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();
         assert!(body.contains("Write the launch email"));
@@ -101,13 +101,13 @@ async fn creating_a_task_puts_it_in_to_do() {
 #[serial]
 async fn tasks_need_a_title_and_any_project_must_be_from_this_org() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let foreign = project_in(&ctx, "globex", "Their project").await;
 
         let res = request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&task_form("", foreign.id, ""))
             .await;
@@ -117,7 +117,7 @@ async fn tasks_need_a_title_and_any_project_must_be_from_this_org() {
 
         let res = request
             .post("/tasks")
-            .add_header(owner.0, owner.1)
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&task_form("Sneaky", foreign.id, ""))
             .await;
@@ -132,18 +132,18 @@ async fn tasks_need_a_title_and_any_project_must_be_from_this_org() {
 #[serial]
 async fn status_changes_move_the_card() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Ship it", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
 
         let res = request
             .post(&format!("/tasks/{}/status", task.id))
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "status": "done", "q": "" }))
             .await;
@@ -160,7 +160,7 @@ async fn status_changes_move_the_card() {
 
         let bad = request
             .post(&format!("/tasks/{}/status", task.id))
-            .add_header(owner.0, owner.1)
+            .as_member(&owner)
             .form(&serde_json::json!({ "status": "archived" }))
             .await;
         assert_eq!(bad.status_code(), 400);
@@ -172,11 +172,11 @@ async fn status_changes_move_the_card() {
 #[serial]
 async fn notes_are_posted_and_counted() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Ship it", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
@@ -184,7 +184,7 @@ async fn notes_are_posted_and_counted() {
 
         let empty = request
             .post(&path)
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "   " }))
             .await;
@@ -193,7 +193,7 @@ async fn notes_are_posted_and_counted() {
 
         let res = request
             .post(&path)
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "Blocked on <copy> review" }))
             .await;
@@ -218,7 +218,7 @@ async fn notes_are_posted_and_counted() {
         assert!(sheet.text().contains("alice"));
         let list = request
             .get("/tasks/list?filter=all")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .await;
         assert!(list.text().contains("Ship it"));
     })
@@ -229,7 +229,7 @@ async fn notes_are_posted_and_counted() {
 #[serial]
 async fn search_filters_by_title_owner_and_project() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let launch = project_in(&ctx, "acme", "Launch").await;
         let pricing = project_in(&ctx, "acme", "Pricing").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
@@ -241,7 +241,7 @@ async fn search_filters_by_title_owner_and_project() {
         ] {
             request
                 .post("/tasks")
-                .add_header(owner.0.clone(), owner.1.clone())
+                .as_member(&owner)
                 .form(&task_form(title, project, who))
                 .await;
         }
@@ -267,12 +267,12 @@ async fn search_filters_by_title_owner_and_project() {
 #[serial]
 async fn other_orgs_tasks_are_out_of_reach() {
     request::<App, _, _>(|request, ctx| async move {
-        let acme = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let globex = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let acme = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let globex = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let project = project_in(&ctx, "globex", "Secret").await;
         request
             .post("/tasks")
-            .add_header(globex.0, globex.1)
+            .as_member(&globex)
             .form(&task_form("Secret task", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
@@ -293,13 +293,13 @@ async fn other_orgs_tasks_are_out_of_reach() {
         );
         let status = request
             .post(&format!("/tasks/{}/status", task.id))
-            .add_header(acme.0.clone(), acme.1.clone())
+            .as_member(&acme)
             .form(&serde_json::json!({ "status": "done" }))
             .await;
         assert_eq!(status.status_code(), 404);
         let note = request
             .post(&format!("/tasks/{}/notes", task.id))
-            .add_header(acme.0, acme.1)
+            .as_member(&acme)
             .form(&serde_json::json!({ "body": "hi" }))
             .await;
         assert_eq!(note.status_code(), 404);
@@ -321,7 +321,7 @@ async fn other_orgs_tasks_are_out_of_reach() {
 #[serial]
 async fn filters_show_the_right_tasks() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
@@ -335,7 +335,7 @@ async fn filters_show_the_right_tasks() {
         ] {
             request
                 .post("/tasks")
-                .add_header(owner.0.clone(), owner.1.clone())
+                .as_member(&owner)
                 .form(&task_form(title, project.id, who))
                 .await;
         }
@@ -349,7 +349,7 @@ async fn filters_show_the_right_tasks() {
                 .unwrap();
             request
                 .post(&format!("/tasks/{}/status", task.id))
-                .add_header(owner.0.clone(), owner.1.clone())
+                .as_member(&owner)
                 .form(&serde_json::json!({ "status": status }))
                 .await;
         }
@@ -360,7 +360,7 @@ async fn filters_show_the_right_tasks() {
             async move {
                 request
                     .get(&format!("/tasks/list?filter={filter}"))
-                    .add_header(cookie.0, cookie.1)
+                    .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
@@ -394,18 +394,18 @@ async fn filters_show_the_right_tasks() {
 #[serial]
 async fn changing_status_from_the_sheet_refreshes_it() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Ship it", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
 
         let res = request
             .post(&format!("/tasks/{}/status", task.id))
-            .add_header(owner.0, owner.1)
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "status": "blocked" }))
             .await;
@@ -434,11 +434,11 @@ async fn changing_status_from_the_sheet_refreshes_it() {
 pub(super) async fn approved_member(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
-    owner: &(axum::http::HeaderName, axum::http::HeaderValue),
+    owner: &TestMember,
     name: &str,
     email: &str,
-) -> ((axum::http::HeaderName, axum::http::HeaderValue), i64) {
-    let cookie = super::prepare_data::join(request, "acme", name, email).await;
+) -> (TestMember, i64) {
+    let cookie = super::prepare_data::join(request, ctx, "acme", name, email).await;
     let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
     let membership = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(user.id))
@@ -448,7 +448,7 @@ pub(super) async fn approved_member(
         .unwrap();
     request
         .post(&format!("/members/{}/approve", membership.id))
-        .add_header(owner.0.clone(), owner.1.clone())
+        .as_member(owner)
         .await;
     (cookie, user.id)
 }
@@ -466,7 +466,7 @@ pub(super) fn form_body(fields: &[(&str, String)]) -> axum::body::Bytes {
 #[serial]
 async fn editing_saves_every_field_and_several_assignees() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_bob, bob_id) =
             approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
@@ -476,7 +476,7 @@ async fn editing_saves_every_field_and_several_assignees() {
         let other = project_in(&ctx, "acme", "Mobile").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Draft email", project.id, &alice.id.to_string()))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
@@ -490,7 +490,7 @@ async fn editing_saves_every_field_and_several_assignees() {
 
         let res = request
             .post(&format!("/tasks/{}", task.id))
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
@@ -539,7 +539,7 @@ async fn editing_saves_every_field_and_several_assignees() {
         // Unticking alice leaves bob alone on it.
         request
             .post(&format!("/tasks/{}", task.id))
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
                 ("title", "Draft the launch email".into()),
@@ -571,22 +571,22 @@ async fn editing_saves_every_field_and_several_assignees() {
 #[serial]
 async fn editing_rejects_people_outside_the_team() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        super::prepare_data::join(&request, "acme", "pat", "pat@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        super::prepare_data::join(&request, &ctx, "acme", "pat", "pat@example.com").await;
         let pending = users::Model::find_by_email(&ctx.db, "pat@example.com")
             .await
             .unwrap();
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Draft email", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
 
         let res = request
             .post(&format!("/tasks/{}", task.id))
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
@@ -612,7 +612,7 @@ async fn editing_rejects_people_outside_the_team() {
 #[serial]
 async fn mine_means_any_task_i_am_assigned_to() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, bob_id) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
@@ -620,7 +620,7 @@ async fn mine_means_any_task_i_am_assigned_to() {
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
                 ("title", "Shared work".into()),
@@ -632,7 +632,7 @@ async fn mine_means_any_task_i_am_assigned_to() {
             .await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Alice alone", project.id, &alice.id.to_string()))
             .await;
 
@@ -666,7 +666,7 @@ async fn mine_means_any_task_i_am_assigned_to() {
         assert!(everyone_by_person.contains(&format!(r#"data-lane="person-{}""#, alice.id)));
         let everyone = request
             .get("/tasks/board?scope=all")
-            .add_header(bob.0, bob.1)
+            .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(everyone.contains("Shared work") && everyone.contains("Alice alone"));
@@ -678,26 +678,26 @@ async fn mine_means_any_task_i_am_assigned_to() {
 #[serial]
 async fn deleting_a_task_takes_its_notes_and_assignees() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Throwaway", project.id, &alice.id.to_string()))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         request
             .post(&format!("/tasks/{}/notes", task.id))
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&serde_json::json!({ "body": "A note" }))
             .await;
 
         let res = request
             .post(&format!("/tasks/{}/delete", task.id))
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
@@ -723,7 +723,7 @@ async fn deleting_a_task_takes_its_notes_and_assignees() {
 #[serial]
 async fn the_board_groups_by_project_person_or_nothing() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();
@@ -732,12 +732,12 @@ async fn the_board_groups_by_project_person_or_nothing() {
         project_in(&ctx, "acme", "Empty project").await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Launch work", launch.id, &alice.id.to_string()))
             .await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Nobody's work", mobile.id, ""))
             .await;
 
@@ -747,7 +747,7 @@ async fn the_board_groups_by_project_person_or_nothing() {
             async move {
                 request
                     .get(&format!("/tasks/board?group={group}"))
-                    .add_header(cookie.0, cookie.1)
+                    .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
@@ -783,7 +783,7 @@ async fn the_board_groups_by_project_person_or_nothing() {
 #[serial]
 async fn the_project_picker_groups_projects_by_roadmap_lane() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         project_in(&ctx, "acme", "Launch").await;
         let later = project_in(&ctx, "acme", "Mobile app").await;
         let mut later: projects::ActiveModel = later.into();
@@ -814,7 +814,7 @@ async fn the_project_picker_groups_projects_by_roadmap_lane() {
 #[serial]
 async fn adding_from_a_column_starts_in_that_column() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         let form = request
             .get(&format!("/tasks/new?status=blocked&project_id={}", project.id))
@@ -827,7 +827,7 @@ async fn adding_from_a_column_starts_in_that_column() {
 
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&serde_json::json!({
                 "title": "Stuck already", "project_id": project.id.to_string(), "priority": "high", "status": "blocked",
             }))
@@ -842,7 +842,7 @@ async fn adding_from_a_column_starts_in_that_column() {
 #[serial]
 async fn chores_need_no_project() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob_id) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
@@ -852,7 +852,7 @@ async fn chores_need_no_project() {
 
         let res = request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
                 ("title", "Order printer ink".into()),
@@ -902,12 +902,12 @@ async fn chores_need_no_project() {
         assert!(home.contains(r#"stat-value">1</span><span class="meta">Due this week"#));
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Launch work", launch.id, ""))
             .await;
         let roadmap = request
             .get("/roadmap")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();
         assert!(roadmap.contains("0 of 1 tasks done"));

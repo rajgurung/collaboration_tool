@@ -6,7 +6,7 @@ use loco_rs::testing::prelude::*;
 use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 
-use super::prepare_data::{sign_up, USER_PASSWORD};
+use super::prepare_data::{sign_up_member, USER_PASSWORD};
 
 #[tokio::test]
 #[serial]
@@ -23,7 +23,7 @@ async fn signup_page_renders() {
 #[serial]
 async fn signup_creates_owner_org_and_general_channel() {
     request::<App, _, _>(|request, ctx| async move {
-        let cookie = sign_up(&request, "Himalayan Ritual", "raj", "Raj@Example.com").await;
+        let cookie = sign_up_member(&request, "Himalayan Ritual", "raj", "Raj@Example.com").await;
 
         let user = users::Model::find_by_email(&ctx.db, "raj@example.com")
             .await
@@ -50,7 +50,7 @@ async fn signup_creates_owner_org_and_general_channel() {
 
         let dashboard = request
             .get("/dashboard")
-            .add_header(cookie.0, cookie.1)
+            .add_header(cookie.0.clone(), cookie.1.clone())
             .await;
         assert_eq!(dashboard.status_code(), 200);
         assert!(dashboard.text().contains("Himalayan Ritual"));
@@ -62,8 +62,8 @@ async fn signup_creates_owner_org_and_general_channel() {
 #[serial]
 async fn same_org_name_gets_a_unique_slug() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        sign_up(&request, "Acme", "bob", "bob@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "bob", "bob@example.com").await;
         assert!(organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
             .is_ok());
@@ -131,7 +131,7 @@ async fn signup_rejects_the_everyone_username() {
 #[serial]
 async fn signup_with_existing_email_fails_cleanly() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let res = request
             .post("/signup")
             .form(&serde_json::json!({

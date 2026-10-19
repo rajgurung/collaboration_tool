@@ -1,0 +1,8 @@
+{% extends "layouts/app.html" %}
+{% block title %}Your organisations · {{ org.name }}{% endblock title %}
+{% block heading %}Your organisations{% endblock heading %}
+{% block content %}
+<div class="card org-page max-w-[480px] p-1.5">
+  {% include "orgs/_list.html" %}
+</div>
+{% endblock content %}

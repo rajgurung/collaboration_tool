@@ -12,10 +12,10 @@ use super::{
     admin::super_admin_cookie,
     mcp::{rpc, token_for},
     multi_org::{alice_in_two_orgs, with_org},
-    prepare_data::sign_up,
+    prepare_data::{sign_up_member, AsMember},
 };
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::Cookie;
 
 /// The hidden `org_id` on the token form, as this browser sees it.
 async fn shown_org_id(request: &TestServer, cookie: &Cookie) -> String {
@@ -52,7 +52,7 @@ fn shown_token(page: &str) -> String {
 #[serial]
 async fn the_page_shows_the_connector_url_and_more_links_to_it() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let more = request
             .get("/more")
             .add_header(alice.0.clone(), alice.1.clone())
@@ -79,7 +79,7 @@ async fn the_page_shows_the_connector_url_and_more_links_to_it() {
 #[serial]
 async fn a_personal_token_is_shown_once_and_stored_hashed() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (status, page) = create(&request, &alice, "Work laptop").await;
         assert_eq!(status, 200);
         let token = shown_token(&page);
@@ -118,7 +118,7 @@ async fn a_personal_token_is_shown_once_and_stored_hashed() {
 #[serial]
 async fn ten_tokens_at_most() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         for i in 0..10 {
             assert_eq!(create(&request, &alice, &format!("Token {i}")).await.0, 200);
         }
@@ -133,8 +133,8 @@ async fn ten_tokens_at_most() {
 #[serial]
 async fn revoking_kills_the_grant_and_only_your_own() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let bob = sign_up(&request, "Globex", "bob", "bob@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let bob = sign_up_member(&request, "Globex", "bob", "bob@example.com").await;
         let alice_token = token_for(&ctx, "alice@example.com").await;
         let grant = access_tokens::Entity::find()
             .one(&ctx.db)
@@ -145,7 +145,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
 
         let res = request
             .post(&format!("/settings/claude/grants/{grant}/revoke"))
-            .add_header(bob.0.clone(), bob.1.clone())
+            .as_member(&bob)
             .await;
         assert_eq!(res.status_code(), 404, "someone else's connection");
         assert_eq!(
@@ -157,7 +157,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
 
         let res = request
             .post(&format!("/settings/claude/grants/{grant}/revoke"))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .await;
         assert_eq!(res.status_code(), 303);
         assert_eq!(
@@ -180,7 +180,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
 #[serial]
 async fn a_super_admin_acting_elsewhere_cannot_make_tokens() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
             .unwrap();

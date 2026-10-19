@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use serial_test::serial;
 
 use super::{
-    prepare_data::sign_up,
+    prepare_data::sign_up_member,
     tasks::{approved_member, project_in},
 };
 
@@ -147,7 +147,7 @@ async fn no_token_gets_a_401_that_points_at_the_metadata() {
 #[serial]
 async fn expired_revoked_and_wrong_resource_tokens_are_refused() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         assert_eq!(
             rpc(&request, &token, "tools/list", json!({})).await.status,
@@ -188,7 +188,7 @@ async fn expired_revoked_and_wrong_resource_tokens_are_refused() {
 #[serial]
 async fn tokens_stop_working_without_an_active_membership() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let alice = user_id(&ctx, "alice@example.com").await;
         let membership = memberships::Model::default_for_user(&ctx.db, alice)
@@ -222,7 +222,7 @@ async fn tokens_stop_working_without_an_active_membership() {
 #[serial]
 async fn browsers_from_other_sites_are_refused_and_no_origin_is_fine() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let res = request
             .post("/mcp")
@@ -259,7 +259,7 @@ async fn browsers_from_other_sites_are_refused_and_no_origin_is_fine() {
 #[serial]
 async fn initialize_and_list_the_eight_tools() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let res = rpc(
             &request,
@@ -317,7 +317,7 @@ async fn initialize_and_list_the_eight_tools() {
 #[serial]
 async fn create_project_fills_in_a_colour_and_tells_the_owner() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
 
@@ -357,7 +357,7 @@ async fn create_project_fills_in_a_colour_and_tells_the_owner() {
 #[serial]
 async fn create_task_assigns_by_username_and_notifies() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let (_, carol) =
             approved_member(&request, &ctx, &owner, "carol", "carol@example.com").await;
@@ -401,7 +401,7 @@ async fn create_task_assigns_by_username_and_notifies() {
 #[serial]
 async fn update_task_changes_only_what_it_is_given() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         let mut owned: collab::models::projects::ActiveModel = project.clone().into();
@@ -456,7 +456,7 @@ async fn update_task_changes_only_what_it_is_given() {
 #[serial]
 async fn update_task_records_when_a_task_was_finished() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let (_, task) = tool(
             &request,
@@ -499,8 +499,8 @@ async fn update_task_records_when_a_task_was_finished() {
 #[serial]
 async fn other_organisations_are_out_of_reach() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let theirs = project_in(&ctx, "globex", "Secret plan").await;
         let gina = token_for(&ctx, "gina@example.com").await;
         let (_, secret) = tool(
@@ -570,7 +570,7 @@ async fn other_organisations_are_out_of_reach() {
 #[serial]
 async fn list_tasks_filters_and_list_members_has_no_emails() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         let token = token_for(&ctx, "alice@example.com").await;
@@ -626,7 +626,7 @@ async fn list_tasks_filters_and_list_members_has_no_emails() {
 #[serial]
 async fn validation_problems_come_back_as_tool_errors() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let (error, message) = tool(
             &request,
@@ -664,7 +664,7 @@ async fn validation_problems_come_back_as_tool_errors() {
 #[serial]
 async fn notes_notify_mentioned_people() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
         let (_, task) = tool(&request, &token, "create_task", json!({ "title": "Chore" })).await;
@@ -706,7 +706,7 @@ async fn notes_notify_mentioned_people() {
 #[serial]
 async fn the_connector_cannot_notify_everyone() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let (_, carol) =
             approved_member(&request, &ctx, &owner, "carol", "carol@example.com").await;

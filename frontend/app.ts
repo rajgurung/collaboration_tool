@@ -49,6 +49,176 @@ document.querySelectorAll<HTMLElement>("[data-flash]").forEach((el) => {
   el.remove();
 });
 
+// Stale tabs. Every app page says which organisation it was drawn for
+// (`<body data-org-id>`), and every request carries it: HTMX through the body's
+// hx-headers, plain forms through a hidden `_org`, raw fetch calls through
+// orgHeaders(). After a switch in another tab the server refuses this tab's
+// requests with 409 and `HX-Redirect` (or 303 for a plain form) to Home.
+const pageOrgId = () => document.body.dataset.orgId ?? "";
+
+// Never HX-Request: the server answers that with HX-Redirect instead of a
+// redirect, which changes what these calls see (secretRefused relies on it).
+function orgHeaders(): Record<string, string> {
+  const id = pageOrgId();
+  return id ? { "X-Org-Id": id } : {};
+}
+
+// Plain urlencoded forms. HTMX forms send the header, the chat composer goes
+// over its socket, the unlock form is a fetch, and multipart bodies are never
+// read for `_org`, so all of those are left alone.
+document.addEventListener(
+  "submit",
+  (event) => {
+    const form = event.target;
+    const id = pageOrgId();
+    if (!(form instanceof HTMLFormElement) || !id || form.method !== "post") return;
+    if (["hx-post", "ws-send", "data-unlock-form"].some((a) => form.hasAttribute(a)) || form.enctype === "multipart/form-data") return;
+    let field = form.querySelector<HTMLInputElement>('input[name="_org"]');
+    if (!field) {
+      field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "_org";
+      form.append(field);
+    }
+    field.value = id;
+  },
+  true,
+);
+
+// Text being typed, or a document upload waiting or under way. A tab holding
+// either doesn't move when it goes stale; it shows one banner instead.
+function hasUnsavedWork(): boolean {
+  if (currentUpload || uploadQueue.length) return true;
+  const skip = ["hidden", "password", "search", "checkbox", "radio", "file", "submit", "button"];
+  return Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).some(
+    (field) =>
+      !(field instanceof HTMLInputElement && (skip.includes(field.type) || field.dataset.filter !== undefined)) &&
+      field.value !== field.defaultValue &&
+      !!field.form &&
+      // Drawn: in a visible form, or a form inside an open dialog.
+      field.getClientRects().length > 0,
+  );
+}
+
+// Follows a refusal to Home, unless the tab holds unsaved work: then the
+// banner shows in place and the text stays where it is. Returns whether the
+// refusal was held.
+let staleHome = "";
+function goHomeOrHold(home: string): boolean {
+  staleHome = home;
+  const shown = visibleBanner();
+  if (shown) {
+    // Already up: show it again rather than adding a second one.
+    shown.scrollIntoView({ block: "nearest" });
+    shown.classList.remove("flash");
+    void shown.offsetWidth;
+    shown.classList.add("flash");
+    window.setTimeout(() => shown.classList.remove("flash"), 1200);
+    return true;
+  }
+  if (!hasUnsavedWork()) {
+    window.location.href = home;
+    return false;
+  }
+  const banner = document.querySelector<HTMLTemplateElement>("#stale-banner-template")?.content.firstElementChild?.cloneNode(true);
+  if (!(banner instanceof HTMLElement)) {
+    window.location.href = home;
+    return false;
+  }
+  placeBanner(banner);
+  return true;
+}
+
+// The banner, if one is on screen. One left in a closed sheet can't be seen,
+// so it goes, and the tab is judged again.
+function visibleBanner(): HTMLElement | null {
+  const banner = document.querySelector<HTMLElement>("[data-stale-banner]");
+  if (banner && banner.getClientRects().length === 0) {
+    banner.remove();
+    return null;
+  }
+  return banner;
+}
+
+// Inside an open sheet, so it shows above it; in chat, under the header, so
+// the composer stays on screen; otherwise at the top of the page.
+function placeBanner(banner: HTMLElement) {
+  const sheet = document.querySelector("dialog[open] .sheet-body");
+  const chatHead = document.querySelector(".chat-screen > .chat-head");
+  if (sheet) sheet.prepend(banner);
+  else if (chatHead) chatHead.after(banner);
+  else (document.querySelector("main.page") ?? document.querySelector(".chat-list-pane") ?? document.body).prepend(banner);
+}
+
+// For raw fetch calls: true when the response was a stale-tab refusal, which
+// has been dealt with. Callers check it first.
+function staleRefusal(res: Response): boolean {
+  const home = res.status === 409 ? res.headers.get("HX-Redirect") : null;
+  if (!home) return false;
+  goHomeOrHold(home);
+  return true;
+}
+
+// HTMX checks the HX-Redirect before the status, so cancelling here is the
+// only way to keep the tab where it is (htmx 2.0.11).
+document.body.addEventListener("htmx:beforeOnLoad", (event) => {
+  const xhr = (event as CustomEvent<{ xhr: XMLHttpRequest }>).detail.xhr;
+  const home = xhr.status === 409 ? xhr.getResponseHeader("HX-Redirect") : null;
+  if (home && goHomeOrHold(home)) event.preventDefault();
+});
+
+// "Back to Acme": switch this browser back to the page's own org. A manual
+// redirect, so the tab stays put; the browser still stores the cookie.
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  if (target?.closest("[data-stale-home]")) {
+    window.location.href = staleHome || "/dashboard";
+    return;
+  }
+  const back = target?.closest<HTMLButtonElement>("[data-stale-back]");
+  if (!back) return;
+  const name = back.dataset.orgName ?? "";
+  back.disabled = true;
+  fetch(`/orgs/${pageOrgId()}/switch`, { method: "POST", redirect: "manual", credentials: "same-origin" })
+    .then((res) => {
+      if (res.type === "opaqueredirect") {
+        back.closest("[data-stale-banner]")?.remove();
+        showToast({ message: `You're back in ${name}` });
+        void startNextUpload();
+        return;
+      }
+      showToast({ kind: "error", message: res.status === 404 ? `You can't open ${name} any more.` : `Couldn't switch to ${name}. Try again.` });
+    })
+    .catch(() => showToast({ kind: "error", message: `Couldn't switch to ${name}. Check your connection and try again.` }))
+    .finally(() => (back.disabled = false));
+});
+
+// Asks the server whether this tab is still in the browser's org. A stale tab
+// gets the refusal and moves (or holds).
+function probeOrg() {
+  if (pageOrgId()) void htmx.ajax("GET", "/orgs/current", { swap: "none" });
+}
+// Back or forward: a page from the back-forward cache, or one the browser
+// drew again from its own cache, may be for the old org.
+window.addEventListener("pageshow", (event) => {
+  const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  if (event.persisted || nav?.type === "back_forward") probeOrg();
+});
+
+// After a switch or a stale-tab move, drop ?switched= and ?from= from Home's
+// address, so a reload doesn't repeat the toast or the notice.
+{
+  const here = new URL(window.location.href);
+  if (here.searchParams.has("switched") || here.searchParams.has("from")) {
+    here.searchParams.delete("switched");
+    here.searchParams.delete("from");
+    history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
+  }
+}
+document.addEventListener("click", (event) => {
+  (event.target as Element | null)?.closest("[data-dismiss-notice]")?.closest("[data-stale-notice]")?.remove();
+});
+
 // Chat: Enter sends, Shift+Enter adds a new line.
 document.addEventListener("keydown", (event) => {
   const target = event.target;
@@ -83,9 +253,12 @@ document.body.addEventListener("htmx:wsAfterSend", (event) => {
   form?.reset();
 });
 
+// A closed socket may mean a switch in another tab (its reconnect is then
+// refused), so ask whether this tab is still in the browser's org.
 const reconnecting = new WeakSet<Element>();
 document.body.addEventListener("htmx:wsClose", (event) => {
   reconnecting.add((event as CustomEvent<{ elt: Element }>).detail.elt);
+  probeOrg();
 });
 document.body.addEventListener("htmx:wsOpen", (event) => {
   const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
@@ -104,8 +277,9 @@ function openActions(bubble: HTMLElement) {
   const body = dialog?.querySelector<HTMLElement>("#chat-dialog-body");
   if (!url || !dialog || !body) return;
   const failed = () => showToast({ kind: "error", message: "Couldn't open that message. Check your connection and try again." });
-  fetch(url, { headers: { "HX-Request": "true" }, credentials: "same-origin" })
+  fetch(url, { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" })
     .then(async (res) => {
+      if (staleRefusal(res)) return;
       if (!res.ok || res.redirected) return failed();
       // The server escapes the message; this is its own fragment.
       body.innerHTML = await res.text();
@@ -247,11 +421,12 @@ document.addEventListener("click", (event) => {
   showMine(message, emoji, url, on);
   fetch(url, {
     method: "POST",
-    headers: { "HX-Request": "true" },
+    headers: { "HX-Request": "true", ...orgHeaders() },
     body: new URLSearchParams({ emoji, on: on ? "1" : "0" }),
     credentials: "same-origin",
   })
     .then(async (res) => {
+      if (staleRefusal(res)) return showMine(message, emoji, url, !on);
       if (!res.ok || res.redirected) throw new Error(`status ${res.status}`);
       swapById(await res.text());
     })
@@ -457,6 +632,13 @@ document.body.addEventListener("htmx:afterSwap", (event) => {
 if (document.querySelector('[hx-get^="/notifications/unread"]')) {
   const events = new EventSource("/notifications/stream");
   events.addEventListener("notify", () => htmx.trigger(document.body, "notifications-changed"));
+  // A switch in another tab closes the stream; when it comes back, check
+  // this tab is still in the browser's org.
+  let streamOpened = false;
+  events.addEventListener("open", () => {
+    if (streamOpened) probeOrg();
+    streamOpened = true;
+  });
   window.addEventListener("pagehide", () => events.close());
 }
 
@@ -1158,13 +1340,13 @@ function queueUpload(file: File) {
   }
   document.getElementById("uploads")?.append(row);
   uploadQueue.push({ file, row });
-  startNextUpload();
+  void startNextUpload();
 }
 
-function startNextUpload() {
+async function startNextUpload() {
   const form = uploadForm();
   const input = form?.querySelector<HTMLInputElement>("input[type=file]");
-  if (currentUpload || !form || !input) return;
+  if (currentUpload || !form || !input || visibleBanner()) return;
   const next = uploadQueue.shift();
   if (!next) return;
   try {
@@ -1174,9 +1356,18 @@ function startNextUpload() {
   } catch {
     // This browser can't hand the file to the form; say so and carry on with the rest.
     next.row.replaceWith(uploadRow(next.file.name, "Couldn't add it. Use Add instead.") ?? "");
-    return startNextUpload();
+    return void startNextUpload();
   }
   currentUpload = next;
+  // Ask first, so a stale tab is caught before it sends a large body. The
+  // file then waits at the front of the queue, behind the banner. HX-Request,
+  // because the server only checks the claim on HTMX GETs.
+  const stale = await fetch("/orgs/current", { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).then(staleRefusal, () => false);
+  if (stale) {
+    currentUpload = null;
+    uploadQueue.unshift(next);
+    return;
+  }
   next.row.querySelector("[data-cancel-upload]")?.remove();
   next.row.querySelector("[data-progress-text]")!.textContent = "Starting";
   form.requestSubmit();
@@ -1302,8 +1493,16 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   if (!(elt instanceof HTMLFormElement) || !elt.hasAttribute("data-upload") || !currentUpload) return;
   const { file, row } = currentUpload;
   currentUpload = null;
-  row.remove();
   elt.reset();
+  // Refused as a stale tab: the banner is up, and the file waits for "Back".
+  if (xhr.status === 409) {
+    delete row.dataset.sent;
+    row.querySelector<HTMLElement>(".bar > span")!.style.width = "0%";
+    row.querySelector("[data-progress-text]")!.textContent = "Waiting";
+    uploadQueue.unshift({ file, row });
+    return;
+  }
+  row.remove();
   // htmx still holds this form's request until the handler returns, so start the next one after.
   setTimeout(startNextUpload);
   // A refusal comes back as its own error row.
@@ -1352,7 +1551,7 @@ const countdowns = new Map<HTMLElement, number>();
 function postForm(url: string, values: Record<string, string>): Promise<Response> {
   return fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", ...orgHeaders() },
     body: new URLSearchParams(values),
     credentials: "same-origin",
   });
@@ -1429,6 +1628,7 @@ function askForPassword(ask: SecretAsk) {
 
 async function showSecret(ask: SecretAsk) {
   const res = await postForm(`/documents/logins/${ask.loginId}/reveal`, { field: ask.field });
+  if (staleRefusal(res)) return;
   if (res.status === 423) return askForPassword(ask);
   if (!res.ok || res.redirected) return secretRefused(res);
   const slot = ask.box.querySelector<HTMLElement>("[data-secret-slot]");
@@ -1459,8 +1659,12 @@ class NeedsPassword extends Error {}
 function copySecret(ask: SecretAsk, unlocking?: Promise<Response>) {
   const what = ask.field === "recovery" ? "Recovery codes" : "Password";
   const text = (async () => {
-    if (unlocking && !(await unlocking).ok) throw new NeedsPassword();
+    const unlocked = unlocking && (await unlocking);
+    // A stale refusal is dealt with by the unlock's own handler below.
+    if (unlocked && unlocked.status === 409) throw new Error("refused");
+    if (unlocked && !unlocked.ok) throw new NeedsPassword();
     const res = await postForm(`/documents/logins/${ask.loginId}/copy`, { field: ask.field });
+    if (staleRefusal(res)) throw new Error("refused");
     if (res.status === 423) throw new NeedsPassword();
     if (!res.ok || res.redirected) {
       await secretRefused(res);
@@ -1528,6 +1732,9 @@ document.addEventListener("submit", (event) => {
   // Copy has to begin inside this tap, so it waits on the unlock itself.
   if (ask.kind === "copy") copySecret(ask, unlocking);
   void unlocking.then(async (res) => {
+    // Closed first, so the banner (if any) isn't left inside a hidden sheet.
+    if (res.status === 409) dialog.close();
+    if (staleRefusal(res)) return;
     if (res.ok && !res.redirected) {
       pendingSecret = null;
       dialog.close();
@@ -1575,3 +1782,147 @@ document.addEventListener(
   true,
 );
 window.addEventListener("pagehide", () => hideAllSecrets());
+
+// The organisation switcher (docs/designs/org-switcher.html): a menu under the
+// sidebar's org name, and on phones a sheet from Home's header or More. Both
+// load their rows from /orgs the first time they open. Without JavaScript the
+// triggers are links to the /orgs page.
+const orgMenuButton = document.querySelector<HTMLElement>("[data-org-menu]");
+const orgMenu = document.getElementById("org-menu");
+const orgSheet = document.querySelector<HTMLDialogElement>("#org-sheet");
+const orgSheetBody = document.getElementById("org-sheet-body");
+
+const orgItems = (list: Element) => Array.from(list.querySelectorAll<HTMLElement>("[role^=menuitem]"));
+
+// Rows are reached with the arrow keys, not Tab, inside the menu and the sheet.
+async function loadOrgs(list: HTMLElement, force = false) {
+  if (force || !list.querySelector("[data-org-list]")) await htmx.ajax("GET", "/orgs", { target: `#${list.id}`, swap: "innerHTML" });
+  orgItems(list).forEach((item) => (item.tabIndex = -1));
+}
+
+function focusOrg(list: HTMLElement, which: "current" | "last") {
+  const items = orgItems(list);
+  const target = which === "last" ? items[items.length - 1] : (items.find((el) => el.getAttribute("aria-checked") === "true") ?? items[0]);
+  target?.focus();
+}
+
+const orgMenuOpen = () => orgMenuButton?.getAttribute("aria-expanded") === "true";
+
+async function openOrgMenu(which: "current" | "last" = "current") {
+  if (!orgMenuButton || !orgMenu) return;
+  orgMenuButton.setAttribute("aria-expanded", "true");
+  orgMenu.hidden = false;
+  await loadOrgs(orgMenu);
+  if (orgMenuOpen()) focusOrg(orgMenu, which);
+}
+
+function closeOrgMenu(refocus = true) {
+  if (!orgMenuButton || !orgMenu || !orgMenuOpen()) return;
+  orgMenuButton.setAttribute("aria-expanded", "false");
+  orgMenu.hidden = true;
+  if (refocus) orgMenuButton.focus();
+}
+
+async function openOrgSheet() {
+  if (!orgSheet || !orgSheetBody) return;
+  orgSheet.showModal();
+  await loadOrgs(orgSheetBody);
+  focusOrg(orgSheetBody, "current");
+}
+
+function orgListKeys(list: HTMLElement, event: KeyboardEvent) {
+  if (event.isComposing) return;
+  const items = orgItems(list);
+  const i = items.indexOf(document.activeElement as HTMLElement);
+  const go = (n: number) => {
+    event.preventDefault();
+    items[(n + items.length) % items.length]?.focus();
+  };
+  if (event.key === "ArrowDown") go(i + 1);
+  else if (event.key === "ArrowUp") go(i - 1);
+  else if (event.key === "Home") go(0);
+  else if (event.key === "End") go(items.length - 1);
+  else if (event.key === "Enter" || event.key === " ") {
+    // Rows are buttons, and the browser clicks them itself: a switch, or the
+    // current org closing the list. Only a pending row is not, and does nothing.
+    if (!(items[i] instanceof HTMLButtonElement)) event.preventDefault();
+  } else if (list === orgMenu && event.key === "Escape") {
+    event.preventDefault();
+    closeOrgMenu();
+  } else if (list === orgMenu && event.key === "Tab") closeOrgMenu(false);
+  else if (event.key.length === 1 && /\S/.test(event.key)) {
+    // The next org whose name starts with that letter.
+    const key = event.key.toLowerCase();
+    for (let step = 1; step <= items.length; step++) {
+      const item = items[(i + step) % items.length];
+      if (item.querySelector(".org-name")?.textContent?.trim().toLowerCase().startsWith(key)) {
+        item.focus();
+        break;
+      }
+    }
+  }
+}
+
+if (orgMenuButton && orgMenu) {
+  orgMenuButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (orgMenuOpen()) closeOrgMenu();
+    else void openOrgMenu();
+  });
+  orgMenuButton.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      void openOrgMenu();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      void openOrgMenu("last");
+    }
+  });
+  orgMenu.addEventListener("keydown", (event) => orgListKeys(orgMenu, event));
+  document.addEventListener("click", (event) => {
+    const target = event.target as Node;
+    if (orgMenuOpen() && !orgMenu.contains(target) && !orgMenuButton.contains(target)) closeOrgMenu(false);
+  });
+}
+orgSheetBody?.addEventListener("keydown", (event) => orgListKeys(orgSheetBody, event));
+document.addEventListener("click", (event) => {
+  const opener = (event.target as Element | null)?.closest("[data-org-sheet]");
+  if (!opener || !orgSheet) return;
+  event.preventDefault();
+  void openOrgSheet();
+});
+document.addEventListener("click", (event) => {
+  const current = (event.target as Element | null)?.closest("[data-org-current]");
+  if (!current || !current.closest("#org-menu, #org-sheet")) return;
+  closeOrgMenu();
+  orgSheet?.close();
+});
+
+// While a switch runs: a spinner and "Switching…" on its row, the others dimmed.
+function switchingState(row: HTMLElement, on: boolean) {
+  const list = row.closest<HTMLElement>("[data-org-list]");
+  list?.querySelectorAll<HTMLElement>(".org-row").forEach((other) => other !== row && other.classList.toggle("dim", on));
+  row.classList.toggle("loading", on);
+  const meta = row.querySelector<HTMLElement>("[data-org-role]");
+  if (meta) {
+    meta.dataset.role ??= meta.textContent ?? "";
+    meta.textContent = on ? "Switching…" : meta.dataset.role;
+  }
+}
+document.body.addEventListener("htmx:beforeRequest", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  if (elt instanceof HTMLElement && elt.matches(".org-row[data-org-name]")) switchingState(elt, true);
+});
+document.body.addEventListener("htmx:afterRequest", (event) => {
+  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
+  if (!(elt instanceof HTMLElement) || !elt.matches(".org-row[data-org-name]") || successful) return;
+  const name = elt.dataset.orgName ?? "";
+  switchingState(elt, false);
+  if (xhr.status === 404) {
+    showToast({ kind: "error", message: `You can't open ${name} any more.` });
+    const list = elt.closest<HTMLElement>("#org-menu, #org-sheet-body");
+    if (list) void loadOrgs(list, true).then(() => focusOrg(list, "current"));
+  } else {
+    showToast({ kind: "error", message: `Couldn't switch to ${name}. Check your connection and try again.` });
+  }
+});

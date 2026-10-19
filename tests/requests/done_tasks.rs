@@ -11,11 +11,11 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, Set};
 use serial_test::serial;
 
 use super::{
-    prepare_data::sign_up,
+    prepare_data::{sign_up_member, AsMember},
     tasks::{project_in, task_form},
 };
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::TestMember;
 
 async fn task_named(ctx: &AppContext, title: &str) -> tasks::Model {
     tasks::Entity::find()
@@ -31,7 +31,7 @@ async fn task_named(ctx: &AppContext, title: &str) -> tasks::Model {
 async fn done_task(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
-    owner: &Cookie,
+    owner: &TestMember,
     title: &str,
     project_id: i64,
     assignee: &str,
@@ -39,11 +39,7 @@ async fn done_task(
 ) {
     let mut form = task_form(title, project_id, assignee);
     form["status"] = "done".into();
-    request
-        .post("/tasks")
-        .add_header(owner.0.clone(), owner.1.clone())
-        .form(&form)
-        .await;
+    request.post("/tasks").as_member(owner).form(&form).await;
     let mut task: tasks::ActiveModel = task_named(ctx, title).await.into();
     task.done_at = Set(Some(done_at));
     task.update(&ctx.db).await.unwrap();
@@ -69,7 +65,7 @@ fn last_week_in_london() -> DateTime<FixedOffset> {
 #[serial]
 async fn done_at_follows_the_status_on_every_route() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         let done_at = |title: &'static str| {
             let ctx = &ctx;
@@ -79,16 +75,12 @@ async fn done_at_follows_the_status_on_every_route() {
         // Added straight into Done.
         let mut form = task_form("Born done", project.id, "");
         form["status"] = "done".into();
-        request
-            .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
-            .form(&form)
-            .await;
+        request.post("/tasks").as_member(&owner).form(&form).await;
         assert!(done_at("Born done").await.is_some());
 
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Ship it", project.id, ""))
             .await;
         let id = task_named(&ctx, "Ship it").await.id;
@@ -101,7 +93,7 @@ async fn done_at_follows_the_status_on_every_route() {
             async move {
                 request
                     .post(&format!("/tasks/{id}/status"))
-                    .add_header(cookie.0, cookie.1)
+                    .as_member(&cookie)
                     .form(&serde_json::json!({ "status": value }))
                     .await;
             }
@@ -127,7 +119,7 @@ async fn done_at_follows_the_status_on_every_route() {
             async move {
                 request
                     .post(&format!("/tasks/{id}"))
-                    .add_header(cookie.0, cookie.1)
+                    .as_member(&cookie)
                     .form(&form)
                     .await;
             }
@@ -146,7 +138,7 @@ async fn done_at_follows_the_status_on_every_route() {
 #[serial]
 async fn the_board_shows_the_latest_five_done_per_lane() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();
@@ -180,14 +172,20 @@ async fn the_board_shows_the_latest_five_done_per_lane() {
         }
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Launch still open", launch.id, ""))
             .await;
 
         let get = |url: &'static str| {
             let request = &request;
             let cookie = owner.clone();
-            async move { request.get(url).add_header(cookie.0, cookie.1).await.text() }
+            async move {
+                request
+                    .get(url)
+                    .add_header(cookie.0.clone(), cookie.1.clone())
+                    .await
+                    .text()
+            }
         };
         let launch_link = format!(r#"href="/tasks?filter=done&project={}""#, launch.id);
         let mobile_link = format!(r#"href="/tasks?filter=done&project={}""#, mobile.id);
@@ -235,7 +233,7 @@ async fn the_board_shows_the_latest_five_done_per_lane() {
 #[serial]
 async fn the_done_view_groups_by_week_and_month_in_the_orgs_zone() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let launch = project_in(&ctx, "acme", "Launch").await;
         let mobile = project_in(&ctx, "acme", "Mobile").await;
         let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap();
@@ -278,7 +276,7 @@ async fn the_done_view_groups_by_week_and_month_in_the_orgs_zone() {
             async move {
                 request
                     .get(&url)
-                    .add_header(cookie.0, cookie.1)
+                    .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
@@ -341,8 +339,8 @@ async fn the_done_view_groups_by_week_and_month_in_the_orgs_zone() {
 #[serial]
 async fn the_done_view_ignores_another_orgs_project_or_person() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let launch = project_in(&ctx, "acme", "Launch").await;
         let secret = project_in(&ctx, "globex", "Secret plan").await;
         done_task(&request, &ctx, &owner, "Ours", launch.id, "", hours_ago(1)).await;
@@ -374,7 +372,7 @@ async fn the_done_view_ignores_another_orgs_project_or_person() {
 #[serial]
 async fn the_migration_backfills_done_at_from_updated_at() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let launch = project_in(&ctx, "acme", "Launch").await;
         done_task(
             &request,
@@ -388,7 +386,7 @@ async fn the_migration_backfills_done_at_from_updated_at() {
         .await;
         request
             .post("/tasks")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&task_form("Open", launch.id, ""))
             .await;
 

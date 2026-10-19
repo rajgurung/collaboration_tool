@@ -11,12 +11,9 @@ use collab::{
 use loco_rs::{auth::jwt, testing::prelude::*, TestServer};
 use serial_test::serial;
 
-use super::prepare_data::{cookie_from, login, sign_up, USER_PASSWORD};
+use super::prepare_data::{cookie_from, login, sign_up_member, Cookie, USER_PASSWORD};
 
-async fn can_open_more(
-    request: &TestServer,
-    cookie: &(axum::http::HeaderName, axum::http::HeaderValue),
-) -> bool {
+async fn can_open_more(request: &TestServer, cookie: &Cookie) -> bool {
     let res = request
         .get("/more")
         .add_header(cookie.0.clone(), cookie.1.clone())
@@ -35,7 +32,7 @@ async fn can_open_more(
 #[serial]
 async fn sign_out_everywhere_ends_other_sessions_but_keeps_this_one() {
     request::<App, _, _>(|request, ctx| async move {
-        let phone = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let phone = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let laptop = login(&request, "alice@example.com", USER_PASSWORD).await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
@@ -65,7 +62,7 @@ async fn sign_out_everywhere_ends_other_sessions_but_keeps_this_one() {
         );
         let page = request
             .get("/more?signed_out=1")
-            .add_header(fresh.0, fresh.1)
+            .add_header(fresh.0.clone(), fresh.1.clone())
             .await
             .text();
         assert!(page.contains("Signed out on every other device."));
@@ -98,7 +95,7 @@ async fn signing_out_everywhere_needs_a_session() {
 #[serial]
 async fn a_password_reset_ends_every_session() {
     request::<App, _, _>(|request, ctx| async move {
-        let cookie = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let cookie = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         request
             .post("/forgot")
             .form(&serde_json::json!({ "email": "alice@example.com" }))
@@ -128,7 +125,7 @@ async fn a_password_reset_ends_every_session() {
 #[serial]
 async fn a_token_without_a_session_version_is_refused() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();

@@ -4,16 +4,16 @@ use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 
 use super::{
-    prepare_data::sign_up,
+    prepare_data::{sign_up_member, AsMember},
     tasks::{approved_member, project_in, task_form},
 };
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::TestMember;
 
 /// Saves a view from a form like the page's, returning the status and redirect.
 async fn save(
     request: &loco_rs::TestServer,
-    cookie: &Cookie,
+    cookie: &TestMember,
     form: &[(&str, &str)],
 ) -> (u16, String) {
     let body: String = form
@@ -23,7 +23,7 @@ async fn save(
         .join("&");
     let res = request
         .post("/tasks/views")
-        .add_header(cookie.0.clone(), cookie.1.clone())
+        .as_member(cookie)
         .content_type("application/x-www-form-urlencoded")
         .bytes(body.into())
         .await;
@@ -39,7 +39,7 @@ async fn save(
 #[serial]
 async fn a_saved_view_brings_its_setup_back() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let res = save(
             &request,
             &alice,
@@ -78,7 +78,7 @@ async fn a_saved_view_brings_its_setup_back() {
         assert!(!done.contains("view-chip-on"));
         let other = request
             .get("/tasks?scope=all")
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(other.contains("My lanes") && !other.contains("view-chip-on"));
@@ -90,7 +90,7 @@ async fn a_saved_view_brings_its_setup_back() {
 #[serial]
 async fn the_default_view_opens_tasks() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         for (name, default) in [("First", "on"), ("Mine by person", "on")] {
             save(
                 &request,
@@ -124,7 +124,7 @@ async fn the_default_view_opens_tasks() {
 
         let chosen = request
             .get("/tasks?scope=all&group=project")
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(
@@ -139,12 +139,12 @@ async fn the_default_view_opens_tasks() {
 #[serial]
 async fn views_are_named_limited_and_private() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
 
         let res = request
             .post("/tasks/views")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "name": "  ", "scope": "all" }))
             .await;
@@ -161,7 +161,7 @@ async fn views_are_named_limited_and_private() {
         }
         let res = request
             .post("/tasks/views")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "name": "One too many", "scope": "all" }))
             .await;
@@ -190,7 +190,7 @@ async fn views_are_named_limited_and_private() {
         ] {
             let res = request
                 .post(&path)
-                .add_header(bob.0.clone(), bob.1.clone())
+                .as_member(&bob)
                 .form(&serde_json::json!({ "name": "hijacked" }))
                 .await;
             assert_eq!(res.status_code(), 404, "{path}");
@@ -207,7 +207,7 @@ async fn views_are_named_limited_and_private() {
 #[serial]
 async fn views_can_be_renamed_updated_and_deleted() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         save(&request, &alice, &[("name", "Mine"), ("scope", "mine"), ("group", "project")]).await;
         let view = saved_views::Entity::find().one(&ctx.db).await.unwrap().unwrap();
 
@@ -220,12 +220,12 @@ async fn views_can_be_renamed_updated_and_deleted() {
 
         request
             .post(&format!("/tasks/views/{}", view.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "name": "Everything", "is_default": "on" }))
             .await;
         request
             .post(&format!("/tasks/views/{}/setup", view.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "scope": "all", "group": "none", "view": "list", "q": "venue" }))
             .await;
         let saved = saved_views::Entity::find().one(&ctx.db).await.unwrap().unwrap();
@@ -238,7 +238,7 @@ async fn views_can_be_renamed_updated_and_deleted() {
 
         let res = request
             .post(&format!("/tasks/views/{}/delete", view.id))
-            .add_header(alice.0, alice.1)
+            .as_member(&alice)
             .form(&serde_json::json!({ "scope": "all" }))
             .await;
         assert_eq!(res.status_code(), 303);
@@ -251,16 +251,16 @@ async fn views_can_be_renamed_updated_and_deleted() {
 #[serial]
 async fn the_desktop_list_shows_lanes_as_rows() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let launch = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&task_form("Book the venue", launch.id, ""))
             .await;
         let list = request
             .get("/tasks/board?view=list&scope=all&group=project")
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(list.contains(r#"id="task-table""#));

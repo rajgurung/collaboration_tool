@@ -116,8 +116,11 @@ impl Hooks for App {
     async fn initializers(_ctx: &AppContext) -> Result<Vec<Box<dyn Initializer>>> {
         Ok(vec![
             Box::new(initializers::view_engine::ViewEngineInitializer),
-            Box::new(initializers::origin_check::OriginCheckInitializer),
             Box::new(initializers::current_org::CurrentOrgInitializer),
+            // After current-org, so it runs first: each initializer's layer
+            // wraps the ones before it. A cross-site POST is refused before
+            // current-org buffers its body.
+            Box::new(initializers::origin_check::OriginCheckInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
         ])
     }

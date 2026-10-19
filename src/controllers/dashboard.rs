@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use chrono::Timelike;
 use loco_rs::prelude::*;
+use serde::Deserialize;
 
 use crate::{
     controllers::chat,
     extractors::current_member::CurrentMember,
-    models::{guide, meetings, memberships, projects, task_assignees, tasks},
+    models::{guide, meetings, memberships, organisations, projects, task_assignees, tasks},
     views::{layout::avatar_color, time},
 };
 
@@ -15,11 +16,49 @@ const MY_TASKS: usize = 4;
 /// How many conversations Home lists.
 const RECENT_CHATS: usize = 2;
 
+#[derive(Debug, Deserialize)]
+struct HomeQuery {
+    /// Set by a switch. Only says "show the toast"; the name comes from the
+    /// org this request resolved.
+    switched: Option<String>,
+    /// Set by a stale-tab refusal: the org the tab was drawn for, if known.
+    from: Option<String>,
+}
+
+/// The card shown after a stale tab was sent here. It names the old org only
+/// when you are an active member of it, so a hand-made `?from=` reveals
+/// nothing.
+async fn stale_notice(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    from: Option<&str>,
+) -> Option<serde_json::Value> {
+    let from = from?;
+    // Never empty, so the template's `if` holds for the nameless notice too.
+    let nameless = serde_json::json!({ "id": null, "name": null });
+    let Ok(id) = from.parse::<i64>() else {
+        return Some(nameless);
+    };
+    if id == member.org.id {
+        return None;
+    }
+    // An error only changes the wording: the refusal has already happened.
+    let shown = match memberships::Model::active_in(&ctx.db, id, member.user.id).await {
+        Ok(Some(_)) => organisations::Model::find_by_id(&ctx.db, id).await.ok(),
+        _ => None,
+    };
+    Some(match shown {
+        Some(org) => serde_json::json!({ "id": org.id, "name": org.name }),
+        None => nameless,
+    })
+}
+
 #[debug_handler]
 async fn index(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<HomeQuery>,
 ) -> Result<Response> {
     let org_id = member.org.id;
     let me = member.user.id;
@@ -147,7 +186,12 @@ async fn index(
     };
     let welcome = membership.as_ref().is_some_and(|m| m.welcomed_at.is_none());
 
-    format::render().view(
+    let stale = stale_notice(&ctx, &member, query.from.as_deref()).await;
+    let flash = query.switched.as_ref().map(
+        |_| data!({ "kind": "info", "message": format!("You're now in {}", member.org.name) }),
+    );
+
+    let mut response = format::render().view(
         &v,
         "dashboard/index.html",
         member.page(
@@ -165,9 +209,18 @@ async fn index(
                 "welcome": welcome,
                 "today": chrono::Utc::now().with_timezone(&tz).format("%A %-d %B").to_string(),
                 "greeting": greeting(chrono::Utc::now().with_timezone(&tz).hour()),
+                "stale": stale,
+                "flash": flash,
             }),
         ),
-    )
+    )?;
+    if query.switched.is_some() || query.from.is_some() {
+        response.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        );
+    }
+    Ok(response)
 }
 
 pub fn routes() -> Routes {

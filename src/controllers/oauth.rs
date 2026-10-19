@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::{
     data::settings::Settings,
     extractors::{
-        current_member::{CurrentMember, SWITCHED_ORG},
+        current_member::{CurrentMember, PinnedMember, SWITCHED_ORG},
         current_user::CurrentUser,
     },
     models::{
@@ -352,7 +352,7 @@ async fn authorize_page(
 async fn authorize(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
-    member: CurrentMember,
+    PinnedMember(member): PinnedMember,
     Form(params): Form<AuthorizeParams>,
 ) -> Result<Response> {
     let settings = Settings::from_context(&ctx)?;

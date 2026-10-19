@@ -17,7 +17,8 @@
   <script src="{{ asset_url(path="vendor/htmx-ext-ws.js") }}" defer></script>
   <script src="{{ asset_url(path="js/app.js") }}" defer></script>
 </head>
-<body {% block body_attrs %}{% endblock body_attrs %}>
+{# The org this page was drawn for. HTMX sends it as X-Org-Id and app.ts adds it to plain forms, so a tab left open after a switch can't write into the new org. #}
+<body {% if current_org_id %}data-org-id="{{ current_org_id }}" hx-headers='{"X-Org-Id": {{ current_org_id }}}' {% endif %}{% block body_attrs %}{% endblock body_attrs %}>
   {% block body %}{% endblock body %}
   {% if flash %}<div hidden data-flash="{{ flash.kind | default(value='info') }}">{{ flash.message }}</div>{% endif %}
 </body>

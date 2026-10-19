@@ -7,19 +7,19 @@ use loco_rs::testing::prelude::*;
 use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up};
+use super::prepare_data::{join, sign_up_member, AsMember};
 
 #[tokio::test]
 #[serial]
 async fn new_meeting_form_defaults_to_today_and_ticks_me() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();
         let res = request
             .get("/meetings/new")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .await;
         assert_eq!(res.status_code(), 200);
         let body = res.text();
@@ -44,7 +44,7 @@ async fn new_meeting_form_defaults_to_today_and_ticks_me() {
 #[serial]
 async fn logging_a_meeting_saves_attendees_and_shows_it() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com").await.unwrap();
 
         let body = format!(
@@ -53,7 +53,7 @@ async fn logging_a_meeting_saves_attendees_and_shows_it() {
         );
         let res = request
             .post("/meetings")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .bytes(body.into())
             .content_type("application/x-www-form-urlencoded")
@@ -74,15 +74,15 @@ async fn logging_a_meeting_saves_attendees_and_shows_it() {
 #[serial]
 async fn meetings_need_minutes_a_date_and_team_attendees() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        join(&request, "acme", "bob", "bob@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        join(&request, &ctx, "acme", "bob", "bob@example.com").await;
         let pending_bob = users::Model::find_by_email(&ctx.db, "bob@example.com")
             .await
             .unwrap();
 
         let res = request
             .post("/meetings")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "title": "Weekly", "held_on": "", "summary": "" }))
             .await;
@@ -92,7 +92,7 @@ async fn meetings_need_minutes_a_date_and_team_attendees() {
 
         let res = request
             .post("/meetings")
-            .add_header(owner.0, owner.1)
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .bytes(
                 format!(
@@ -114,14 +114,14 @@ async fn meetings_need_minutes_a_date_and_team_attendees() {
 #[serial]
 async fn meetings_stay_inside_their_organisation() {
     request::<App, _, _>(|request, _ctx| async move {
-        let acme = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let globex = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let acme = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let globex = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         request
             .post("/meetings")
-            .add_header(globex.0, globex.1)
+            .as_member(&globex)
             .form(&serde_json::json!({ "title": "Board meeting", "held_on": "2026-10-01", "summary": "Confidential plans" }))
             .await;
-        let page = request.get("/meetings").add_header(acme.0, acme.1).await;
+        let page = request.get("/meetings").add_header(acme.0.clone(), acme.1.clone()).await;
         assert!(!page.text().contains("Confidential plans"));
     })
     .await;

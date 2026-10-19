@@ -1,0 +1,42 @@
+{# The switcher's rows: the sidebar menu, the phone sheet and the /orgs page share them. One form, and each row a button with its own formaction, so it works without JavaScript; app.ts adds the keys and the "Switching…" state. #}
+<form method="post" class="org-list" data-org-list>
+  {% if me.acting %}
+  <div class="org-menu-label">Acting in</div>
+  <button type="button" class="org-row" role="menuitemradio" aria-checked="true" data-org-current>
+    <span class="org-logo">{{ org.name | truncate(length=1, end="") | upper }}</span>
+    <span class="org-text"><span class="org-name truncate-1">{{ org.name }}</span><span class="meta">{{<icon name="shield" class="h-[13px] w-[13px]"/>}}Platform admin</span></span>
+    {{<icon name="check" class="tick h-5 w-5"/>}}
+  </button>
+  <div class="org-sep" role="separator"></div>
+  <div class="org-menu-label">Your organisations</div>
+  {% else %}
+  <div class="org-menu-label org-menu-only">Your organisations</div>
+  {% endif %}
+  <div class="org-scroll">
+    {% for o in active_orgs %}
+    {% if o.current %}
+    <button type="button" class="org-row" role="menuitemradio" aria-checked="true" data-org-current>
+      <span class="org-logo">{{ o.name | truncate(length=1, end="") | upper }}</span>
+      <span class="org-text"><span class="org-name truncate-1">{{ o.name }}</span><span class="meta capitalize">{{ o.role }}</span></span>
+      {{<icon name="check" class="tick h-5 w-5"/>}}
+    </button>
+    {% else %}
+    <button type="submit" formaction="/orgs/{{ o.id }}/switch" hx-post="/orgs/{{ o.id }}/switch" class="org-row" role="menuitemradio" aria-checked="false" data-org-name="{{ o.name }}">
+      <span class="org-logo">{{ o.name | truncate(length=1, end="") | upper }}</span>
+      <span class="org-text"><span class="org-name truncate-1">{{ o.name }}</span><span class="meta capitalize" data-org-role>{{ o.role }}</span></span>
+      <span class="org-spinner" aria-hidden="true">{{<icon name="loader-circle" class="spin h-5 w-5"/>}}</span>
+    </button>
+    {% endif %}
+    {% endfor %}
+    {% if pending_orgs | length > 0 %}
+    <div class="org-sep" role="separator"></div>
+    {% for o in pending_orgs %}
+    <div class="org-row" role="menuitem" aria-disabled="true">
+      <span class="org-logo org-logo-wait">{{ o.name | truncate(length=1, end="") | upper }}</span>
+      <span class="org-text"><span class="org-name truncate-1">{{ o.name }}</span><span class="meta">{{<icon name="clock-3" class="h-[13px] w-[13px]"/>}}Waiting for approval</span></span>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+  {% if me.acting %}<p class="org-note">Switching ends acting in {{ org.name }}.</p>{% endif %}
+</form>

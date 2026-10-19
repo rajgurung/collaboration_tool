@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::{
     data::settings::Settings,
     extractors::{
-        current_member::{CurrentMember, SWITCHED_ORG_TOKEN},
+        current_member::{CurrentMember, PinnedMember, SWITCHED_ORG_TOKEN},
         session::redirect_response,
     },
     models::access_tokens::{self, PersonalParams, MAX_PERSONAL},
@@ -96,7 +96,7 @@ async fn index(
 /// in a redirect or a URL, which would end up in logs.
 #[debug_handler]
 async fn create_token(
-    member: CurrentMember,
+    PinnedMember(member): PinnedMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     Form(form): Form<TokenForm>,

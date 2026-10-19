@@ -96,3 +96,85 @@ async fn one_membership_per_organisation_per_user() {
     let all = memberships::Model::for_user(&ctx.db, alice).await.unwrap();
     assert_eq!(all.len(), 2);
 }
+
+async fn add_with_status(ctx: &AppContext, org_id: i64, user_id: i64, status: &str) {
+    let membership = add_member(ctx, org_id, user_id, "alice").await.unwrap();
+    let mut membership: memberships::ActiveModel = membership.into();
+    membership.status = ActiveValue::Set(status.to_string());
+    membership.update(&ctx.db).await.unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn switcher_counts_counts_active_and_pending_only() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _) = sign_up(ctx, "Acme", "alice").await;
+    assert_eq!(
+        memberships::Model::switcher_counts(&ctx.db, alice)
+            .await
+            .unwrap(),
+        (1, 0)
+    );
+    for (name, status) in [
+        ("Beta", memberships::status::ACTIVE),
+        ("Gamma", memberships::status::PENDING),
+        ("Delta", memberships::status::REJECTED),
+        ("Epsilon", memberships::status::REMOVED),
+    ] {
+        let (_, org) = sign_up(ctx, name, &name.to_lowercase()).await;
+        add_with_status(ctx, org, alice, status).await;
+    }
+    assert_eq!(
+        memberships::Model::switcher_counts(&ctx.db, alice)
+            .await
+            .unwrap(),
+        (2, 1)
+    );
+    assert_eq!(
+        memberships::Model::switcher_counts(&ctx.db, 999_999)
+            .await
+            .unwrap(),
+        (0, 0)
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn for_user_with_orgs_sorts_active_by_name_then_pending() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _) = sign_up(ctx, "Northwind Bakery", "alice").await;
+    for (name, status) in [
+        ("zen scale", memberships::status::ACTIVE),
+        ("Himalayan Ritual", memberships::status::PENDING),
+        ("Acme Studio", memberships::status::ACTIVE),
+        ("Brightside", memberships::status::PENDING),
+        ("Declined Co", memberships::status::REJECTED),
+        ("Removed Co", memberships::status::REMOVED),
+    ] {
+        let owner = name.replace(' ', "").to_lowercase();
+        let (_, org) = sign_up(ctx, name, &owner).await;
+        add_with_status(ctx, org, alice, status).await;
+    }
+    let names: Vec<(String, String)> = memberships::Model::for_user_with_orgs(&ctx.db, alice)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(m, org)| (org.name, m.status))
+        .collect();
+    let expected = [
+        ("Acme Studio", "active"),
+        ("Northwind Bakery", "active"),
+        ("zen scale", "active"),
+        ("Brightside", "pending"),
+        ("Himalayan Ritual", "pending"),
+    ];
+    assert_eq!(
+        names,
+        expected
+            .iter()
+            .map(|(n, s)| (n.to_string(), s.to_string()))
+            .collect::<Vec<_>>()
+    );
+}

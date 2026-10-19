@@ -28,7 +28,9 @@ pub mod status {
 
 /// `status = 'active'`, for ordering active memberships first (descending).
 fn active_first() -> sea_orm::sea_query::SimpleExpr {
-    Expr::col(Column::Status).eq(status::ACTIVE)
+    // Qualified, so a query that joins another table with a status column
+    // still means this one.
+    Expr::col((Entity, Column::Status)).eq(status::ACTIVE)
 }
 
 #[async_trait::async_trait]
@@ -80,6 +82,68 @@ impl Model {
             .order_by_asc(Column::Id)
             .all(db)
             .await?)
+    }
+
+    /// How many active and pending memberships the user has, for whether the
+    /// layout shows the organisation switcher. One small indexed query.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn switcher_counts<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+    ) -> ModelResult<(i64, i64)> {
+        let counts = Entity::find()
+            .select_only()
+            .column_as(
+                Expr::cust(format!(
+                    "count(*) FILTER (WHERE status = '{}')",
+                    status::ACTIVE
+                )),
+                "active",
+            )
+            .column_as(
+                Expr::cust(format!(
+                    "count(*) FILTER (WHERE status = '{}')",
+                    status::PENDING
+                )),
+                "pending",
+            )
+            .filter(Column::UserId.eq(user_id))
+            .into_tuple::<(i64, i64)>()
+            .one(db)
+            .await?;
+        Ok(counts.unwrap_or_default())
+    }
+
+    /// The user's active and pending memberships with their organisations,
+    /// for the switcher: active first, then pending, each A to Z by name.
+    /// Declined and removed ones are left out.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn for_user_with_orgs<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+    ) -> ModelResult<Vec<(Self, organisations::Model)>> {
+        Ok(Entity::find()
+            .find_also_related(organisations::Entity)
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::Status.is_in([status::ACTIVE, status::PENDING]))
+            .order_by_desc(active_first())
+            .order_by_asc(Expr::expr(Func::lower(Expr::col((
+                organisations::Entity,
+                organisations::Column::Name,
+            )))))
+            .order_by_asc(Expr::col((
+                organisations::Entity,
+                organisations::Column::Id,
+            )))
+            .all(db)
+            .await?
+            .into_iter()
+            .filter_map(|(m, org)| org.map(|org| (m, org)))
+            .collect())
     }
 
     /// The membership to use when no organisation has been chosen: the
