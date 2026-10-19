@@ -7,8 +7,8 @@ use crate::{
         client::client_ip,
         current_user::CurrentUser,
         session::{
-            append_cookie, cleared_acting_org_cookie, cleared_session_cookie, redirect_response,
-            session_cookie,
+            append_cookie, cleared_acting_org_cookie, cleared_current_org_cookie,
+            cleared_session_cookie, redirect_response, session_cookie, signed_in_cookies,
         },
     },
     mailers::{auth::AuthMailer, security::SecurityMailer},
@@ -106,7 +106,7 @@ async fn login(
         return login_error(&v, &form, 403, LOCKED);
     }
     format::render()
-        .cookies(&[session_cookie(&ctx, &user)?])?
+        .cookies(&signed_in_cookies(&ctx, &user)?)?
         .redirect(safe_next(&form.next).unwrap_or("/"))
 }
 
@@ -132,13 +132,15 @@ async fn logout(State(ctx): State<AppContext>, headers: HeaderMap) -> Result<Res
     for cookie in [
         cleared_session_cookie(&ctx)?,
         cleared_acting_org_cookie(&ctx)?,
+        cleared_current_org_cookie(&ctx)?,
     ] {
         append_cookie(&mut response, &cookie)?;
     }
     Ok(response)
 }
 
-/// Ends every session of this user, then signs this device back in.
+/// Ends every session of this user, then signs this device back in. This
+/// browser keeps its `current_org`, so the person stays in the same org.
 #[debug_handler]
 async fn sign_out_everywhere(
     CurrentUser(user): CurrentUser,

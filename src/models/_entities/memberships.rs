@@ -16,7 +16,7 @@ pub struct Model {
     pub approved_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(unique)]
     pub organisation_id: i64,
-    #[sea_orm(unique)]
+    #[sea_orm(unique_key = "user")]
     pub user_id: i64,
     pub approved_by_id: Option<i64>,
     pub guide_dismissed_at: Option<DateTimeWithTimeZone>,

@@ -29,6 +29,7 @@ pub struct Model {
     pub secrets_unlocked_until: Option<DateTimeWithTimeZone>,
     pub secrets_unlocked_sid: Option<String>,
     pub locked_at: Option<DateTimeWithTimeZone>,
+    pub secrets_unlocked_org_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -61,7 +62,13 @@ pub enum Relation {
     NoteReactions,
     #[sea_orm(has_many = "super::oauth_codes::Entity")]
     OauthCodes,
-    #[sea_orm(has_many = "super::organisations::Entity")]
+    #[sea_orm(
+        belongs_to = "super::organisations::Entity",
+        from = "Column::SecretsUnlockedOrgId",
+        to = "super::organisations::Column::Id",
+        on_update = "Cascade",
+        on_delete = "SetNull"
+    )]
     Organisations,
     #[sea_orm(has_many = "super::projects::Entity")]
     Projects,

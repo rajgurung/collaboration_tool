@@ -117,12 +117,14 @@ impl Hooks for App {
         Ok(vec![
             Box::new(initializers::view_engine::ViewEngineInitializer),
             Box::new(initializers::origin_check::OriginCheckInitializer),
+            Box::new(initializers::current_org::CurrentOrgInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
         ])
     }
 
     fn routes(ctx: &AppContext) -> AppRoutes {
         AppRoutes::with_default_routes() // controller routes below
+            .add_route(controllers::orgs::routes())
             .add_route(controllers::logins::routes())
             .add_route(controllers::documents::routes())
             .add_route(controllers::claude::routes())

@@ -2,10 +2,14 @@
 //! personal access tokens, and the list of connections with Revoke.
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use loco_rs::prelude::*;
+use serde::Deserialize;
 
 use crate::{
     data::settings::Settings,
-    extractors::{current_member::CurrentMember, session::redirect_response},
+    extractors::{
+        current_member::{CurrentMember, SWITCHED_ORG_TOKEN},
+        session::redirect_response,
+    },
     models::access_tokens::{self, PersonalParams, MAX_PERSONAL},
     views::{
         forms::{field_errors, FieldErrors},
@@ -20,6 +24,15 @@ struct Extra {
     new_token: Option<String>,
     name: String,
     errors: FieldErrors,
+    error: Option<&'static str>,
+}
+
+/// The token form. `org_id` is the organisation the form was shown for, a
+/// string checked by hand like on the Allow page.
+#[derive(Deserialize)]
+struct TokenForm {
+    name: String,
+    org_id: Option<String>,
 }
 
 async fn page(
@@ -58,6 +71,8 @@ async fn page(
                 "new_token": extra.new_token,
                 "name": extra.name,
                 "errors": extra.errors,
+                "error": extra.error,
+                "org_id": member.org.id,
             }),
         ),
     )?;
@@ -84,12 +99,21 @@ async fn create_token(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
-    Form(params): Form<PersonalParams>,
+    Form(form): Form<TokenForm>,
 ) -> Result<Response> {
     // The page explains how to leave; a token would be for the wrong organisation.
     if member.acting {
         return page(&ctx, &member, &v, StatusCode::FORBIDDEN, Extra::default()).await;
     }
+    if !member.shown_for_this_org(form.org_id.as_deref()) {
+        let extra = Extra {
+            error: Some(SWITCHED_ORG_TOKEN),
+            name: form.name,
+            ..Extra::default()
+        };
+        return page(&ctx, &member, &v, StatusCode::CONFLICT, extra).await;
+    }
+    let params = PersonalParams { name: form.name };
     let mcp_url = Settings::from_context(&ctx)?.mcp_url();
     match access_tokens::Model::create_personal(
         &ctx.db,

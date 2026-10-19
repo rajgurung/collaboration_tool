@@ -1,14 +1,14 @@
-//! A person with memberships in two organisations. The database still allows
-//! only one membership per user, so each test drops that unique index first.
-//! Every test boots a freshly migrated database, so this does not leak.
+//! A person with memberships in two organisations, and the `current_org`
+//! cookie that picks between them.
+use axum::http::{HeaderName, HeaderValue};
 use collab::{
     app::App,
     models::{
         access_tokens::{self, PersonalParams},
-        folders, login_events, logins, memberships, organisations, users,
+        folders, login_events, logins, memberships, organisations, tasks, users,
     },
 };
-use loco_rs::{app::AppContext, prelude::*};
+use loco_rs::{app::AppContext, prelude::*, TestServer};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -17,13 +17,15 @@ use serial_test::serial;
 
 use super::{
     mcp::{rpc, tool, RESOURCE},
-    prepare_data::{join, sign_up},
-    tasks::project_in,
+    prepare_data::{join, sign_up, USER_PASSWORD},
+    tasks::{project_in, task_form},
 };
+
+type Cookie = (HeaderName, HeaderValue);
 
 /// Alice owns Acme, then becomes an active member of Beta (owned by Bob).
 /// Returns Alice's id and her two memberships, Acme's first.
-async fn alice_in_two_orgs(
+pub(super) async fn alice_in_two_orgs(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
 ) -> (
@@ -34,10 +36,6 @@ async fn alice_in_two_orgs(
 ) {
     let cookie = sign_up(request, "Acme", "alice", "alice@example.com").await;
     sign_up(request, "Beta", "bob", "bob@example.com").await;
-    ctx.db
-        .execute_unprepared(r#"DROP INDEX "idx-memberships-user_id""#)
-        .await
-        .unwrap();
     let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
         .await
         .unwrap();
@@ -64,18 +62,57 @@ async fn alice_in_two_orgs(
     (cookie, alice.id, in_acme, in_beta)
 }
 
-async fn set_status(ctx: &AppContext, membership: memberships::Model, status: &str) {
+pub(super) async fn set_status(ctx: &AppContext, membership: memberships::Model, status: &str) {
     let mut active = membership.into_active_model();
     active.status = ActiveValue::Set(status.to_string());
     active.update(&ctx.db).await.unwrap();
 }
 
 /// The organisation name in the page's top bar.
-fn org_heading(html: &str) -> &str {
+pub(super) fn org_heading(html: &str) -> &str {
     let start = html.find("<h1").expect("a heading");
     let text = &html[start..];
     let text = &text[text.find('>').unwrap() + 1..];
     &text[..text.find("</h1>").unwrap()]
+}
+
+/// The session cookie plus `current_org=<value>`, as one request header.
+pub(super) fn with_org(cookie: &Cookie, value: impl std::fmt::Display) -> Cookie {
+    let both = format!("{}; current_org={value}", cookie.1.to_str().unwrap());
+    (cookie.0.clone(), HeaderValue::from_str(&both).unwrap())
+}
+
+/// The response's `Set-Cookie` for this cookie name, if any.
+pub(super) fn set_cookie(res: &axum_test::TestResponse, name: &str) -> Option<String> {
+    res.headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .find(|c| c.starts_with(&format!("{name}=")))
+}
+
+/// Whether the response clears this cookie.
+pub(super) fn clears(res: &axum_test::TestResponse, name: &str) -> bool {
+    set_cookie(res, name)
+        .is_some_and(|c| c.starts_with(&format!("{name}=;")) && c.contains("Max-Age=0"))
+}
+
+pub(super) async fn switch(
+    request: &TestServer,
+    cookie: &Cookie,
+    org_id: impl std::fmt::Display,
+) -> axum_test::TestResponse {
+    request
+        .post(&format!("/orgs/{org_id}/switch"))
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .await
+}
+
+async fn dashboard(request: &TestServer, cookie: &Cookie) -> axum_test::TestResponse {
+    request
+        .get("/dashboard")
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .await
 }
 
 async fn token_in(ctx: &AppContext, org_id: i64, user_id: i64) -> String {
@@ -341,6 +378,462 @@ async fn a_password_reset_tells_the_owners_of_every_active_organisation() {
             .find(|m| m.contains("To: bob@example.com"))
             .unwrap();
         assert!(to_bob.contains("in Beta") && !to_bob.contains("Acme"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_sets_the_cookie_and_pages_follow_it() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let (acme, beta) = (in_acme.organisation_id, in_beta.organisation_id);
+
+        let res = switch(&request, &cookie, beta).await;
+        assert_eq!(res.status_code(), 303);
+        assert_eq!(res.headers()["location"], "/dashboard");
+        let set = set_cookie(&res, "current_org").unwrap();
+        assert!(set.starts_with(&format!("current_org={beta};")), "{set}");
+        let res = dashboard(&request, &with_org(&cookie, beta)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Beta");
+
+        let res = switch(&request, &with_org(&cookie, beta), acme).await;
+        let set = set_cookie(&res, "current_org").unwrap();
+        assert!(set.starts_with(&format!("current_org={acme};")), "{set}");
+        let res = dashboard(&request, &with_org(&cookie, acme)).await;
+        assert_eq!(org_heading(&res.text()), "Acme");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_over_htmx_returns_hx_redirect_with_the_cookies() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = request
+            .post(&format!("/orgs/{}/switch", in_beta.organisation_id))
+            .add_header(cookie.0.clone(), cookie.1.clone())
+            .add_header("HX-Request", "true")
+            .await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(res.headers()["HX-Redirect"], "/dashboard");
+        let set = set_cookie(&res, "current_org").unwrap();
+        assert!(set.starts_with(&format!("current_org={};", in_beta.organisation_id)));
+        assert!(clears(&res, "acting_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_current_org_cookie_is_http_only_lax_and_lasts_a_session() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = switch(&request, &cookie, in_beta.organisation_id).await;
+        let set = set_cookie(&res, "current_org").unwrap();
+        let session = ctx.config.get_jwt_config().unwrap().expiration;
+        assert!(set.contains("HttpOnly"), "{set}");
+        assert!(set.contains("SameSite=Lax"), "{set}");
+        assert!(set.contains("Path=/"), "{set}");
+        assert!(set.contains(&format!("Max-Age={session}")), "{set}");
+        assert!(!set.contains("Secure"), "no Secure in test: {set}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_valid_cookie_sends_no_clearing_cookie() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = dashboard(&request, &with_org(&cookie, in_beta.organisation_id)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(set_cookie(&res, "current_org"), None);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_to_an_org_you_are_not_active_in_is_a_404() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        sign_up(&request, "Globex", "carol", "carol@example.com").await;
+        let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
+            .await
+            .unwrap();
+        for id in [globex.id, 999_999] {
+            let res = switch(&request, &cookie, id).await;
+            assert_eq!(res.status_code(), 404, "org {id}");
+            assert_eq!(set_cookie(&res, "current_org"), None);
+        }
+        let beta = in_beta.organisation_id;
+        let mut membership = in_beta;
+        for status in [
+            memberships::status::PENDING,
+            memberships::status::REJECTED,
+            memberships::status::REMOVED,
+        ] {
+            let mut active = membership.into_active_model();
+            active.status = ActiveValue::Set(status.to_string());
+            membership = active.update(&ctx.db).await.unwrap();
+            let res = switch(&request, &cookie, beta).await;
+            assert_eq!(res.status_code(), 404, "{status}");
+            assert_eq!(set_cookie(&res, "current_org"), None);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_needs_a_signed_in_user() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (_, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = request
+            .post(&format!("/orgs/{}/switch", in_beta.organisation_id))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert_eq!(res.headers()["location"], "/login");
+        assert_eq!(set_cookie(&res, "current_org"), None);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_forged_cookie_falls_back_and_is_cleared() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, _) = alice_in_two_orgs(&request, &ctx).await;
+        sign_up(&request, "Globex", "carol", "carol@example.com").await;
+        let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
+            .await
+            .unwrap();
+        let res = dashboard(&request, &with_org(&cookie, globex.id)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Acme");
+        assert!(clears(&res, "current_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_garbage_cookie_falls_back_and_is_cleared() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, _) = alice_in_two_orgs(&request, &ctx).await;
+        let res = dashboard(&request, &with_org(&cookie, "abc")).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Acme");
+        assert!(clears(&res, "current_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_cookie_for_a_deleted_org_falls_back() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let beta = in_beta.organisation_id;
+        ctx.db
+            .execute_unprepared(&format!("DELETE FROM organisations WHERE id = {beta}"))
+            .await
+            .unwrap();
+        let res = dashboard(&request, &with_org(&cookie, beta)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Acme");
+        assert!(clears(&res, "current_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_cookie_for_an_org_you_were_removed_from_falls_back() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, _) = alice_in_two_orgs(&request, &ctx).await;
+        let acme = in_acme.organisation_id;
+        set_status(&ctx, in_acme, memberships::status::REMOVED).await;
+        let res = dashboard(&request, &with_org(&cookie, acme)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Beta");
+        assert!(clears(&res, "current_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_waiting_page_shows_only_without_an_active_membership() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let acme = in_acme.organisation_id;
+        set_status(&ctx, in_acme, memberships::status::PENDING).await;
+        let res = dashboard(&request, &with_org(&cookie, acme)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Beta");
+        assert!(clears(&res, "current_org"));
+
+        set_status(&ctx, in_beta, memberships::status::REMOVED).await;
+        let res = dashboard(&request, &with_org(&cookie, acme)).await;
+        assert_eq!(res.status_code(), 403);
+        assert!(res.text().contains("Acme"), "the Acme waiting page");
+        assert!(clears(&res, "current_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn with_a_beta_cookie_acme_tasks_404_and_new_tasks_go_to_beta() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let acme_project = project_in(&ctx, "acme", "Acme launch").await;
+        let beta_project = project_in(&ctx, "beta", "Beta launch").await;
+        let res = request
+            .post("/tasks")
+            .add_header(cookie.0.clone(), cookie.1.clone())
+            .form(&task_form("Acme task", acme_project.id, ""))
+            .await;
+        assert!(res.status_code().is_redirection(), "{}", res.text());
+        let acme_task = task_titled(&ctx, "Acme task").await;
+        assert_eq!(acme_task.organisation_id, in_acme.organisation_id);
+
+        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let res = request
+            .get(&format!("/tasks/{}", acme_task.id))
+            .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 404);
+
+        // Today a form without an org posts into the cookie's org. PR 3 adds
+        // a check that refuses a form shown for another org.
+        let res = request
+            .post("/tasks")
+            .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
+            .form(&task_form("Beta task", beta_project.id, ""))
+            .await;
+        assert!(res.status_code().is_redirection(), "{}", res.text());
+        let beta_task = task_titled(&ctx, "Beta task").await;
+        assert_eq!(beta_task.organisation_id, in_beta.organisation_id);
+    })
+    .await;
+}
+
+async fn task_titled(ctx: &AppContext, title: &str) -> tasks::Model {
+    tasks::Entity::find()
+        .filter(tasks::Column::Title.eq(title))
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn an_acme_token_acts_in_acme_whatever_the_cookie() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, alice, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        project_in(&ctx, "acme", "Acme launch").await;
+        project_in(&ctx, "beta", "Beta launch").await;
+        let acme_token = token_in(&ctx, in_acme.organisation_id, alice).await;
+        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let res = request
+            .post("/mcp")
+            .add_header("authorization", format!("Bearer {acme_token}"))
+            .add_header("accept", "application/json, text/event-stream")
+            .add_header(in_beta_cookie.0, in_beta_cookie.1)
+            .json(&json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "list_projects", "arguments": {} },
+            }))
+            .await;
+        assert_eq!(res.status_code(), 200);
+        let text = res.text();
+        assert!(text.contains("Acme launch"), "{text}");
+        assert!(!text.contains("Beta launch"), "{text}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn switching_ends_an_unlock_of_logins() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, alice, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = unlock(&request, &cookie).await;
+        assert_eq!(res.status_code(), 200, "{}", res.text());
+        let unlocked = users::Model::find_by_id(&ctx.db, alice).await.unwrap();
+        assert_eq!(
+            unlocked.secrets_unlocked_org_id,
+            Some(in_acme.organisation_id)
+        );
+
+        switch(&request, &cookie, in_beta.organisation_id).await;
+        let after = users::Model::find_by_id(&ctx.db, alice).await.unwrap();
+        assert_eq!(after.secrets_unlocked_until, None);
+        assert_eq!(after.secrets_unlocked_org_id, None);
+        assert!(!after.secrets_unlocked(
+            unlocked.secrets_unlocked_sid.as_deref(),
+            in_acme.organisation_id
+        ));
+    })
+    .await;
+}
+
+async fn unlock(request: &TestServer, cookie: &Cookie) -> axum_test::TestResponse {
+    request
+        .post("/documents/logins/unlock")
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .form(&[("password", USER_PASSWORD)])
+        .await
+}
+
+async fn reveal(request: &TestServer, cookie: &Cookie, id: i64) -> axum_test::TestResponse {
+    request
+        .post(&format!("/documents/logins/{id}/reveal"))
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .form(&[("field", "password")])
+        .await
+}
+
+#[tokio::test]
+#[serial]
+async fn an_acme_unlock_does_not_reveal_beta_logins() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let beta = in_beta.organisation_id;
+        // Admins see every login in Beta.
+        let mut admin = in_beta.into_active_model();
+        admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+        admin.update(&ctx.db).await.unwrap();
+        let in_beta_cookie = with_org(&cookie, beta);
+        let folder = folders::Model::list_for_org(&ctx.db, beta)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.folder.name == "Logins")
+            .unwrap()
+            .folder;
+        let res = request
+            .post(&format!("/documents/folders/{}/logins", folder.id))
+            .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
+            .form(&[
+                ("title", "Beta bank"),
+                ("username", "office@example.com"),
+                ("password", "beta-secret-123"),
+            ])
+            .await;
+        assert_eq!(res.status_code(), 303, "{}", res.text());
+        let login = logins::Entity::find().one(&ctx.db).await.unwrap().unwrap();
+
+        // Unlocked in Acme (no cookie), then the cookie edited to Beta.
+        assert_eq!(unlock(&request, &cookie).await.status_code(), 200);
+        let res = reveal(&request, &in_beta_cookie, login.id).await;
+        assert_eq!(res.status_code(), 423, "{}", res.text());
+        assert!(!res.text().contains("beta-secret-123"));
+
+        // Unlocked in Beta itself, the same reveal works.
+        assert_eq!(unlock(&request, &in_beta_cookie).await.status_code(), 200);
+        let res = reveal(&request, &in_beta_cookie, login.id).await;
+        assert_eq!(res.status_code(), 200, "{}", res.text());
+        assert!(res.text().contains("beta-secret-123"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn logout_clears_current_org_and_acting_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let res = request
+            .post("/logout")
+            .add_header(in_beta_cookie.0, in_beta_cookie.1)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(clears(&res, "auth_token"));
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn signing_in_clears_a_leftover_current_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (_, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let res = request
+            .post("/login")
+            .add_header(
+                "cookie",
+                format!("current_org={}; acting_org=1", in_beta.organisation_id),
+            )
+            .form(&json!({ "email": "alice@example.com", "password": USER_PASSWORD }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(set_cookie(&res, "auth_token").is_some());
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+
+        // Signing up on a shared browser clears them too.
+        let res = request
+            .post("/signup")
+            .add_header("cookie", format!("current_org={}", in_beta.organisation_id))
+            .form(&json!({
+                "organisation_name": "Globex",
+                "name": "carol",
+                "email": "carol@example.com",
+                "password": USER_PASSWORD,
+            }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+
+        // And so does joining.
+        let res = request
+            .post("/join/acme")
+            .add_header(
+                "cookie",
+                format!("current_org={}; acting_org=1", in_beta.organisation_id),
+            )
+            .form(&json!({
+                "name": "dave",
+                "email": "dave@example.com",
+                "password": USER_PASSWORD,
+            }))
+            .await;
+        assert_eq!(res.status_code(), 303, "{}", res.text());
+        assert!(clears(&res, "current_org"));
+        assert!(clears(&res, "acting_org"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn sign_out_everywhere_keeps_this_browsers_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let beta = in_beta.organisation_id;
+        let in_beta_cookie = with_org(&cookie, beta);
+        let res = request
+            .post("/account/sign-out-everywhere")
+            .add_header(in_beta_cookie.0, in_beta_cookie.1)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert_eq!(set_cookie(&res, "current_org"), None);
+
+        let fresh = super::prepare_data::cookie_from(&res.headers().clone());
+        let res = dashboard(&request, &with_org(&fresh, beta)).await;
+        assert_eq!(res.status_code(), 200);
+        assert_eq!(org_heading(&res.text()), "Beta");
     })
     .await;
 }

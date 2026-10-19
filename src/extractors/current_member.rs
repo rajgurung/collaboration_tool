@@ -9,6 +9,7 @@ use super::{
     session::redirect_response,
 };
 use crate::{
+    initializers::current_org::StaleCurrentOrg,
     models::{
         memberships::{self, role},
         organisations, users,
@@ -18,6 +19,17 @@ use crate::{
 
 /// Cookie a super admin sets to work inside another organisation.
 pub const ACTING_ORG_COOKIE: &str = "acting_org";
+
+/// Cookie that says which organisation this browser is working in. Only a
+/// hint: every request checks the membership again.
+pub const CURRENT_ORG_COOKIE: &str = "current_org";
+
+/// Shown when the Claude Allow page is posted in another organisation.
+pub const SWITCHED_ORG: &str =
+    "You switched organisation while this page was open. Start again from Claude.";
+
+/// Shown when the personal token form is posted in another organisation.
+pub const SWITCHED_ORG_TOKEN: &str = "You switched organisation while this page was open. Check the organisation, then create the token again.";
 
 #[derive(Clone)]
 pub struct CurrentMember {
@@ -54,6 +66,14 @@ impl CurrentMember {
             via_session: false,
             session_id: None,
         }
+    }
+
+    /// Whether a form's hidden `org_id` names this member's organisation.
+    /// Forms that grant Claude access pin the org they were shown for, so a
+    /// switch in another tab can't bind a token to a different one.
+    #[must_use]
+    pub fn shown_for_this_org(&self, org_id: Option<&str>) -> bool {
+        org_id.and_then(|id| id.parse::<i64>().ok()) == Some(self.org.id)
     }
 
     /// Owners and admins approve members and manage settings.
@@ -129,6 +149,8 @@ impl CurrentMember {
     }
 }
 
+/// Picks the organisation in this order: a super admin's `acting_org`, then a
+/// `current_org` the user is active in, then their default membership.
 impl FromRequestParts<AppContext> for CurrentMember {
     type Rejection = Response;
 
@@ -151,6 +173,17 @@ impl FromRequestParts<AppContext> for CurrentMember {
                     session_id,
                 });
             }
+        }
+
+        let chosen = chosen_org(parts, ctx, user.id)
+            .await
+            .map_err(|e| e.into_response())?;
+        if let Some((org, membership)) = chosen {
+            return Ok(Self {
+                via_session: true,
+                session_id,
+                ..Self::from_membership(user, org, membership)
+            });
         }
 
         let membership = memberships::Model::default_for_user(&ctx.db, user.id)
@@ -204,6 +237,32 @@ pub fn forbidden(message: &str) -> Error {
         StatusCode::FORBIDDEN,
         loco_rs::controller::ErrorDetail::new("forbidden", message),
     )
+}
+
+/// The organisation this browser chose with the `current_org` cookie, if the
+/// user is still an active member there. A cookie that fails the check raises
+/// [`StaleCurrentOrg`], so the response clears it.
+async fn chosen_org(
+    parts: &Parts,
+    ctx: &AppContext,
+    user_id: i64,
+) -> Result<Option<(organisations::Model, memberships::Model)>> {
+    let jar = cookie::CookieJar::from_headers(&parts.headers);
+    let Some(cookie) = jar.get(CURRENT_ORG_COOKIE) else {
+        return Ok(None);
+    };
+    let membership = match cookie.value().parse::<i64>() {
+        Ok(org_id) => memberships::Model::active_in(&ctx.db, org_id, user_id).await?,
+        Err(_) => None,
+    };
+    let Some(membership) = membership else {
+        if let Some(flag) = parts.extensions.get::<StaleCurrentOrg>() {
+            flag.raise();
+        }
+        return Ok(None);
+    };
+    let org = organisations::Model::find_by_id(&ctx.db, membership.organisation_id).await?;
+    Ok(Some((org, membership)))
 }
 
 async fn acting_org(parts: &Parts, ctx: &AppContext) -> Option<organisations::Model> {

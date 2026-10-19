@@ -8,7 +8,8 @@ const CAPACITY: usize = 256;
 pub enum NotifyEvent {
     /// This user has new notifications.
     Changed(i64),
-    /// This user's sessions were ended; their open streams close.
+    /// This user's sessions were ended, or they switched organisation;
+    /// their open streams close.
     SignedOut(i64),
 }
 
