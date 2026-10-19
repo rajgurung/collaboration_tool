@@ -14,6 +14,7 @@ use serial_test::serial;
 use super::{
     admin::super_admin_cookie,
     mcp::{rpc, RESOURCE},
+    multi_org::{alice_in_two_orgs, with_org},
     prepare_data::{sign_up, USER_PASSWORD},
 };
 
@@ -77,6 +78,42 @@ fn authorize_url(client_id: &str, redirect: &str) -> String {
     format!("/oauth/authorize?{query}")
 }
 
+/// The hidden `org_id` on the Allow page, as this browser sees it.
+async fn shown_org_id(request: &TestServer, cookie: &Cookie, client_id: &str) -> String {
+    let page = request
+        .get(&authorize_url(client_id, CLAUDE))
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .await;
+    assert_eq!(page.status_code(), 200, "{}", page.text());
+    let body = page.text();
+    let marker = r#"name="org_id" value=""#;
+    let start = body.find(marker).expect("a hidden org_id") + marker.len();
+    body[start..start + body[start..].find('"').unwrap()].to_string()
+}
+
+/// Posts the Allow page's form with this `org_id` (left out when `None`).
+async fn post_decision(
+    request: &TestServer,
+    cookie: &Cookie,
+    client_id: &str,
+    redirect: &str,
+    decision: &str,
+    org_id: Option<&str>,
+) -> axum_test::TestResponse {
+    let mut fields = authorize_fields(client_id, redirect);
+    fields.push(("decision", decision.to_string()));
+    if let Some(org_id) = org_id {
+        fields.push(("org_id", org_id.to_string()));
+    }
+    let pairs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    request
+        .post("/oauth/authorize")
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .content_type("application/x-www-form-urlencoded")
+        .bytes(form_body(&pairs))
+        .await
+}
+
 /// Presses a button on the Allow page and returns where it sends the browser.
 async fn decide(
     request: &TestServer,
@@ -85,15 +122,16 @@ async fn decide(
     redirect: &str,
     decision: &str,
 ) -> String {
-    let mut fields = authorize_fields(client_id, redirect);
-    fields.push(("decision", decision.to_string()));
-    let pairs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let res = request
-        .post("/oauth/authorize")
-        .add_header(cookie.0.clone(), cookie.1.clone())
-        .content_type("application/x-www-form-urlencoded")
-        .bytes(form_body(&pairs))
-        .await;
+    let org_id = shown_org_id(request, cookie, client_id).await;
+    let res = post_decision(
+        request,
+        cookie,
+        client_id,
+        redirect,
+        decision,
+        Some(&org_id),
+    )
+    .await;
     assert_eq!(res.status_code(), 302, "{}", res.text());
     location(res.headers())
 }
@@ -228,7 +266,7 @@ async fn registration_is_public_and_allowlisted() {
 #[tokio::test]
 #[serial]
 async fn the_whole_flow_from_sign_in_to_a_tool_call() {
-    request::<App, _, _>(|request, _ctx| async move {
+    request::<App, _, _>(|request, ctx| async move {
         sign_up(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let url = authorize_url(&client_id, CLAUDE);
@@ -282,6 +320,15 @@ async fn the_whole_flow_from_sign_in_to_a_tool_call() {
         let query = query_of(&back);
         assert_eq!(query["state"], "xyz");
         assert_eq!(query["iss"], "http://localhost:5150");
+        let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+            .await
+            .unwrap();
+        let issued = oauth_codes::Entity::find()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(issued.organisation_id, acme.id);
 
         let (status, tokens) = exchange(&request, &client_id, &query["code"]).await;
         assert_eq!(status, 200, "{tokens}");
@@ -599,6 +646,7 @@ async fn a_super_admin_acting_elsewhere_is_asked_to_leave_first() {
 
         let mut fields = authorize_fields(&client_id, CLAUDE);
         fields.push(("decision", "allow".to_string()));
+        fields.push(("org_id", acme.id.to_string()));
         let pairs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let res = request
             .post("/oauth/authorize")
@@ -749,6 +797,92 @@ async fn only_old_clients_that_never_got_a_code_are_pruned() {
         assert!(exists(used).await, "a client that got a code stays");
         assert!(!exists(old_unused).await, "unused for a week goes");
         assert!(exists(new_unused).await, "unused but recent stays");
+    })
+    .await;
+}
+
+async fn no_codes(ctx: &loco_rs::app::AppContext) -> bool {
+    oauth_codes::Entity::find()
+        .all(&ctx.db)
+        .await
+        .unwrap()
+        .is_empty()
+}
+
+#[tokio::test]
+#[serial]
+async fn the_allow_page_pins_the_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let client_id = register(&request, CLAUDE).await;
+        assert_eq!(
+            shown_org_id(&request, &cookie, &client_id).await,
+            in_acme.organisation_id.to_string()
+        );
+        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        assert_eq!(
+            shown_org_id(&request, &in_beta_cookie, &client_id).await,
+            in_beta.organisation_id.to_string()
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn allow_after_a_switch_is_refused() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let client_id = register(&request, CLAUDE).await;
+        let shown = shown_org_id(&request, &cookie, &client_id).await;
+        assert_eq!(shown, in_acme.organisation_id.to_string());
+
+        // Another tab switched this browser to Beta.
+        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let res = post_decision(
+            &request,
+            &in_beta_cookie,
+            &client_id,
+            CLAUDE,
+            "allow",
+            Some(&shown),
+        )
+        .await;
+        assert_eq!(res.status_code(), 400);
+        assert!(res
+            .text()
+            .contains("You switched organisation while this page was open."));
+        assert!(no_codes(&ctx).await);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn allow_with_a_missing_empty_or_non_numeric_org_is_refused() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let client_id = register(&request, CLAUDE).await;
+        for org_id in [None, Some(""), Some("acme"), Some("1 OR 1=1")] {
+            let res = post_decision(&request, &alice, &client_id, CLAUDE, "allow", org_id).await;
+            assert_eq!(res.status_code(), 400, "{org_id:?}");
+            assert!(no_codes(&ctx).await, "{org_id:?}");
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn deny_without_an_org_still_goes_back_with_access_denied() {
+    request::<App, _, _>(|request, _ctx| async move {
+        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let client_id = register(&request, CLAUDE).await;
+        let res = post_decision(&request, &alice, &client_id, CLAUDE, "deny", None).await;
+        assert_eq!(res.status_code(), 302, "{}", res.text());
+        let query = query_of(&location(res.headers()));
+        assert_eq!(query["error"], "access_denied");
+        assert!(!query.contains_key("code"));
     })
     .await;
 }

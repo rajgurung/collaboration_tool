@@ -24,6 +24,10 @@ pub const ACTING_ORG_COOKIE: &str = "acting_org";
 /// hint: every request checks the membership again.
 pub const CURRENT_ORG_COOKIE: &str = "current_org";
 
+/// Shown when a form pinned to one organisation is posted in another.
+pub const SWITCHED_ORG: &str =
+    "You switched organisation while this page was open. Start again from Claude.";
+
 #[derive(Clone)]
 pub struct CurrentMember {
     pub user: users::Model,
@@ -59,6 +63,14 @@ impl CurrentMember {
             via_session: false,
             session_id: None,
         }
+    }
+
+    /// Whether a form's hidden `org_id` names this member's organisation.
+    /// Forms that grant Claude access pin the org they were shown for, so a
+    /// switch in another tab can't bind a token to a different one.
+    #[must_use]
+    pub fn shown_for_this_org(&self, org_id: Option<&str>) -> bool {
+        org_id.and_then(|id| id.parse::<i64>().ok()) == Some(self.org.id)
     }
 
     /// Owners and admins approve members and manage settings.

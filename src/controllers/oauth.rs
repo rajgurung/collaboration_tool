@@ -11,7 +11,10 @@ use serde::Deserialize;
 
 use crate::{
     data::settings::Settings,
-    extractors::{current_member::CurrentMember, current_user::CurrentUser},
+    extractors::{
+        current_member::{CurrentMember, SWITCHED_ORG},
+        current_user::CurrentUser,
+    },
     models::{
         access_tokens::{self, CodeExchange, Issued, SCOPE},
         oauth_clients::{self, RegisterError, RegisterParams},
@@ -127,6 +130,9 @@ struct AuthorizeParams {
     resource: Option<String>,
     /// The button pressed on the consent page: "allow" or anything else.
     decision: Option<String>,
+    /// The organisation the consent page was shown for. A string, checked by
+    /// hand, so a bad value gets the "you switched" page.
+    org_id: Option<String>,
 }
 
 /// A request that checked out.
@@ -335,6 +341,7 @@ async fn authorize_page(
                 "state": approved.state,
                 "scope": SCOPE,
                 "resource": approved.resource,
+                "org_id": member.org.id,
             },
         }),
     )?))
@@ -364,6 +371,9 @@ async fn authorize(
             state,
             &[("error", "access_denied")],
         );
+    }
+    if !member.shown_for_this_org(params.org_id.as_deref()) {
+        return refused_page(&v, SWITCHED_ORG);
     }
     let (_, code) = oauth_codes::Model::issue(
         &ctx.db,
