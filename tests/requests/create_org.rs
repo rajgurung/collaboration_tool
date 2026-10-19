@@ -1,7 +1,10 @@
 //! "New organisation": `GET /orgs/new` and `POST /orgs`.
 use collab::{
     app::App,
-    models::{folders, logins, memberships, organisations, tasks, users},
+    models::{
+        folders, login_accesses, login_events, logins, memberships, org_keys, organisations, tasks,
+        users,
+    },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
@@ -728,6 +731,16 @@ async fn the_new_org_is_separate_from_the_old_one() {
             .as_member(&alice)
             .form(&[("name", "Acme contracts")])
             .await;
+        // A real activity row in Acme: an unlock, then a reveal of Acme bank.
+        let acme_bank = logins::Entity::find()
+            .filter(logins::Column::Title.eq("Acme bank"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(unlock(&request, &alice).await.status_code(), 200);
+        let res = reveal(&request, &alice, acme_bank.id).await;
+        assert_eq!(res.status_code(), 200, "{}", res.text());
 
         let lumen = lumen(&request, &alice).await;
         let res = get(&request, &lumen, &format!("/tasks/{}", task.id)).await;
@@ -753,6 +766,73 @@ async fn the_new_org_is_separate_from_the_old_one() {
         );
         let activity = get(&request, &lumen, "/documents/activity").await.text();
         assert!(!activity.contains("Acme bank"));
+        let acme_activity = get(&request, &with_org(&alice, acme), "/documents/activity")
+            .await
+            .text();
+        assert!(acme_activity.contains("Acme bank"), "Acme's own log has it");
+        assert_eq!(
+            login_events::Entity::find()
+                .filter(login_events::Column::OrganisationId.eq(lumen.org_id))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0,
+            "no login events in Lumen"
+        );
+        let lumen_login_ids: Vec<i64> = logins::Entity::find()
+            .filter(logins::Column::OrganisationId.eq(lumen.org_id))
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|l| l.id)
+            .collect();
+        assert!(lumen_login_ids.is_empty());
+        assert_eq!(
+            login_accesses::Entity::find()
+                .filter(login_accesses::Column::LoginId.is_in(lumen_login_ids))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0,
+            "no login accesses in Lumen"
+        );
+
+        // A login saved in Lumen gets Lumen's own key.
+        let lumen_logins = folders.iter().find(|s| s.folder.name == "Logins").unwrap();
+        let res = request
+            .post(&format!(
+                "/documents/folders/{}/logins",
+                lumen_logins.folder.id
+            ))
+            .as_member(&lumen)
+            .form(&[
+                ("title", "Lumen supplier"),
+                ("username", "orders@example.com"),
+                ("password", "lumen-secret-456"),
+            ])
+            .await;
+        assert_eq!(res.status_code(), 303, "{}", res.text());
+        let keys_for = |org_id: i64| {
+            let db = ctx.db.clone();
+            async move {
+                org_keys::Entity::find()
+                    .filter(org_keys::Column::OrganisationId.eq(org_id))
+                    .all(&db)
+                    .await
+                    .unwrap()
+            }
+        };
+        let (acme_keys, lumen_keys) = (keys_for(acme).await, keys_for(lumen.org_id).await);
+        assert_eq!(acme_keys.len(), 1);
+        assert_eq!(lumen_keys.len(), 1, "one key for Lumen");
+        assert_ne!(acme_keys[0].wrapped_dek, lumen_keys[0].wrapped_dek);
+        // Acme's login still reveals its own password, in Acme.
+        let in_acme = with_org(&alice, acme);
+        assert_eq!(unlock(&request, &in_acme).await.status_code(), 200);
+        let res = reveal(&request, &in_acme, acme_bank.id).await;
+        assert_eq!(res.status_code(), 200, "{}", res.text());
+        assert!(res.text().contains("acme-secret-123"));
         let members = get(&request, &lumen, "/members").await.text();
         assert!(members.contains(">ali<") && !members.contains(">bob<"));
         let chat = get(&request, &lumen, "/chat").await.text();
@@ -790,6 +870,11 @@ async fn org_names_are_escaped_everywhere() {
         let toast = get(&request, &inside, "/dashboard?created=1").await.text();
         let list = htmx_get(&request, &inside, "/orgs").await.text();
         let more = get(&request, &inside, "/more").await.text();
+        // The duplicate-name error quotes the stored name.
+        let dupe = create(&request, &inside, name, "ali").await;
+        assert_eq!(dupe.status_code(), 422);
+        let dupe = dupe.text();
+        assert!(dupe.contains("You already have an organisation called &lt;script&gt;"));
         let admin = super::admin::super_admin_cookie(&request, &ctx).await;
         let admin_page = request
             .get("/admin")
@@ -799,6 +884,7 @@ async fn org_names_are_escaped_everywhere() {
         for (what, page) in [
             ("the toast", &toast),
             ("the switcher", &list),
+            ("the duplicate-name error", &dupe),
             ("More", &more),
             ("/admin", &admin_page),
         ] {
@@ -908,4 +994,20 @@ async fn an_old_org_link_is_an_app_404_naming_only_the_current_org() {
         assert!(!res.text().contains("Acme Studio") && !res.text().contains("Lumen"));
     })
     .await;
+}
+
+async fn unlock(request: &TestServer, who: &TestMember) -> axum_test::TestResponse {
+    request
+        .post("/documents/logins/unlock")
+        .as_member(who)
+        .form(&[("password", USER_PASSWORD)])
+        .await
+}
+
+async fn reveal(request: &TestServer, who: &TestMember, id: i64) -> axum_test::TestResponse {
+    request
+        .post(&format!("/documents/logins/{id}/reveal"))
+        .as_member(who)
+        .form(&[("field", "password")])
+        .await
 }
