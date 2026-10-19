@@ -1845,8 +1845,16 @@ function orgListKeys(list: HTMLElement, event: KeyboardEvent) {
   else if (event.key === "End") go(items.length - 1);
   else if (event.key === "Enter" || event.key === " ") {
     // Rows are buttons, and the browser clicks them itself: a switch, or the
-    // current org closing the list. Only a pending row is not, and does nothing.
-    if (!(items[i] instanceof HTMLButtonElement)) event.preventDefault();
+    // current org closing the list. "New organisation" is a link, which the
+    // browser follows on Enter only, so Space clicks it here. A pending row
+    // does nothing.
+    const item = items[i];
+    if (item instanceof HTMLButtonElement) return;
+    if (!(item instanceof HTMLAnchorElement)) event.preventDefault();
+    else if (event.key === " ") {
+      event.preventDefault();
+      item.click();
+    }
   } else if (list === orgMenu && event.key === "Escape") {
     event.preventDefault();
     closeOrgMenu();
@@ -1925,5 +1933,93 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
     if (list) void loadOrgs(list, true).then(() => focusOrg(list, "current"));
   } else {
     showToast({ kind: "error", message: `Couldn't switch to ${name}. Check your connection and try again.` });
+  }
+});
+
+// "New organisation" (docs/designs/create-org.html) opens its form in the org
+// sheet: a centred dialog on desktop, and on a phone in place of the list,
+// with a back arrow to it. Without JavaScript the rows are links to /orgs/new.
+const orgSheetTitle = document.getElementById("org-sheet-title");
+const orgSheetBack = orgSheet?.querySelector<HTMLButtonElement>("[data-org-back]");
+// Where focus goes when the form closes: the switcher button, if it opened from the menu.
+let newOrgReturn: HTMLElement | null = null;
+
+function sheetMode(form: boolean) {
+  if (!orgSheet || !orgSheetBody || !orgSheetTitle) return;
+  orgSheet.classList.toggle("org-sheet-form", form);
+  orgSheetTitle.textContent = form ? "New organisation" : "Your organisations";
+  if (form) {
+    orgSheetBody.removeAttribute("role");
+  } else {
+    orgSheetBody.setAttribute("role", "menu");
+    if (orgSheetBack) orgSheetBack.hidden = true;
+  }
+}
+
+function focusNewOrg() {
+  orgSheetBody?.querySelector<HTMLInputElement>('#org-new-form [aria-invalid="true"], #org-new-form input[name=organisation_name]')?.focus();
+}
+
+async function openNewOrg(fromList: boolean) {
+  if (!orgSheet || !orgSheetBody) return void (window.location.href = "/orgs/new");
+  newOrgReturn = orgMenuOpen() ? orgMenuButton : null;
+  closeOrgMenu(false);
+  try {
+    await htmx.ajax("GET", "/orgs/new", { target: "#org-sheet-body", swap: "innerHTML" });
+  } catch {
+    showToast({ kind: "error", message: "Couldn't open the form. Check your connection and try again." });
+    return;
+  }
+  // A stale tab is sent Home instead, and its list was never replaced.
+  if (!orgSheetBody.querySelector("#org-new-form")) return;
+  sheetMode(true);
+  if (orgSheetBack) orgSheetBack.hidden = !fromList;
+  if (!orgSheet.open) orgSheet.showModal();
+  focusNewOrg();
+}
+
+document.addEventListener("click", (event) => {
+  const row = (event.target as Element | null)?.closest<HTMLAnchorElement>("a[data-org-new]");
+  if (!row || !orgSheet) return;
+  event.preventDefault();
+  void openNewOrg(!!row.closest("#org-sheet-body"));
+});
+
+orgSheetBack?.addEventListener("click", () => {
+  sheetMode(false);
+  void loadOrgs(orgSheetBody!, true).then(() => focusOrg(orgSheetBody!, "current"));
+});
+
+orgSheet?.addEventListener("close", () => {
+  if (!orgSheet.classList.contains("org-sheet-form")) return;
+  // The list loads again the next time the sheet opens.
+  orgSheetBody?.replaceChildren();
+  sheetMode(false);
+  newOrgReturn?.focus();
+  newOrgReturn = null;
+});
+
+// A 422 swaps the form in again; htmx focuses its first problem (autofocus).
+// A server error keeps what was typed and shows the alert; no connection, a
+// toast. The transaction means nothing was saved either way.
+document.body.addEventListener("htmx:beforeRequest", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  if (elt instanceof HTMLFormElement && elt.matches("[data-org-new-form]")) {
+    const alert = elt.querySelector<HTMLElement>("[data-org-new-alert]");
+    if (alert) alert.hidden = true;
+  }
+});
+document.body.addEventListener("htmx:responseError", (event) => {
+  const { elt, xhr } = (event as CustomEvent<{ elt: Element; xhr: XMLHttpRequest }>).detail;
+  if (!(elt instanceof HTMLFormElement) || !elt.matches("[data-org-new-form]") || xhr.status === 422 || xhr.status === 409) return;
+  const alert = elt.querySelector<HTMLElement>("[data-org-new-alert]");
+  if (!alert) return;
+  alert.hidden = false;
+  alert.scrollIntoView({ block: "nearest" });
+});
+document.body.addEventListener("htmx:sendError", (event) => {
+  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
+  if (elt instanceof HTMLFormElement && elt.matches("[data-org-new-form]")) {
+    showToast({ kind: "error", message: "Couldn't create the organisation. Check your connection and try again." });
   }
 });

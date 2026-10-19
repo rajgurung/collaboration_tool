@@ -20,6 +20,7 @@
       {% else %}
       <div class="list-row min-h-[60px]"><span class="org-logo org-logo-lg">{{ org.name | truncate(length=1, end="") | upper }}</span><span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-base font-semibold">{{ org.name }}</span><span class="meta {% if not me.acting %}capitalize{% endif %}">{% if me.acting %}Platform admin{% else %}{{ me.role }}{% endif %}</span></span></div>
       {% endif %}
+      {% if not me.acting %}<a href="/orgs/new" class="list-row org-new min-h-14" aria-haspopup="dialog" data-org-new><span class="org-logo-new org-logo-new-lg">{{<icon name="plus" class="h-[18px] w-[18px]"/>}}</span><span class="flex-1 text-base font-semibold">New organisation</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>{% endif %}
     </div>
   </section>
   {% endif %}

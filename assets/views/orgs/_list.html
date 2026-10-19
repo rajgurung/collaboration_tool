@@ -1,4 +1,4 @@
-{# The switcher's rows: the sidebar menu, the phone sheet and the /orgs page share them. One form, and each row a button with its own formaction, so it works without JavaScript; app.ts adds the keys and the "Switching…" state. #}
+{# The switcher's rows: the sidebar menu, the phone sheet and the /orgs page share them. One form, and each row a button with its own formaction, so it works without JavaScript; app.ts adds the keys and the "Switching…" state. "New organisation" is a link after the form, outside the scrolling part, and never while acting. #}
 <form method="post" class="org-list" data-org-list>
   {% if me.acting %}
   <div class="org-menu-label">Acting in</div>
@@ -40,3 +40,7 @@
   </div>
   {% if me.acting %}<p class="org-note">Switching ends acting in {{ org.name }}.</p>{% endif %}
 </form>
+{% if not me.acting %}
+<div class="org-sep" role="separator"></div>
+<a href="/orgs/new" class="org-row org-new" role="menuitem" data-org-new><span class="org-logo-new">{{<icon name="plus" class="h-[18px] w-[18px]"/>}}</span><span class="org-text"><span class="org-name">New organisation</span></span></a>
+{% endif %}

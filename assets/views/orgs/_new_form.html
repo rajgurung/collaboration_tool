@@ -1,5 +1,5 @@
 {# "New organisation" (docs/designs/create-org.html): the desktop dialog, the phone sheet and the /orgs/new page share it. A 422 over HTMX replaces the whole form. The server renders _org, so it also works without JavaScript. #}
-<form id="org-new-form" method="post" action="/orgs" hx-post="/orgs" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find input:not([type=hidden])" class="org-new-form" data-org-new-form>
+<form id="org-new-form" method="post" action="/orgs" hx-post="/orgs" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find [name=organisation_name], find [name=name]" class="org-new-form" data-org-new-form>
   <input type="hidden" name="_org" value="{{ current_org_id }}">
   {% if at_cap %}
   <div class="org-limit-box">

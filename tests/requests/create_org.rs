@@ -776,3 +776,36 @@ async fn the_new_org_is_separate_from_the_old_one() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn org_names_are_escaped_everywhere() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = alice(&request).await;
+        let name = "<script>alert(1)</script>";
+        let escaped = "&lt;script&gt;alert(1)&lt;/script&gt;";
+        let res = create(&request, &alice, name, "ali").await;
+        assert_eq!(res.status_code(), 303, "{}", res.text());
+        let inside = with_org(&alice, created_id(&res));
+        let toast = get(&request, &inside, "/dashboard?created=1").await.text();
+        let list = htmx_get(&request, &inside, "/orgs").await.text();
+        let more = get(&request, &inside, "/more").await.text();
+        let admin = super::admin::super_admin_cookie(&request, &ctx).await;
+        let admin_page = request
+            .get("/admin")
+            .add_header(admin.0.clone(), admin.1.clone())
+            .await
+            .text();
+        for (what, page) in [
+            ("the toast", &toast),
+            ("the switcher", &list),
+            ("More", &more),
+            ("/admin", &admin_page),
+        ] {
+            assert!(page.contains(escaped), "{what}: escaped");
+            assert!(!page.contains(name), "{what}: never raw");
+        }
+        assert!(toast.contains(&format!("{escaped} is ready.")));
+    })
+    .await;
+}

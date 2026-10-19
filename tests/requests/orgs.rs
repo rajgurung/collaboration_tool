@@ -564,3 +564,73 @@ async fn there_is_no_get_that_switches() {
     })
     .await;
 }
+
+/// The "New organisation" row: a link after the switch form, never inside it.
+fn new_org_row_outside_the_form(html: &str) -> bool {
+    let Some(row) = html.find(r#"<a href="/orgs/new" class="org-row org-new" role="menuitem""#)
+    else {
+        return false;
+    };
+    html[..row].contains("</form>") && !html[row..].contains("</form>")
+}
+
+#[tokio::test]
+#[serial]
+async fn the_org_list_ends_with_new_organisation() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, _) = alice_in_two_orgs(&request, &ctx).await;
+        let fragment = htmx_get(&request, &cookie, "/orgs").await.text();
+        assert!(new_org_row_outside_the_form(&fragment), "{fragment}");
+        assert!(fragment.find("Beta").unwrap() < fragment.find("New organisation").unwrap());
+        // The /orgs page has the switch form, then the row. Its layout has a
+        // form of its own after it (sign out), so look inside the card.
+        let page = get(&request, &cookie, "/orgs").await.text();
+        let card = &page[page.find("org-page").unwrap()..];
+        assert!(new_org_row_outside_the_form(card));
+        // One org: the same row.
+        let solo = sign_up_member(&request, "Zen", "zed", "zed@example.com").await;
+        let list = htmx_get(&request, &solo, "/orgs").await.text();
+        assert!(new_org_row_outside_the_form(&list));
+        let more = get(&request, &solo, "/more").await.text();
+        assert!(more.contains(r#"<a href="/orgs/new" class="list-row org-new"#));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn acting_shows_no_new_organisation_row() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (_, _, in_acme, _) = alice_in_two_orgs(&request, &ctx).await;
+        let admin = super::admin::super_admin_cookie(&request, &ctx).await;
+        let acting = acting_in(&admin, in_acme.organisation_id);
+        let list = htmx_get(&request, &acting, "/orgs").await.text();
+        assert!(list.contains("Acting in"));
+        assert!(!list.contains("/orgs/new"));
+        let page = get(&request, &acting, "/orgs").await.text();
+        assert!(!page.contains("/orgs/new"));
+        let more = get(&request, &acting, "/more").await.text();
+        assert!(more.contains(">Switch<"), "back to their own org");
+        assert!(!more.contains("/orgs/new"));
+        // Their own org, not acting: the row is back.
+        let own = get(&request, &(admin.0.clone(), admin.1.clone()), "/more")
+            .await
+            .text();
+        assert!(own.contains("/orgs/new"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_admin_page_keeps_its_plain_name() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let admin = super::admin::super_admin_cookie(&request, &ctx).await;
+        let page = get(&request, &admin, "/admin").await.text();
+        assert!(page.contains("Platform admin"));
+        assert!(!has_switcher(&page));
+        assert!(!page.contains("/orgs/new"));
+    })
+    .await;
+}
