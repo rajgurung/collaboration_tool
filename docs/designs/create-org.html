@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create another organisation mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+/* ---------- Tokens: copied from frontend/styles/app.css ----------
+   Scoped to [data-theme] on any element (not just <html>) so the mockup can
+   show a light and a dark copy of each screen side by side. */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f3ef; --side: #eceae4; --surface: #ffffff; --lane: #f8f7f4; --line: #e2dfd7; --line-soft: #eceae4;
+  --chip: #e9e7e0; --text: #1a1814; --muted: #625e57; --link: #8a5300; --accent: #f2a93b; --accent-hover: #f6b858;
+  --on-accent: #1a1814; --active-bg: #fbebd0; --scrim: rgba(20, 18, 15, 0.45);
+  --todo: #8a867d; --progress: #3b6fe0; --blocked: #d4552f; --blocked-bg: #fce9e2; --done: #2f9e6b; --danger: #c2410c; --on-danger: #ffffff;
+  --shadow: 0 1px 2px rgba(23, 20, 15, 0.08);
+  --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
+  --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
+  --canvas: #e4e1d9;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121214; --side: #17171a; --surface: #1f1f23; --lane: #18181c; --line: #2c2c32; --line-soft: #29292f;
+  --chip: #26262b; --text: #edece8; --muted: #a6a29b; --link: #ffc77a; --accent: #ffb454; --accent-hover: #ffc475;
+  --on-accent: #1b1300; --active-bg: #4a3618; --scrim: rgba(0, 0, 0, 0.6);
+  --todo: #a6a29b; --progress: #7c9dff; --blocked: #ff8466; --blocked-bg: #3a2019; --done: #4cc38a; --danger: #ff8466; --on-danger: #1b1300;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45); --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
+  --canvas: #0b0b0c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--canvas); color: var(--text); font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; cursor: pointer; color: inherit; }
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ic { flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.meta { font-size: 13px; color: var(--muted); }
+.truncate-1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ---------- Mockup chrome (not part of the app) ---------- */
+.mock-bar { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 32px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.mock-bar h1 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; min-width: 260px; }
+.mock-bar nav { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; font-weight: 600; color: var(--link); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
+.seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.section { padding: 36px 32px 48px; border-bottom: 1px solid var(--line); }
+.section > h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+.section > p.lead { margin: 0 0 24px; max-width: 860px; color: var(--muted); }
+.shots { display: flex; flex-wrap: wrap; gap: 36px 32px; align-items: flex-start; }
+.shot { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.shot-wide { flex-basis: 100%; }
+.shot-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.ann { width: 360px; padding: 16px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; }
+.ann-wide { width: auto; max-width: 860px; }
+.ann h3 { margin: 0 0 8px; font-size: 15px; }
+.ann h3 + * { margin-top: 0; }
+.ann ol, .ann ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ann p + p, .ann p + ul, .ann ul + p, .ann ol + h3, .ann ul + h3, .ann p + h3 { margin-top: 10px; }
+.ann code, .lead code { font-size: 12.5px; padding: 1px 4px; border-radius: 4px; background: var(--chip); }
+.ann table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ann th, .ann td { padding: 6px 8px 6px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line-soft); }
+.ann th { font-weight: 700; color: var(--muted); }
+kbd { display: inline-block; min-width: 20px; padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--lane); font: 600 12px/18px "Plus Jakarta Sans", sans-serif; text-align: center; }
+.q { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--active-bg); color: var(--text); font-size: 13.5px; }
+.q b { display: block; margin-bottom: 2px; }
+.later { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
+
+/* Light, dark, or both side by side */
+.pair { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.pair.stack { flex-direction: column; flex-wrap: nowrap; width: 100%; }
+.th { color: var(--text); }
+body[data-mode="light"] .th-dark, body[data-mode="dark"] .th-light { display: none; }
+body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { display: none; }
+.desk-holder { position: relative; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow-lift); }
+
+/* ---------- Device frames ---------- */
+.frame-phone { box-sizing: content-box; position: relative; display: flex; flex-direction: column; width: 390px; height: 844px; overflow: hidden; border: 10px solid #0e0e10; border-radius: 48px; background: var(--bg); box-shadow: var(--shadow-lift); }
+.statusbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 6px 30px 0; font-size: 15px; font-weight: 700; background: var(--bg); }
+.statusbar.surface { background: var(--surface); }
+.home-ind { position: absolute; left: 50%; bottom: 8px; z-index: 60; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: var(--text); opacity: 0.85; }
+.phone-body { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.frame-desk { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); width: 1440px; height: 900px; overflow: hidden; background: var(--bg); transform-origin: top left; }
+
+/* ---------- App components, copied or adapted from app.css ---------- */
+.avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
+.avatar-xs { width: 22px; height: 22px; font-size: 10px; font-weight: 700; }
+.avatar-sm { width: 28px; height: 28px; font-size: 12px; }
+.avatar-md { width: 36px; height: 36px; font-size: 14px; }
+.avatar-lg { width: 44px; height: 44px; font-size: 16px; }
+.avatar-stack { display: inline-flex; }
+.avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
+.avatar-stack > .avatar + .avatar { margin-left: -6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn-tall { min-height: 44px; }
+.icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--text); flex-shrink: 0; }
+.icon-btn:hover { background: var(--chip); }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; box-shadow: var(--shadow-1); }
+.list { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-1); }
+.list-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; }
+.list > * + * { border-top: 1px solid var(--line-soft); }
+.section-label { margin: 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.section-head a { color: var(--link); font-size: 15px; padding: 10px 0; }
+.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
+.pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 10px; background: var(--chip); font-size: 12px; font-weight: 600; }
+.dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: var(--dot, var(--muted)); }
+.dot-ring { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+.bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 3px; background: var(--bar, var(--accent)); }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 12px; font-size: 16px; }
+.input.focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.toast-error { background: var(--danger); color: var(--on-danger); }
+.toast-region { position: absolute; z-index: 80; display: grid; gap: 8px; pointer-events: none; }
+.phone-body .toast-region { left: 16px; right: 16px; bottom: 96px; justify-items: center; }
+.frame-desk .toast-region { right: 24px; bottom: 24px; justify-items: end; }
+
+/* Shell */
+.sidebar { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); }
+.side-link { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-weight: 500; }
+.side-link[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.side-link[aria-current="page"] .ic { color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 0 8px 0 16px; background: var(--bg); }
+.topbar h1 { flex: 1; min-width: 0; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.tabbar { position: absolute; inset: auto 0 0 0; z-index: 40; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 8px 8px 26px; background: var(--surface); border-top: 1px solid var(--line); }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.tab-icon { display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.tab[aria-current="page"] { color: var(--text); font-weight: 600; }
+.tab[aria-current="page"] .tab-icon { background: var(--active-bg); }
+.page { padding: 4px 16px 110px; display: flex; flex-direction: column; gap: 20px; }
+.d-main { min-width: 0; display: flex; flex-direction: column; }
+.d-page { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; max-width: 1192px; }
+
+/* Home */
+.greet-date { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.greet { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.frame-desk .greet { font-size: 32px; }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.frame-desk .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.phone-body .stat { gap: 10px; padding: 14px; }
+.stat > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
+.phone-body .stat-icon { width: 36px; height: 36px; }
+.stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.project-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.home-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 28px; align-items: start; }
+.cards-3 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.task-line { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px; font-size: 15px; font-weight: 500; }
+
+/* ===== NEW: the switcher button at the top of the sidebar ===== */
+.org-static, .org-switch { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; margin-bottom: 16px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; }
+.org-switch:hover, .org-switch.hover { background: var(--chip); }
+.org-switch[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
+.org-switch.kbd-focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.org-btn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.org-btn-text strong { font-size: 15px; }
+.org-btn-text .sub { display: inline-flex; align-items: center; gap: 4px; margin-top: 1px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.org-switch .chev { color: var(--muted); }
+.logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.logo-lg { width: 36px; height: 36px; border-radius: 11px; font-size: 15px; }
+.logo-wait { background: var(--chip); color: var(--muted); box-shadow: none; }
+
+/* ===== NEW: the menu (desktop popover) and the rows (shared with the phone sheet) ===== */
+.org-menu { position: absolute; top: 64px; left: 12px; z-index: 50; width: 300px; padding: 6px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lift); }
+.org-menu-label { padding: 8px 10px 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.org-scroll { max-height: 404px; overflow-y: auto; }
+.org-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 10px; border: 0; border-radius: 10px; background: none; color: var(--text); text-align: left; }
+.org-row:hover:not([aria-disabled="true"]), .org-row.hover { background: var(--chip); }
+.org-row.focus, .org-row:focus-visible { outline: none; background: var(--chip); box-shadow: inset 0 0 0 2px var(--accent); }
+.org-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.org-name { font-size: 15px; font-weight: 600; }
+.org-row[aria-checked="true"] .org-name { font-weight: 700; }
+.org-row .meta { display: inline-flex; align-items: center; gap: 4px; }
+.org-row .tick { color: var(--link); }
+.org-row[aria-disabled="true"] { cursor: default; }
+.org-row[aria-disabled="true"] .org-name { color: var(--muted); font-weight: 500; }
+.org-row.loading .meta { color: var(--text); }
+.org-row.dim { opacity: 0.55; }
+.org-sep { height: 1px; margin: 6px 4px; background: var(--line-soft); }
+.org-note { margin: 4px 10px 6px; font-size: 12.5px; color: var(--muted); }
+
+/* Phone: header button on Home, and the sheet */
+.org-head { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 10px; background: none; color: var(--text); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; text-align: left; }
+.org-head span { min-width: 0; }
+.org-head .ic { color: var(--muted); }
+.org-head-static { flex: 1; min-width: 0; margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.m-scrim { position: absolute; inset: 0; z-index: 45; background: var(--scrim); }
+.m-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; flex-direction: column; max-height: calc(100% - 48px); border-radius: 20px 20px 0 0; background: var(--surface); }
+.sheet-handle { display: grid; place-items: center; padding-top: 8px; flex-shrink: 0; }
+.sheet-handle::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+.sheet-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 20px; }
+.sheet-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 700; }
+.sheet-body { min-height: 0; overflow-y: auto; padding: 0 12px 34px; }
+.m-sheet .org-row { min-height: 60px; padding: 8px 10px; gap: 14px; }
+.m-sheet .org-name { font-size: 16px; }
+
+/* Acting banner (exists today, unchanged) */
+.acting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--active-bg); font-size: 14px; }
+.frame-desk .acting .btn { min-height: 36px; }
+.phone-body .acting .btn { min-height: 44px; }
+
+/* ===== NEW: the notice after a stale tab moves ===== */
+.notice { display: flex; align-items: flex-start; gap: 12px; padding: 14px 4px 14px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.frame-desk .notice { max-width: 760px; }
+.notice-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 999px; background: var(--active-bg); color: var(--link); }
+.notice-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 1px; }
+.notice-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.notice > .icon-btn { margin-top: -10px; color: var(--muted); }
+.draft { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); }
+.draft-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.draft-field { display: flex; flex-direction: column; gap: 1px; }
+.draft-field .field-label { font-size: 12px; }
+.draft-field p { font-size: 15px; overflow-wrap: anywhere; }
+.file-line { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+
+/* Stale-tab story strip */
+.story { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; max-width: 1180px; }
+.story-step { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; }
+.story-step b { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.tabchip { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 30px; padding: 0 10px 0 4px; border-radius: 8px; background: var(--chip); font-size: 13px; font-weight: 600; }
+.tabchip .logo { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+
+/* Specimens at real size */
+.specimen { position: relative; width: 248px; padding: 16px 12px; border-radius: 16px; background: var(--side); border: 1px solid var(--line); }
+.specimen .org-static, .specimen .org-switch { margin-bottom: 0; }
+.spec-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.live { position: relative; width: 248px; height: 600px; padding: 16px 12px; border-radius: 16px; background: var(--side); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.live .org-menu { top: 64px; }
+.live .toast-region { left: 12px; right: -120px; bottom: 16px; justify-items: start; }
+
+/* ===== NEW in PR 4: the "New organisation" row ===== */
+.org-new .logo-new { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border: 1.5px dashed color-mix(in srgb, var(--muted) 65%, transparent); border-radius: 10px; color: var(--muted); box-sizing: border-box; }
+.m-sheet .org-new .logo-new, .list .logo-new.lg { width: 36px; height: 36px; border-radius: 11px; }
+.org-new .org-name { font-weight: 600; }
+.org-new:hover .logo-new, .org-new.hover .logo-new { border-color: var(--muted); color: var(--text); }
+.org-limit { margin: 0 10px 6px; font-size: 12.5px; color: var(--muted); }
+
+/* ===== NEW: the create form (desktop dialog = the app's .sheet at 768px and up; phone = bottom sheet) ===== */
+.d-scrim { position: absolute; inset: 0; z-index: 60; background: var(--scrim); }
+.dlg { position: absolute; z-index: 70; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; max-height: calc(100% - 64px); display: flex; flex-direction: column; border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lift); overflow: hidden; }
+.dlg-head { display: flex; align-items: flex-start; gap: 8px; padding: 18px 12px 0 24px; }
+.dlg-head h2, .form-head h2 { flex: 1; margin: 8px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; }
+.dlg-body { padding: 8px 24px 24px; overflow-y: auto; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.m-sheet .form-body { flex: 1 1 auto; min-height: 0; padding: 0 20px 0; overflow-y: auto; }
+.form-lead { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+.m-sheet .form-lead { margin-bottom: 16px; }
+.fields { display: grid; gap: 18px; }
+.field { display: grid; gap: 6px; }
+.field-hint { font-size: 13px; color: var(--muted); }
+.field-error { display: flex; align-items: flex-start; gap: 5px; font-size: 13px; color: var(--danger); }
+.field-error .ic { margin-top: 1px; }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+.input[disabled] { opacity: 0.6; }
+.prefix-wrap { position: relative; }
+.prefix-wrap .at { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; }
+.prefix-wrap .input { padding-left: 30px; }
+.facts { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--lane); border: 1px solid var(--line-soft); font-size: 14px; }
+.facts li { display: flex; gap: 10px; align-items: flex-start; list-style: none; }
+.facts .ic { color: var(--muted); margin-top: 2px; }
+.facts { padding-left: 14px; }
+.alert { margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; font-size: 14px; }
+.alert-error { background: var(--blocked-bg); color: var(--blocked); }
+.acting-note { display: flex; gap: 10px; margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: var(--active-bg); font-size: 14px; }
+.acting-note .ic { margin-top: 2px; color: var(--link); }
+.sheet-foot { flex-shrink: 0; padding: 12px 20px 34px; border-top: 1px solid var(--line-soft); background: var(--surface); }
+.btn-lg { min-height: 48px; padding: 0 20px; font-size: 16px; }
+.btn-full { width: 100%; }
+.btn[disabled] { opacity: 0.75; cursor: default; }
+.btn .spin { margin-left: -2px; }
+.limit-box { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 8px 4px; text-align: center; }
+.limit-box .tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 14px; background: var(--chip); color: var(--muted); }
+.limit-box h3 { margin: 0; font-size: 17px; }
+.limit-box p { max-width: 360px; color: var(--muted); font-size: 14.5px; }
+.m-sheet .m-kbd { flex-shrink: 0; height: 290px; background: #d1d3d9; display: grid; place-items: center; color: #555; font-size: 13px; font-weight: 600; }
+[data-theme="dark"] .m-sheet .m-kbd { background: #2b2b2e; color: #999; }
+
+/* ===== Getting started, copied from app.css ===== */
+.guide { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 6px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-1); }
+.guide-close { position: absolute; top: 8px; right: 8px; color: var(--muted); }
+.guide-top { display: flex; align-items: center; gap: 14px; padding-right: 36px; }
+.guide-ring { flex-shrink: 0; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--chip) 0); }
+.guide-ring > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--surface); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.guide-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.guide-step { display: flex; align-items: center; gap: 12px; padding: 11px 2px; border-top: 1px solid var(--line-soft); }
+.guide-tick { flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid var(--line); border-radius: 50%; color: #fff; box-sizing: border-box; }
+.guide-go { flex-shrink: 0; min-height: 34px; padding: 0 14px; font-size: 14px; }
+.phone-body .guide { padding: 14px 12px 4px; }
+.phone-body .guide-how { display: none; }
+.empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 15px; }
+.empty a { color: var(--link); }
+</style>
+</head>
+<body data-view="both" data-mode="light">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-clock-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-list-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></symbol>
+  <symbol id="i-meetings" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></symbol>
+  <symbol id="i-log-out" viewBox="0 0 24 24"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></symbol>
+  <symbol id="i-monitor-smartphone" viewBox="0 0 24 24"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></symbol>
+  <symbol id="i-status-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-status-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+  <symbol id="i-status-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></symbol>
+  <symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+</svg>
+
+<header class="mock-bar">
+  <h1>Create another organisation · multi-org PR 4 · mockup</h1>
+  <nav aria-label="Sections">
+    <a href="#entry">1 Entry points</a><a href="#form">2 The form</a><a href="#after">3 After creating</a><a href="#edges">4 Edge cases</a><a href="#roles">5 Roles and states</a><a href="#questions">6 Questions</a>
+  </nav>
+  <div class="seg" role="group" aria-label="Theme"><button type="button" data-mode-set="light" aria-pressed="true">Light</button><button type="button" data-mode-set="dark" aria-pressed="false">Dark</button><button type="button" data-mode-set="both" aria-pressed="false">Light and dark</button></div>
+  <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
+</header>
+
+<!-- ============================== 1. ENTRY POINTS ============================== -->
+<section class="section" id="entry">
+  <h2>1. Where "New organisation" lives</h2>
+  <p class="lead">Priya owns Acme Studio. It is her only organisation. She wants a separate space for Lumen Café, the café she is opening with a friend. In PR 3 her org name was plain text, because she had nothing to switch to. In PR 4 the switcher shows for everyone, so the new row is always one click or tap away.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · one org, menu open, keyboard focus on New organisation</span><div id="d-entry"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>The menu ends with a hairline and one row: a dashed square with a plus, then "New organisation". It is the last row, after any pending requests, exactly where section 7 of the PR 3 mockup left room for it.</li>
+        <li>The row sits outside the scrolling list. With nine orgs the list scrolls and "New organisation" stays in view at the bottom.</li>
+        <li>The dashed square tells it apart from a real org at a glance. A real org has a filled amber initial.</li>
+        <li>It is a <code>menuitem</code>, not a <code>menuitemradio</code>. It opens the form, it does not switch. Arrow keys reach it like any row. Typing <kbd>N</kbd> reaches it too.</li>
+        <li>Without JavaScript it is a link to <code>/orgs/new</code>, a plain page with the same form.</li>
+        <li>Owner, admin and member all see it. An organisation belongs to the person who creates it, so the role in the current org does not matter.</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>The switcher for one org</h3>
+      <p><b>Recommended: the chevron shows for everyone now.</b> PR 3's rule ("plain name with one org") becomes "always a button", except while a super admin is acting with no membership of their own.</p>
+      <ul>
+        <li>One control that always works the same, in the same place.</li>
+        <li>A menu with your one org and "New organisation" is small but honest. It shows the idea that you can have more than one.</li>
+        <li>The cost: a chevron on every one-org sidebar, for a feature most people will never use. It is quiet (muted, 16px), so this is small.</li>
+      </ul>
+      <p>The alternative is a plain name plus a "New organisation" row on More only. Desktop would then have no entry at all, since More is a phone page. So it is not really an option on desktop.</p>
+      <p class="meta">Build note: <code>org_menu</code> becomes true for every active member. While acting, it stays as PR 3 has it: true only with a membership of your own.</p>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Home, one org: the name is now a button</span><div id="p-home"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · sheet open, one org</span><div id="p-sheet"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · More, one org</span><div id="p-more"></div></div>
+    <div class="ann">
+      <h3>Phone</h3>
+      <ol>
+        <li>Home's header name gets its chevron for everyone and opens the same sheet as in PR 3. The sheet ends with the same hairline and a 60px "New organisation" row.</li>
+        <li>Tapping it swaps the sheet's content to the form, in the same sheet. No second sheet stacked on the first. The close button closes it all.</li>
+        <li>More's "Organisation" section now shows for everyone, with two rows. With one org, the first row just names your org and role: no "Switch", since there is nothing to switch to. The second row is "New organisation" and goes straight to the form.</li>
+        <li>With two or more orgs the first row gets "Switch" back, as in PR 3 (section 3 here).</li>
+      </ol>
+      <div class="q"><b>Question for Raj: other entry points</b>Menu, phone sheet and More (recommended), and nothing else. The Getting started guide, the Members page and the waiting or removed pages stay as they are. The waiting and removed pages are worth a separate look (see Suggestions in the report).</div>
+    </div>
+    <div class="shot shot-wide">
+      <span class="shot-label">Close up · the switcher in every case it now appears</span>
+      <div class="pair" id="spec-entry"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 2. THE FORM ============================== -->
+<section class="section" id="form">
+  <h2>2. The form</h2>
+  <p class="lead">Two fields. Signup asks for an organisation name, a username, an email and a password (<code>assets/views/signup/new.html</code>). Priya already has an account, so only the first two are left. Signup does not ask for a time zone, so this form does not either.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · the dialog over Home, filled in</span><div id="d-form"></div></div>
+    <div class="ann">
+      <h3>Desktop: a dialog, not a page</h3>
+      <ol>
+        <li>The app's <code>dialog.sheet</code> already turns into a centred 560px dialog at 768px and up. This uses it as it is. No new component.</li>
+        <li>A dialog keeps Priya where she was. Cancel puts her back in Acme Studio with nothing changed.</li>
+        <li>Two fields do not need a page. A page would also need its own place in the sidebar, which it does not have.</li>
+        <li><code>/orgs/new</code> stays as a plain page for no JavaScript, and for a link someone types. Same form, inside the app shell.</li>
+        <li>Focus starts in "Organisation name". <kbd>Esc</kbd> and Cancel close it and put focus back on the switcher button.</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>The fields</h3>
+      <table>
+        <tr><th>Field</th><th>What it does</th></tr>
+        <tr><td>Organisation name</td><td>Empty, focused. <code>autocomplete="organization"</code>, as signup. 2 to 80 characters, trimmed.</td></tr>
+        <tr><td>Your username</td><td>Filled with Priya's username in the org she is in now (<code>memberships.username</code>, "priya"). Rules as signup: a letter first, 3 to 30 letters or numbers, never "everyone". Hint: "How people in this organisation see you."</td></tr>
+        <tr><td>No time zone</td><td>Signup doesn't ask. Owners already set it on Members. See the question below.</td></tr>
+        <tr><td>No email or password</td><td>Same account. The form says so in one line, so nobody wonders if they need a new sign-in.</td></tr>
+      </table>
+      <p>Under the fields, two plain facts: nothing from Acme Studio moves across, and the same email and password work for both. These answer the two worries people have here.</p>
+      <div class="q"><b>Question for Raj: time zone</b>Copy the current org's zone into the new one, with no field (recommended). Today every new org starts on <code>Europe/London</code> (the column default). Copying is right for most people, who start a second org in the same place. Owners can change it on Members.</div>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the sheet as it opens</span><div id="p-form-empty"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · filled in</span><div id="p-form-filled"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · creating</span><div id="p-form-busy"></div></div>
+    <div class="ann">
+      <h3>Phone: the sheet</h3>
+      <ol>
+        <li>The sheet's title changes to "New organisation". A back arrow on the left returns to the list, the close button on the right closes it all.</li>
+        <li>The button is full width in a footer that stays above the keyboard, like the logins form (<code>.sheet-sticky-foot</code>). No Cancel button: the sheet already closes by swipe, backdrop, close button or Esc.</li>
+        <li>Inputs are 16px, so iOS does not zoom. The username field has <code>autocapitalize="off"</code> and <code>spellcheck="false"</code>.</li>
+        <li>Creating: the button reads "Creating…" with a spinner, and both fields lock. A double tap does nothing.</li>
+      </ol>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · name and username refused</span><div id="p-form-errors"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · a name you already have</span><div id="p-form-dupe"></div></div>
+    <div class="ann">
+      <h3>Validation</h3>
+      <table>
+        <tr><th>Case</th><th>Message, under the field</th></tr>
+        <tr><td>Name blank</td><td>The browser's own "required" stops it first. If it reaches the server: "Use 2 to 80 characters."</td></tr>
+        <tr><td>Name 1 or over 80 characters</td><td>"Use 2 to 80 characters." (today's signup message)</td></tr>
+        <tr><td>Username blank or broken</td><td>"Start with a letter and use 3 to 30 letters or numbers."</td></tr>
+        <tr><td>Username "everyone"</td><td>"That name is reserved."</td></tr>
+        <tr><td>Username taken in the new org</td><td>Can't happen. The org is empty until Priya is in it.</td></tr>
+        <tr><td>Name used by another org on the platform</td><td>Allowed. Names are not unique in the code: only the slug is, and <code>unique_slug</code> adds "-2". A stranger's "Lumen Café" is invisible to Priya.</td></tr>
+        <tr><td>Name matches one of Priya's own orgs</td><td>"You already have an organisation called Acme Studio. Pick a name you can tell apart." Recommended, see the question.</td></tr>
+      </table>
+      <p>On a refusal the form keeps what was typed, puts focus on the first field with a problem, and marks it <code>aria-invalid</code>. Errors replace the hint, as <code>text_field</code> does today.</p>
+      <div class="q"><b>Question for Raj: same name as one of yours</b>Refuse a name that matches (ignoring case and spaces) an org you are active in (recommended). Two "Acme Studio" rows in the switcher can't be told apart, and the menu has no other detail to tell them by. Names across the whole platform stay free.</div>
+    </div>
+    <div class="shot">
+      <span class="shot-label">Close up · desktop dialog states</span>
+      <div class="pair" id="spec-form"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 3. AFTER CREATING ============================== -->
+<section class="section" id="after">
+  <h2>3. After creating</h2>
+  <p class="lead">Priya is the owner of Lumen Café, the browser switches into it, and she lands on Home there. A toast says it is ready. The Getting started guide is waiting, because it belongs to the membership and this membership is new.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Home in Lumen Café, first run</span><div id="d-after"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Toast: "Lumen Café is ready. You're the owner." The normal dark toast, bottom right on desktop and above the tab bar on phones, gone after 3.5 seconds.</li>
+        <li>The same trick as a switch: the create redirects to <code>/dashboard?created=1</code>, Home words the toast from the org it really resolved, and <code>app.ts</code> drops <code>?created=1</code> so a reload does not repeat it.</li>
+        <li>The Getting started guide shows at 0 of 5, the owner's steps: invite your team, a project, a task, hello in #general, tag a teammate. "Invite your team" is first and amber, because a new org with nobody in it is the real next step.</li>
+        <li>Every count is 0 and the empty states are today's: "Nothing in the "now" lane. Add a project" and "Nothing on your plate. Add a task".</li>
+        <li>#general and the starter document folders exist already. <code>create_with_owner</code> makes them, the same as at signup.</li>
+        <li>The sidebar button reads "Lumen Café". The menu now lists both orgs, A to Z.</li>
+      </ol>
+      <div class="q"><b>Question for Raj: the welcome pop-up</b>Skip it for someone who already belongs to another org (recommended). <code>welcomed_at</code> is per membership, so today Priya would get the four-slide tour of an app she already uses, on top of the toast. The fix: set <code>welcomed_at</code> when the membership is made by "New organisation". The guide still shows, since its steps are about this org.</div>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Home in Lumen Café</span><div id="p-after"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the sheet now</span><div id="p-after-sheet"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · More now</span><div id="p-after-more"></div></div>
+    <div class="ann">
+      <h3>On the phone</h3>
+      <ol>
+        <li>Same landing. On a phone the guide hides each step's second line, as it does today.</li>
+        <li>The sheet lists Acme Studio and Lumen Café, both "Owner", with the tick on Lumen Café.</li>
+        <li>More's org row gets "Switch" back, because there is now something to switch to.</li>
+        <li>Any other open tab, still on Acme, gets PR 3's notice next time it loads something: "This tab was showing Acme Studio. You're now in Lumen Café." Nothing new to build.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 4. EDGE CASES ============================== -->
+<section class="section" id="edges">
+  <h2>4. Edge cases</h2>
+  <p class="lead">A super admin acting inside someone else's org, a cap on how many orgs one person can make, and failures.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · acting, form opened from a typed link</span><div id="p-acting"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · at the limit</span><div id="p-limit"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · no connection</span><div id="p-offline"></div></div>
+    <div class="ann">
+      <h3>Super admin acting</h3>
+      <ol>
+        <li>Raj, acting in Acme Studio, sees no "New organisation" row in the menu or on More. That menu is about where he is acting and his way back. A create button there could read as "create inside Acme".</li>
+        <li>If he opens <code>/orgs/new</code> by hand, the form works and says so first: "You're acting in Acme Studio. Creating this ends acting. The new organisation is yours, with you as owner."</li>
+        <li>Creating clears the acting cookie, as a switch does, and lands him in his own new org. It is never created inside or on behalf of Acme.</li>
+      </ol>
+      <h3>A limit</h3>
+      <p><b>Recommended: yes, 10 organisations created per account.</b> Counted from <code>organisations.created_by_id</code>, so it can't be dodged by leaving. No real person needs more today. It stops a script, or a stuck button, from filling the database. At the limit the row still shows. The form says why instead of the fields, so nobody hunts for a missing button.</p>
+      <h3>Failures</h3>
+      <ul>
+        <li><b>No connection:</b> toast "Couldn't create the organisation. Check your connection and try again." The form stays open and filled.</li>
+        <li><b>Server error:</b> a red alert at the top of the form: "Something went wrong, and nothing was created. Try again." Signup's transaction already makes it all or nothing.</li>
+        <li><b>Double submit:</b> the button locks on the first press.</li>
+      </ul>
+      <div class="q"><b>Question for Raj: the limit</b>10 per account, with a plain message (recommended). Or no limit for now. If 10, is there a contact to name in the message? It says nothing about one in this draft.</div>
+    </div>
+    <div class="ann">
+      <h3>Other cases</h3>
+      <table>
+        <tr><th>Case</th><th>What happens</th></tr>
+        <tr><td>The form was opened in a tab that has gone stale</td><td>The create is accepted. It writes into no existing org, so PR 3's org check has nothing to protect. Recommend it runs as <code>CurrentUser</code> and joins the exempt list next to <code>POST /orgs/{id}/switch</code>.</td></tr>
+        <tr><td>Priya's username changed in Acme while the form was open</td><td>The form sends what is in the field. Nothing to check.</td></tr>
+        <tr><td>Two tabs create at once</td><td>Two orgs, two toasts. The limit still counts both.</td></tr>
+        <tr><td>Name with an accent</td><td>Fine for the name. The join link's slug drops it today: "Lumen Café" becomes <code>/join/lumen-caf</code>. See Suggestions in the report.</td></tr>
+        <tr><td>Waiting, removed or declined, with no active org</td><td>No app shell, so no entry point. Unchanged in PR 4.</td></tr>
+      </table>
+    </div>
+    <div class="shot">
+      <span class="shot-label">Close up · desktop, acting: no create row</span>
+      <div class="pair" id="spec-acting"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 5. ROLES AND STATES ============================== -->
+<section class="section" id="roles">
+  <h2>5. Roles and states</h2>
+  <p class="lead">What each person sees. The feature is about the account, not the role, so the table is short.</p>
+  <div class="shots">
+    <div class="ann ann-wide">
+      <table>
+        <tr><th>Who</th><th>Menu and sheet</th><th>More</th><th>Can create</th></tr>
+        <tr><td>Owner (Priya in Acme Studio)</td><td>The list, then "New organisation"</td><td>Org row, then "New organisation"</td><td>Yes, becomes owner of the new one</td></tr>
+        <tr><td>Admin (Dawa in Thornbury Vets)</td><td>Same</td><td>Same</td><td>Yes</td></tr>
+        <tr><td>Member (Priya in Northwind Bakery)</td><td>Same</td><td>Same</td><td>Yes. Her role in Northwind is unchanged.</td></tr>
+        <tr><td>Super admin acting</td><td>No create row</td><td>No create row</td><td>Only via <code>/orgs/new</code>, with the acting note</td></tr>
+        <tr><td>Super admin in their own org</td><td>Same as an owner</td><td>Same</td><td>Yes</td></tr>
+        <tr><td>At the limit</td><td>Row shows</td><td>Row shows</td><td>The form explains the limit</td></tr>
+      </table>
+      <p class="meta" style="margin-top:10px">Empty: can't happen. Every page in the app has a current org, so the menu always has at least one row above "New organisation". Many: section 1's close up shows nine orgs with the row pinned below the scroll. Loading: the form is part of the page, so it opens with no wait. Only the create itself has a busy state (section 2).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 6. QUESTIONS ============================== -->
+<section class="section" id="questions">
+  <h2>6. Questions for Raj</h2>
+  <p class="lead">Each with a recommendation.</p>
+  <div class="ann ann-wide">
+    <ol>
+      <li><b>The switcher for one org:</b> show the chevron and menu for everyone. Recommend: yes. Without it, desktop has no way in.</li>
+      <li><b>Desktop form:</b> a dialog (the existing <code>.sheet</code>, centred at 560px), with <code>/orgs/new</code> as the no-JavaScript page. Recommend: yes, over a full page.</li>
+      <li><b>Username:</b> ask for it, filled with your current one. Recommend: yes. It costs one glance, and per-org usernames are the point of memberships.</li>
+      <li><b>Time zone:</b> copy the current org's, no field. Recommend: yes, over the <code>Europe/London</code> default.</li>
+      <li><b>Same name as one of your own orgs:</b> refuse it. Recommend: yes. Names stay free across the platform.</li>
+      <li><b>Welcome pop-up:</b> skip it when you already belong to another org, keep the Getting started guide. Recommend: yes.</li>
+      <li><b>Toast:</b> "Lumen Café is ready. You're the owner." Recommend: yes.</li>
+      <li><b>Super admin acting:</b> no create row while acting; the form works from a typed link, says it ends acting, and makes the org the admin's own. Recommend: yes.</li>
+      <li><b>Limit:</b> 10 organisations created per account. Recommend: yes. Tell me if the message should name a contact.</li>
+      <li><b>Stale tabs:</b> the create runs as <code>CurrentUser</code> and is exempt from PR 3's org check. Recommend: yes. It writes into no existing org.</li>
+    </ol>
+  </div>
+</section>
+
+<script>
+/* ---------- Data ---------- */
+const PRIYA = { name: "priya" };
+const RAJ = { name: "raj" };
+const DAWA = { name: "dawa" };
+const ACME = { id: 12, name: "Acme Studio", role: "Owner" };
+const LUMEN = { id: 58, name: "Lumen Café", role: "Owner" };
+const NORTH = { id: 31, name: "Northwind Bakery", role: "Member" };
+const HIMAL = { id: 47, name: "Himalayan Ritual", pending: true };
+const ZEN = { id: 1, name: "Zen Scale", role: "Owner" };
+const DAWA_ORGS = [
+  { name: "Acme Studio", role: "Admin" }, { name: "Brightside Dental", role: "Member" }, { name: "Fernhill Primary PTA", role: "Admin" },
+  { name: "Kathmandu Coffee Co.", role: "Owner" }, { name: "Northwind Bakery", role: "Member" }, { name: "Oakline Joinery", role: "Member" },
+  { name: "Riverside Community Climbing Club and Café", role: "Member" }, { name: "Thornbury Vets", role: "Admin" },
+  { name: "Little Lantern Nursery", pending: true },
+];
+const HOME = {
+  "Acme Studio": {
+    stats: [6, 1, 4, 3],
+    projects: [["Studio website refresh", "Active", 35, "#3b6fe0", "6 of 17 done", ["kai", "priya"]], ["Spring lookbook", "Active", 20, "#2f9e6b", "2 of 10 done", ["ana", "maya"]]],
+    tasks: [["progress", "Send the Harbour Deli logo proofs"], ["blocked", "Fix the hero image crop on mobile"], ["todo", "Book the photographer for 4 November"]],
+    chat: [["design", "maya: New colour swatches are in Documents"], ["general", "sam: Office closed on Friday afternoon"]],
+  },
+  "Lumen Café": { stats: [0, 0, 0, 0], projects: [], tasks: [], chat: [], fresh: true },
+  "Zen Scale": { stats: [3, 0, 1, 0], projects: [], tasks: [], chat: [] },
+};
+const COLORS = { maya: "#ff758f", sam: "#6cb6ff", kai: "#c9d76a", ana: "#72e5b4", priya: "#df85ff", raj: "#ffb454", dawa: "#72e5b4" };
+const GUIDE = [
+  ["Invite your team", "Share your join link. You approve people as they arrive.", "Get the link"],
+  ["Put a project on the roadmap", "Something the team is working on now.", "Add project"],
+  ["Add a task", "Give it to someone, or keep it as a small chore.", "New task"],
+  ["Say hello in #general", "Your team's shared chat channel.", "Open chat"],
+  ["Tag a teammate", "Type @ in chat or a task note. They get a notification.", "Try it"],
+];
+
+/* ---------- Helpers ---------- */
+const ic = (name, size = 18, cls = "") => `<svg class="ic ${cls}" width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const av = (n, size = "sm") => `<span class="avatar avatar-${size}" style="background:${COLORS[n] || "#e8dfce"}" aria-hidden="true">${n[0].toUpperCase()}</span>`;
+const logo = (org, cls = "") => `<span class="logo ${org.pending ? "logo-wait" : ""} ${cls}">${org.name[0]}</span>`;
+function both(html, stack = false) {
+  return `<div class="pair${stack ? " stack" : ""}"><div class="th th-light" data-theme="light">${html}</div><div class="th th-dark" data-theme="dark">${html}</div></div>`;
+}
+const put = (id, html) => { document.getElementById(id).innerHTML = both(html); };
+const putDesk = (id, html) => { document.getElementById(id).innerHTML = both(`<div class="desk-holder">${html}</div>`, true); };
+
+/* ---------- Switcher rows (PR 3) plus the new row ---------- */
+function orgRow(org, o = {}) {
+  if (org.pending) {
+    return `<div class="org-row" role="menuitem" aria-disabled="true" tabindex="-1">${logo(org, o.big ? "logo-lg" : "")}<span class="org-text"><span class="org-name truncate-1">${org.name}</span><span class="meta">${ic("clock-3", 13)}Waiting for approval</span></span></div>`;
+  }
+  const cur = o.current === org.name;
+  const role = o.roleOverride && cur ? `${ic("shield", 13)}${o.roleOverride}` : org.role;
+  return `<button type="button" class="org-row ${o.focus === org.name ? "focus" : ""}" role="menuitemradio" aria-checked="${cur}" tabindex="-1">${logo(org, o.big ? "logo-lg" : "")}<span class="org-text"><span class="org-name truncate-1">${org.name}</span><span class="meta">${role}</span></span>${cur ? ic("check", 20, "tick") : ""}</button>`;
+}
+const newRow = (o = {}) => `<a href="/orgs/new" class="org-row org-new ${o.focus === "new" ? "focus" : ""}" role="menuitem" tabindex="-1"><span class="logo-new">${ic("plus", 18)}</span><span class="org-text"><span class="org-name">New organisation</span></span></a>`;
+function orgList(orgs, o = {}) {
+  const active = orgs.filter((x) => !x.pending);
+  const pending = orgs.filter((x) => x.pending);
+  return active.map((x) => orgRow(x, o)).join("") + (pending.length ? `<div class="org-sep" role="separator"></div>` + pending.map((x) => orgRow(x, o)).join("") : "");
+}
+/* The whole body of the menu or sheet. The new row sits outside the scroll. */
+function orgBody(orgs, o = {}) {
+  if (o.acting) {
+    return `<div class="org-menu-label">Acting in</div>${orgRow(o.acting, { ...o, current: o.acting.name, roleOverride: "Platform admin" })}<div class="org-sep" role="separator"></div><div class="org-menu-label">Your organisations</div>${orgList(o.own, { ...o, current: null })}<p class="org-note">Switching ends acting in ${o.acting.name}.</p>`;
+  }
+  return `${o.sheet ? "" : `<div class="org-menu-label">Your organisations</div>`}<div class="${o.scroll ? "org-scroll" : ""}" style="${o.scroll && o.sheet ? "max-height:none" : ""}">${orgList(orgs, o)}</div><div class="org-sep" role="separator"></div>${newRow(o)}`;
+}
+const menu = (orgs, o = {}) => `<div class="org-menu" role="menu" aria-label="Your organisations"${o.style ? ` style="${o.style}"` : ""}>${orgBody(orgs, o)}</div>`;
+function orgButton(org, o = {}) {
+  if (o.single) return `<a href="#" class="org-static">${logo(org)}<strong class="truncate-1" style="font-size:15px">${org.name}</strong></a>`;
+  const sub = o.acting ? `<span class="sub">${ic("shield", 12)}Platform admin</span>` : "";
+  return `<button type="button" class="org-switch" aria-haspopup="menu" aria-expanded="${!!o.open}">${logo(org)}<span class="org-btn-text"><strong class="truncate-1">${org.name}</strong>${sub}</span>${ic("chevrons-up-down", 16, "chev")}</button>`;
+}
+function sidebar(org, o = {}) {
+  const links = [["house", "Home"], ["bell", "Notifications"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["map", "Roadmap"], ["meetings", "Meetings"], ["folder", "Documents"], ["users", "Members"]].filter(([, l]) => !(o.acting && l === "Documents"));
+  if (o.superAdmin) links.push(["shield", "Admin"]);
+  const me = o.me || PRIYA;
+  return `<nav class="sidebar">${orgButton(org, o)}${links.map(([i, l]) => `<a href="#" class="side-link"${l === "Home" ? ' aria-current="page"' : ""}>${ic(i, 20)}<span style="flex:1">${l}</span>${l === "Chat" && o.chat ? `<span class="badge">${o.chat}</span>` : ""}</a>`).join("")}<div class="side-foot">${av(me.name, "md")}<span class="truncate-1" style="flex:1;font-size:14px;font-weight:500">${me.name}</span><span class="icon-btn">${ic("sun-moon", 20)}</span><span class="icon-btn">${ic("log-out", 20)}</span></div>${o.menu || ""}</nav>`;
+}
+const actingBanner = (name) => `<div class="acting"><span>You are inside <strong>${name}</strong> as platform admin. Changes you make are real.</span><button class="btn btn-secondary">Leave</button></div>`;
+
+/* ---------- Home ---------- */
+function stats(orgName) {
+  const s = HOME[orgName].stats;
+  const items = [["var(--progress)", "Your open tasks"], ["var(--blocked)", "Blocked"], ["var(--accent)", "Due this week"], ["var(--done)", "Unread messages"]];
+  return `<div class="stats">${items.map(([c, l], i) => `<a class="stat" style="--dot:${c}"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">${s[i]}</span><span class="meta">${l}</span></span></a>`).join("")}</div>`;
+}
+function projectCard(p) {
+  return `<a class="project-card" style="--accent-bar:${p[3]}"><span style="display:flex;align-items:center;gap:8px"><span class="truncate-1" style="flex:1;font-weight:700">${p[0]}</span><span class="pill">${p[1]}</span></span><span style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1;--bar:${p[3]}"><span style="width:${p[2]}%"></span></span><span class="meta">${p[2]}%</span></span><span style="display:flex;align-items:center;gap:8px"><span class="meta" style="flex:1">${p[4]}</span><span class="avatar-stack">${p[5].map((n) => av(n, "xs")).join("")}</span></span></a>`;
+}
+const statusIc = (s) => `<span style="color:var(--${s === "progress" ? "progress" : s === "blocked" ? "blocked" : "todo"});display:inline-grid">${ic("status-" + s, 20)}</span>`;
+function guide(orgName) {
+  return `<section class="guide" aria-labelledby="g"><span class="icon-btn guide-close">${ic("x", 18)}</span><div class="guide-top"><span class="guide-ring" style="--pct:0" role="img" aria-label="0 of 5 done"><span>0/5</span></span><div style="min-width:0"><h2 id="g" style="margin:0;font-size:17px;font-weight:800;letter-spacing:-0.01em">Getting started</h2><p class="meta" style="font-size:14px">A few quick steps to find your way around ${orgName}. They tick themselves as you go.</p></div></div><ul class="guide-steps">${GUIDE.map(([t, h, a], i) => `<li class="guide-step"><span class="guide-tick"></span><span style="display:flex;flex-direction:column;flex:1;min-width:0"><strong style="font-size:15px">${t}</strong><span class="meta guide-how">${h}</span></span><a class="btn ${i === 0 ? "btn-primary" : "btn-secondary"} guide-go">${a}</a></li>`).join("")}</ul></section>`;
+}
+function roadmapBlock(h, phone) {
+  const body = h.projects.length ? (phone ? projectCard(h.projects[0]) : `<div class="cards-3">${h.projects.map(projectCard).join("")}</div>`) : `<div class="card empty">Nothing in the "now" lane. <a>Add a project</a></div>`;
+  return `<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Roadmap: now</h2><a>Full roadmap</a></div>${body}</section>`;
+}
+function homeDesk(orgName, me) {
+  const h = HOME[orgName];
+  const tasks = h.tasks.length ? `<div class="list">${h.tasks.map(([s, t]) => `<div class="task-line">${statusIc(s)}${t}</div>`).join("")}</div>` : `<div class="card empty">Nothing on your plate. <a>Add a task</a></div>`;
+  const chat = h.chat.length ? `<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Recent chat</h2><a>All chats</a></div><div class="list">${h.chat.map(([c, t]) => `<div class="task-line"><span style="color:var(--muted);display:inline-grid">${ic("hash", 18)}</span><span style="display:flex;flex-direction:column;min-width:0"><strong style="font-size:14px">${c}</strong><span class="meta truncate-1">${t}</span></span></div>`).join("")}</div></section>` : "";
+  return `<div class="d-page"><div style="display:flex;align-items:flex-end;gap:12px"><div style="flex:1"><p class="greet-date">Sunday 19 October</p><p class="greet">Good morning, ${me.name}</p></div><a class="btn btn-primary">${ic("plus", 16)}New task</a></div>${h.fresh ? guide(orgName) : ""}${stats(orgName)}<div class="home-grid"><div style="display:flex;flex-direction:column;gap:24px">${roadmapBlock(h)}<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>My tasks</h2><a>All tasks</a></div>${tasks}</section></div><div>${chat}</div></div></div>`;
+}
+function homePhone(orgName, me) {
+  const h = HOME[orgName];
+  return `<div class="page"><div><p class="greet-date">Sunday 19 October</p><p class="greet">Good morning, ${me.name}</p></div>${h.fresh ? guide(orgName) : ""}${stats(orgName)}${roadmapBlock(h, true)}</div>`;
+}
+const tabbar = (active = "Home") => `<nav class="tabbar">${[["house", "Home"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["ellipsis", "More"]].map(([i, l]) => `<a class="tab"${l === active ? ' aria-current="page"' : ""}><span class="tab-icon">${ic(i, 22)}</span>${l}</a>`).join("")}</nav>`;
+function phoneHeader(orgName, me) {
+  return `<header class="topbar"><button type="button" class="org-head" aria-haspopup="dialog"><span class="truncate-1">${orgName}</span>${ic("chevron-down", 18)}</button><a class="icon-btn" aria-label="Account and settings">${av(me.name, "sm")}</a><a class="icon-btn" aria-label="Notifications">${ic("bell", 22)}</a></header>`;
+}
+const phone = (inner) => `<div class="frame-phone"><div class="statusbar"><span>9:41</span><span style="font-size:13px">●●● ▮</span></div><div class="phone-body">${inner}</div><span class="home-ind"></span></div>`;
+function sheet(body, o = {}) {
+  const title = o.title || "Your organisations";
+  const back = o.back ? `<button class="icon-btn" aria-label="Back to your organisations" style="margin-left:-12px">${ic("chevron-left", 22)}</button>` : "";
+  const role = o.form ? "" : ` role="menu" aria-label="${title}"`;
+  return `<div class="m-scrim"></div><div class="m-sheet" role="dialog" aria-label="${title}"><div class="sheet-handle"></div><div class="sheet-head"${o.back ? ' style="padding-left:8px"' : ""}>${back}<h2>${title}</h2><button class="icon-btn" aria-label="Close">${ic("x", 20)}</button></div>${o.form ? body : `<div class="sheet-body"${role}>${body}</div>`}</div>`;
+}
+const toast = (msg, cls = "", style = "") => `<div class="toast-region" role="status"${style ? ` style="${style}"` : ""}><div class="toast ${cls}">${msg}</div></div>`;
+
+/* ---------- More ---------- */
+function morePage(org, me, o = {}) {
+  const row = (i, l, end = ic("chevron-right", 18)) => `<div class="list-row">${ic(i, 20)}<span style="flex:1;font-size:16px">${l}</span><span style="color:var(--muted);display:inline-grid">${end}</span></div>`;
+  const orgRowMore = o.many
+    ? `<button type="button" class="list-row" style="width:100%;border:0;background:none;text-align:left;color:inherit;min-height:60px" aria-haspopup="dialog">${logo(org, "logo-lg")}<span style="flex:1;min-width:0;display:flex;flex-direction:column"><span class="truncate-1" style="font-size:16px;font-weight:600">${org.name}</span><span class="meta">${org.role}</span></span><span style="color:var(--link);font-weight:600;font-size:15px">Switch</span><span style="color:var(--muted);display:inline-grid">${ic("chevron-right", 18)}</span></button>`
+    : `<div class="list-row" style="min-height:60px">${logo(org, "logo-lg")}<span style="flex:1;min-width:0;display:flex;flex-direction:column"><span class="truncate-1" style="font-size:16px;font-weight:600">${org.name}</span><span class="meta">${org.role}</span></span></div>`;
+  const newMore = `<a class="list-row org-new" style="min-height:56px" aria-haspopup="dialog"><span class="logo-new lg">${ic("plus", 18)}</span><span style="flex:1;font-size:16px;font-weight:600">New organisation</span><span style="color:var(--muted);display:inline-grid">${ic("chevron-right", 18)}</span></a>`;
+  return `<header class="topbar"><h1>More</h1><a class="icon-btn">${ic("bell", 22)}</a></header><div class="page">
+    <div class="card" style="display:flex;align-items:center;gap:12px;padding:14px">${av(me.name, "lg")}<div style="flex:1;min-width:0"><p style="font-size:17px;font-weight:600">${me.name}</p><p class="meta">${org.role} · ${org.name}</p></div></div>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Organisation</h2><div class="list">${orgRowMore}${newMore}</div></section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Workspace</h2><div class="list">${row("map", "Roadmap")}${row("meetings", "Meetings")}${row("folder", "Documents")}${row("users", "Members")}</div></section>
+  </div>`;
+}
+
+/* ---------- The create form ---------- */
+function field(o) {
+  const msg = o.error ? `<span class="field-error" id="${o.id}-msg">${ic("circle-alert", 14)}${o.error}</span>` : o.hint ? `<span class="field-hint">${o.hint}</span>` : "";
+  return `<label class="field"><span class="field-label">${o.label}</span><input class="input ${o.focus ? "focus" : ""}" value="${o.value || ""}" ${o.attrs || ""} ${o.error ? 'aria-invalid="true"' : ""} ${o.busy ? "disabled" : ""}>${msg}</label>`;
+}
+function formInner(o = {}) {
+  const v = o.values || {};
+  const e = o.errors || {};
+  if (o.limit) {
+    return `<div class="limit-box"><span class="tile">${ic("lock", 26)}</span><h3>You've set up 10 organisations</h3><p>That's the most one account can set up for now. You can keep using the ones you have.</p></div>`;
+  }
+  const acting = o.acting ? `<div class="acting-note">${ic("shield", 16)}<span>You're acting in <strong>Acme Studio</strong>. Creating this ends acting. The new organisation is yours, with you as owner.</span></div>` : "";
+  const alert = o.alert ? `<p class="alert alert-error" role="alert">${o.alert}</p>` : "";
+  const from = o.from || "Acme Studio";
+  return `${acting}${alert}<p class="form-lead">A separate space with its own people, tasks and chat. You'll be its owner.</p>
+  <div class="fields">
+    ${field({ id: "n", label: "Organisation name", value: v.name, error: e.name, focus: o.focus === "name", busy: o.busy, attrs: 'autocomplete="organization" required maxlength="80"' })}
+    ${field({ id: "u", label: "Your username", value: v.username ?? (o.acting ? "raj" : "priya"), error: e.username, hint: "How people in this organisation see you. Start with a letter, then 3 to 30 letters or numbers.", focus: o.focus === "username", busy: o.busy, attrs: 'autocapitalize="off" spellcheck="false" required' })}
+  </div>
+  <ul class="facts"><li>${ic("lock", 16)}<span>Nothing from ${from} is shared with it.</span></li><li>${ic("mail", 16)}<span>You'll sign in with the same email and password.</span></li></ul>`;
+}
+const submitLabel = (o) => (o.busy ? `${ic("loader-circle", 18, "spin")}Creating…` : o.limit ? "Close" : "Create organisation");
+function dialog(o = {}) {
+  const foot = o.limit
+    ? `<div class="dlg-foot"><button class="btn btn-secondary btn-tall">Close</button></div>`
+    : `<div class="dlg-foot"><button class="btn btn-secondary btn-tall" ${o.busy ? "disabled" : ""}>Cancel</button><button class="btn btn-primary btn-tall" ${o.busy ? 'disabled aria-busy="true"' : ""}>${submitLabel(o)}</button></div>`;
+  return `<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t" style="${o.style || ""}"><div class="dlg-head"><h2 id="dlg-t">New organisation</h2><button class="icon-btn" aria-label="Close" style="color:var(--muted)">${ic("x", 20)}</button></div><div class="dlg-body">${formInner(o)}${foot}</div></div>`;
+}
+function formSheet(o = {}) {
+  const body = `<div class="form-body">${formInner(o)}<div style="height:16px"></div></div><div class="sheet-foot">${o.limit ? `<button class="btn btn-secondary btn-lg btn-full">Close</button>` : `<button class="btn btn-primary btn-lg btn-full" ${o.busy ? "disabled" : ""}>${submitLabel(o)}</button>`}</div>${o.kbd ? `<div class="m-kbd">Keyboard</div>` : ""}`;
+  return sheet(body, { title: "New organisation", back: !o.noBack, form: true });
+}
+const acmePhoneBg = () => phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar();
+
+/* ---------- 1. Entry points ---------- */
+putDesk("d-entry", `<div class="frame-desk">${sidebar(ACME, { open: true, chat: 3, menu: menu([ACME], { current: "Acme Studio", focus: "new" }) })}<div class="d-main">${homeDesk("Acme Studio", PRIYA)}</div></div>`);
+put("p-home", phone(acmePhoneBg()));
+put("p-sheet", phone(acmePhoneBg() + sheet(orgBody([ACME], { current: "Acme Studio", big: true, sheet: true }))));
+put("p-more", phone(morePage(ACME, PRIYA) + tabbar("More")));
+
+const specs = [
+  ["One org, closed: the chevron now shows", orgButton(ACME), 248],
+  ["One org, open", `<div style="position:relative;height:200px">${orgButton(ACME, { open: true })}${menu([ACME], { current: "Acme Studio", style: "top:52px;left:0" })}</div>`, 340],
+  ["Several orgs and a pending request", `<div style="position:relative;height:330px">${orgButton(ACME, { open: true })}${menu([ACME, NORTH, HIMAL], { current: "Acme Studio", style: "top:52px;left:0" })}</div>`, 340],
+  ["Nine orgs: the list scrolls, the row stays", `<div style="position:relative;height:560px">${orgButton({ name: "Kathmandu Coffee Co." }, { open: true })}${menu(DAWA_ORGS, { current: "Kathmandu Coffee Co.", scroll: true, style: "top:52px;left:0" })}</div>`, 340],
+];
+document.getElementById("spec-entry").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}" style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">${specs.map(([l, h, w]) => `<div class="specimen" style="width:${w}px"><p class="spec-label">${l}</p>${h}</div>`).join("")}</div>`).join("");
+
+/* ---------- 2. The form ---------- */
+putDesk("d-form", `<div class="frame-desk">${sidebar(ACME, { chat: 3 })}<div class="d-main">${homeDesk("Acme Studio", PRIYA)}</div><div class="d-scrim"></div>${dialog({ values: { name: "Lumen Café" }, focus: "name" })}</div>`);
+put("p-form-empty", phone(acmePhoneBg() + formSheet({ values: { name: "" }, focus: "name", kbd: true })));
+put("p-form-filled", phone(acmePhoneBg() + formSheet({ values: { name: "Lumen Café" } })));
+put("p-form-busy", phone(acmePhoneBg() + formSheet({ values: { name: "Lumen Café" }, busy: true })));
+put("p-form-errors", phone(acmePhoneBg() + formSheet({ values: { name: "L", username: "priya.k" }, errors: { name: "Use 2 to 80 characters.", username: "Start with a letter and use 3 to 30 letters or numbers." }, focus: "name" })));
+put("p-form-dupe", phone(acmePhoneBg() + formSheet({ values: { name: "acme studio" }, errors: { name: "You already have an organisation called Acme Studio. Pick a name you can tell apart." }, focus: "name" })));
+
+const formSpecs = [
+  ["Reserved username", dialog({ values: { name: "Lumen Café", username: "everyone" }, errors: { username: "That name is reserved." }, style: "position:static;transform:none;width:520px" })],
+  ["Server error: nothing was created", dialog({ values: { name: "Lumen Café" }, alert: "Something went wrong, and nothing was created. Try again.", style: "position:static;transform:none;width:520px" })],
+  ["Creating", dialog({ values: { name: "Lumen Café" }, busy: true, style: "position:static;transform:none;width:520px" })],
+];
+document.getElementById("spec-form").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}" style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">${formSpecs.map(([l, h]) => `<div class="specimen" style="width:560px;background:var(--scrim)"><p class="spec-label" style="color:#fff">${l}</p>${h}</div>`).join("")}</div>`).join("");
+
+/* ---------- 3. After creating ---------- */
+const READY = "Lumen Café is ready. You're the owner.";
+putDesk("d-after", `<div class="frame-desk">${sidebar(LUMEN)}<div class="d-main">${homeDesk("Lumen Café", PRIYA)}</div>${toast(READY)}</div>`);
+put("p-after", phone(phoneHeader("Lumen Café", PRIYA) + homePhone("Lumen Café", PRIYA) + tabbar() + toast(READY)));
+put("p-after-sheet", phone(phoneHeader("Lumen Café", PRIYA) + homePhone("Lumen Café", PRIYA) + tabbar() + sheet(orgBody([ACME, LUMEN], { current: "Lumen Café", big: true, sheet: true }))));
+put("p-after-more", phone(morePage(LUMEN, PRIYA, { many: true }) + tabbar("More")));
+
+/* ---------- 4. Edge cases ---------- */
+put("p-acting", phone(actingBanner("Acme Studio") + phoneHeader("Acme Studio", RAJ) + homePhone("Acme Studio", RAJ) + tabbar() + formSheet({ acting: true, values: { name: "Zen Scale Labs" }, from: "Acme Studio", noBack: true })));
+put("p-limit", phone(acmePhoneBg() + formSheet({ limit: true })));
+put("p-offline", phone(acmePhoneBg() + formSheet({ values: { name: "Lumen Café" } }) + toast("Couldn't create the organisation. Check your connection and try again.", "toast-error", "z-index:90;bottom:110px")));
+document.getElementById("spec-acting").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}"><div class="specimen" style="width:340px"><p class="spec-label">Acting in Acme Studio, menu open</p><div style="position:relative;height:300px">${orgButton(ACME, { acting: true, open: true })}${menu([], { acting: ACME, own: [ZEN], style: "top:56px;left:0" })}</div></div></div>`).join("");
+
+/* ---------- Desktop frames, scaled to fit ---------- */
+function renderDesk() {
+  document.querySelectorAll(".desk-holder").forEach((h) => {
+    const frame = h.firstElementChild;
+    const avail = h.closest(".shot").clientWidth;
+    const z = Math.min(1440, avail || 1440) / 1440;
+    h.style.width = `${1440 * z}px`;
+    h.style.height = `${900 * z}px`;
+    frame.style.transform = `scale(${z})`;
+  });
+}
+renderDesk();
+addEventListener("resize", renderDesk);
+document.querySelectorAll("[data-mode-set]").forEach((b) => b.addEventListener("click", () => {
+  const m = b.dataset.modeSet;
+  document.body.dataset.mode = m;
+  document.documentElement.dataset.theme = m === "dark" ? "dark" : "light";
+  document.querySelectorAll("[data-mode-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+document.querySelectorAll("[data-view-set]").forEach((b) => b.addEventListener("click", () => {
+  document.body.dataset.view = b.dataset.viewSet;
+  document.querySelectorAll("[data-view-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+</script>
+</body>
+</html>
