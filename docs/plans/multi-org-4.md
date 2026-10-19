@@ -236,9 +236,10 @@ the admin's own org.
   alert at the top of the form: "Something went wrong, and nothing was
   created. Try again." The fields stay filled. The transaction means nothing
   was saved.
-- No connection: on `htmx:sendError`, the toast "Couldn't create the
-  organisation. Check your connection and try again." The form stays open
-  and filled.
+- No connection: on `htmx:sendError`, "Couldn't create the organisation.
+  Check your connection and try again." The form stays open and filled.
+  Built in the alert slot, not as a toast: a modal sheet sits in the top
+  layer, above any toast (review fix).
 - While the request runs, the button reads "Creating…" with a spinner and
   both fields lock (`hx-disabled-elt`). A double tap sends once.
 
