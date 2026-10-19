@@ -48,7 +48,7 @@ pub enum ChatEvent {
         line: Box<ThreadLine>,
     },
     /// The user's sessions were ended (sign out everywhere, password reset,
-    /// removal). Their open sockets close.
+    /// removal), or they switched organisation. Their open sockets close.
     SignedOut { user_id: i64 },
 }
 
