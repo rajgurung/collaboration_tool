@@ -1,0 +1,86 @@
+# Super admin and acting in another organisation
+
+The platform super admin is a user with `users.is_super_admin = true`. They
+see every organisation at `/admin` and can work inside any of them as an
+owner. Working inside an organisation they do not belong to is called
+"acting".
+
+## Making the super admin
+
+There is no sign-up path. Run the task:
+
+```sh
+SUPER_ADMIN_PASSWORD=choose-one cargo loco task super_admin
+```
+
+- It reads `settings.super_admin` (email, username, organisation name; set by
+  `SUPER_ADMIN_*` variables in production, see `docs/deploy.md`).
+- If the user does not exist, it needs `SUPER_ADMIN_PASSWORD` and creates
+  them. If they exist, it never changes their password.
+- It sets `is_super_admin` and, if they have no membership, creates their own
+  organisation with them as owner.
+- Safe to run again.
+
+File: `src/tasks/super_admin.rs`.
+
+## Entering and leaving an organisation
+
+```mermaid
+sequenceDiagram
+    actor S as Super admin
+    participant Ad as admin controller
+    participant CM as CurrentMember
+    S->>Ad: GET /admin
+    Ad-->>S: every organisation with counts, every user
+    S->>Ad: POST /admin/orgs/ID/enter
+    Ad-->>S: acting_org cookie = ID, redirect /dashboard
+    S->>CM: any app page
+    CM->>CM: is_super_admin and acting_org points to a real org
+    CM-->>S: member of ID, role owner, acting = true
+    S->>Ad: POST /admin/leave
+    Ad-->>S: cookie cleared, redirect /admin
+```
+
+Rules:
+
+- `/admin` and its routes answer 404 to anyone else, so the area is not
+  advertised (`src/controllers/admin.rs:14`).
+- Entering writes an info log line, "super admin entered organisation"
+  (`src/controllers/admin.rs:73`). Nothing is written to the database.
+- The `acting_org` cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` in
+  production. `CurrentMember` reads it only for super admins, so the cookie
+  does nothing for anyone else (`src/extractors/session.rs:54`).
+- While acting, the admin's own membership is ignored. Their username in that
+  organisation is their `users.name`.
+- Signing out (`POST /logout`) clears the cookie too.
+- A super admin with no membership and no acting cookie is sent to `/admin`.
+
+The decision happens in `CurrentMember::from_request_parts`
+(`src/extractors/current_member.rs:135`).
+
+## What acting allows and blocks
+
+Acting gives the role `owner`, so owner and admin checks pass. Some actions
+check `acting` and refuse.
+
+| Area | While acting |
+|---|---|
+| Tasks, projects, roadmap, meetings, notes | Allowed |
+| Approve or decline join requests, change roles, set the time zone | Allowed |
+| Remove a member, see "Change these at the source" | Blocked (403) |
+| Documents and logins, all routes | Blocked (403) |
+| See a login password | Blocked (`can_reveal` is false) |
+| React to a task note | Blocked (403) |
+| `@everyone` in a task note | Saved, but notifies nobody; not offered in the @ menu |
+| Connect Claude, make a personal token | Blocked: a page asks them to leave first |
+| Chat | Only conversations they are a member of. They are not added to the organisation's `#general`. |
+
+The blocks come from `CurrentMember::require_own_membership`
+(`src/extractors/current_member.rs:99`) and direct `member.acting` checks in
+`src/controllers/members.rs:48`, `src/controllers/tasks.rs:910`,
+`src/controllers/notifications.rs:192`, `src/controllers/claude.rs:90`,
+`src/controllers/oauth.rs:318` and `:356`, and `src/models/logins.rs:451`.
+
+Unverified: chat routes have no `acting` check. Creating a group or starting
+a DM while acting is not blocked in the code. Whether the UI offers it was not
+checked.
