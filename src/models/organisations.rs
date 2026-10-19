@@ -25,7 +25,7 @@ pub type Organisations = Entity;
 /// Everything needed to create an organisation and its owner in one step.
 #[derive(Debug, Deserialize, Validate)]
 pub struct SignupParams {
-    #[validate(length(min = 2, max = 80, message = "Use 2 to 80 characters."))]
+    #[validate(custom(function = "trimmed_name_length"))]
     pub organisation_name: String,
     #[validate(
         regex(path = *users::USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."),
@@ -36,6 +36,32 @@ pub struct SignupParams {
     pub email: String,
     #[validate(length(min = users::PASSWORD_MIN_LENGTH, max = 128, message = "Use at least 8 characters."))]
     pub password: String,
+}
+
+/// "New organisation" for someone already signed in: the same two fields as
+/// signup, with the same rules and messages.
+#[derive(Debug, Deserialize, Validate)]
+pub struct NewOrgParams {
+    #[validate(custom(function = "trimmed_name_length"))]
+    pub organisation_name: String,
+    #[validate(
+        regex(path = *users::USERNAME_RE, message = "Start with a letter and use 3 to 30 letters or numbers."),
+        custom(function = "users::not_reserved")
+    )]
+    pub name: String,
+}
+
+/// An organisation name is 2 to 80 characters once trimmed, so a name of
+/// only spaces is refused instead of saved empty.
+///
+/// # Errors
+/// A field error when the trimmed name is too short or too long.
+pub fn trimmed_name_length(name: &str) -> Result<(), validator::ValidationError> {
+    let len = name.trim().chars().count();
+    if (2..=80).contains(&len) {
+        return Ok(());
+    }
+    Err(validator::ValidationError::new("length").with_message("Use 2 to 80 characters.".into()))
 }
 
 #[async_trait::async_trait]

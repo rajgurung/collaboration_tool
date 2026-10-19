@@ -1,7 +1,14 @@
-use collab::{app::App, models::_entities::organisations};
+use collab::{
+    app::App,
+    models::{
+        _entities::organisations,
+        organisations::{NewOrgParams, SignupParams},
+    },
+};
 use loco_rs::testing::prelude::*;
 use sea_orm::EntityTrait;
 use serial_test::serial;
+use validator::Validate;
 
 macro_rules! configure_insta {
     ($($expr:expr),*) => {
@@ -34,4 +41,51 @@ async fn can_query_organisations() {
         .all(&boot.app_context.db)
         .await
         .expect("`organisations` should be queryable — entity and migration must agree");
+}
+
+fn new_org(name: &str, username: &str) -> NewOrgParams {
+    NewOrgParams {
+        organisation_name: name.to_string(),
+        name: username.to_string(),
+    }
+}
+
+fn signup(name: &str) -> SignupParams {
+    SignupParams {
+        organisation_name: name.to_string(),
+        name: "alice".to_string(),
+        email: "alice@example.com".to_string(),
+        password: "correct-horse".to_string(),
+    }
+}
+
+/// The message on `organisation_name`, if validation refused it.
+fn name_error(result: Result<(), validator::ValidationErrors>) -> Option<String> {
+    result.err().and_then(|e| {
+        e.field_errors()
+            .get("organisation_name")
+            .and_then(|list| list.first())
+            .and_then(|err| err.message.as_ref().map(ToString::to_string))
+    })
+}
+
+#[test]
+fn a_spaces_only_name_is_refused() {
+    for name in ["   ", " a ", ""] {
+        assert_eq!(
+            name_error(new_org(name, "alice").validate()).as_deref(),
+            Some("Use 2 to 80 characters."),
+            "create: {name:?}"
+        );
+        assert_eq!(
+            name_error(signup(name).validate()).as_deref(),
+            Some("Use 2 to 80 characters."),
+            "signup: {name:?}"
+        );
+    }
+    // Spaces around a real name don't count against it.
+    let long = format!("  {}  ", "a".repeat(80));
+    assert_eq!(name_error(new_org(&long, "alice").validate()), None);
+    assert_eq!(name_error(signup(" ab ").validate()), None);
+    assert!(name_error(signup(&"a".repeat(81)).validate()).is_some());
 }
