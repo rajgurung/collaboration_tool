@@ -1988,13 +1988,24 @@ function focusNewOrg() {
   orgSheetBody?.querySelector<HTMLInputElement>('#org-new-form [aria-invalid="true"], #org-new-form input[name=organisation_name]')?.focus();
 }
 
+// Set when loading the form fails: a server error or no connection.
+let newOrgFailed = false;
+for (const name of ["htmx:responseError", "htmx:sendError"]) {
+  document.body.addEventListener(name, (event) => {
+    const detail = (event as CustomEvent<{ pathInfo?: { requestPath?: string }; xhr?: XMLHttpRequest }>).detail;
+    if (detail.pathInfo?.requestPath === "/orgs/new" && detail.xhr?.status !== 409) newOrgFailed = true;
+  });
+}
+
 async function openNewOrg(fromList: boolean) {
   if (!orgSheet || !orgSheetBody) return void (window.location.href = "/orgs/new");
   newOrgReturn = orgMenuOpen() ? orgMenuButton : null;
   closeOrgMenu(false);
-  try {
-    await htmx.ajax("GET", "/orgs/new", { target: "#org-sheet-body", swap: "innerHTML" });
-  } catch {
+  newOrgFailed = false;
+  await htmx.ajax("GET", "/orgs/new", { target: "#org-sheet-body", swap: "innerHTML" }).catch(() => (newOrgFailed = true));
+  if (newOrgFailed) {
+    // Outside any dialog, where a toast can be seen.
+    orgSheet.close();
     showToast({ kind: "error", message: "Couldn't open the form. Check your connection and try again." });
     return;
   }
@@ -2028,26 +2039,44 @@ orgSheet?.addEventListener("close", () => {
 });
 
 // A 422 swaps the form in again; htmx focuses its first problem (autofocus).
-// A server error keeps what was typed and shows the alert; no connection, a
-// toast. The transaction means nothing was saved either way.
+// A server error or no connection keeps what was typed and shows the alert
+// at the top of the form (a toast would sit under the modal sheet). The
+// transaction means nothing was saved either way.
+function clearFieldError(input: HTMLInputElement) {
+  input.removeAttribute("aria-invalid");
+  const field = input.closest(".field");
+  field?.querySelector(".field-error")?.remove();
+  const hint = field?.querySelector<HTMLElement>(".field-hint");
+  if (hint) hint.hidden = false;
+}
+document.addEventListener("input", (event) => {
+  const input = event.target;
+  if (input instanceof HTMLInputElement && input.matches('#org-new-form [aria-invalid="true"]')) clearFieldError(input);
+});
+function showNewOrgAlert(form: HTMLFormElement, message: string) {
+  const alert = form.querySelector<HTMLElement>("[data-org-new-alert]");
+  if (!alert) return;
+  alert.textContent = message;
+  alert.hidden = false;
+  alert.scrollIntoView({ block: "nearest" });
+}
 document.body.addEventListener("htmx:beforeRequest", (event) => {
   const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
   if (elt instanceof HTMLFormElement && elt.matches("[data-org-new-form]")) {
     const alert = elt.querySelector<HTMLElement>("[data-org-new-alert]");
     if (alert) alert.hidden = true;
+    // Old 422 errors never sit next to a new answer.
+    elt.querySelectorAll<HTMLInputElement>('[aria-invalid="true"]').forEach(clearFieldError);
   }
 });
 document.body.addEventListener("htmx:responseError", (event) => {
   const { elt, xhr } = (event as CustomEvent<{ elt: Element; xhr: XMLHttpRequest }>).detail;
   if (!(elt instanceof HTMLFormElement) || !elt.matches("[data-org-new-form]") || xhr.status === 422 || xhr.status === 409) return;
-  const alert = elt.querySelector<HTMLElement>("[data-org-new-alert]");
-  if (!alert) return;
-  alert.hidden = false;
-  alert.scrollIntoView({ block: "nearest" });
+  showNewOrgAlert(elt, "Something went wrong, and nothing was created. Try again.");
 });
 document.body.addEventListener("htmx:sendError", (event) => {
   const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
   if (elt instanceof HTMLFormElement && elt.matches("[data-org-new-form]")) {
-    showToast({ kind: "error", message: "Couldn't create the organisation. Check your connection and try again." });
+    showNewOrgAlert(elt, "Couldn't create the organisation. Check your connection and try again.");
   }
 });

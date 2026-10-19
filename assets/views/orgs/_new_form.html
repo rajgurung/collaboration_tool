@@ -1,5 +1,5 @@
 {# "New organisation" (docs/designs/create-org.html): the desktop dialog, the phone sheet and the /orgs/new page share it. A 422 over HTMX replaces the whole form. The server renders _org, so it also works without JavaScript. #}
-<form id="org-new-form" method="post" action="/orgs" hx-post="/orgs" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find [name=organisation_name], find [name=name]" class="org-new-form" data-org-new-form>
+<form id="org-new-form" method="post" action="/orgs" hx-post="/orgs" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find .org-new-cancel, find [name=organisation_name], find [name=name]" class="org-new-form" data-org-new-form>
   <input type="hidden" name="_org" value="{{ current_org_id }}">
   {% if at_cap %}
   <div class="org-limit-box">
@@ -21,7 +21,7 @@
     <label class="field">
       <span class="field-label">Your username</span>
       <input class="input" name="name" value="{{ form.name }}" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="30" required {% if errors.name and not errors.organisation_name %}autofocus{% endif %} {% if errors.name %}aria-invalid="true"{% endif %}>
-      {% if errors.name %}<span class="field-error">{{<icon name="circle-alert" class="h-3.5 w-3.5"/>}}{{ errors.name }}</span>{% else %}<span class="field-hint">How people in this organisation see you. Start with a letter, then 3 to 30 letters or numbers.</span>{% endif %}
+      {% if errors.name %}<span class="field-error">{{<icon name="circle-alert" class="h-3.5 w-3.5"/>}}{{ errors.name }}</span>{% endif %}<span class="field-hint" {% if errors.name %}hidden{% endif %}>How people in this organisation see you. Start with a letter, then 3 to 30 letters or numbers.</span>
     </label>
   </div>
   <ul class="org-facts">
