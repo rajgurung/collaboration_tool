@@ -84,7 +84,17 @@ already scopes by `member.org.id`.
 4. Create another organisation.
 5. Org-scoped removal.
 6. Join with an existing account.
-7. Links and the Claude connector.
+7. Organisation in the address (replaces "Links and the Claude connector").
+
+**PR 7 replaced (Raj decided on 19 October).** Instead of keeping the current
+organisation in a per-browser cookie, every page will carry it in its address,
+for example `/o/acme-studio/tasks`. Each tab then holds its own organisation,
+so two companies can be open side by side and a tab can no longer write into
+another company by accident. Email, notification and Claude connector links
+name their organisation by construction, which covers the old PR 7 scope. It is
+a larger change (every route, link, form and redirect), so it runs as its own
+project, starting with a brief, after PRs 5 and 6. The `current_org` cookie
+then only remembers the last organisation for bare URLs like `/`.
 
 **Order (Raj decided on 19 October).** Org-scoped removal (5) comes before
 join with an existing account (6), as the reviewers recommended. Today removal
