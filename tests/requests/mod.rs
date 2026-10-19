@@ -50,3 +50,5 @@ pub mod done_tasks;
 
 pub mod logins;
 pub mod note_reactions;
+
+pub mod multi_org;

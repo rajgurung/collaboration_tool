@@ -56,7 +56,8 @@ already scopes by `member.org.id`.
   index first (each test boots a freshly migrated database, so this does not
   leak). Checks: pages use the oldest org; a Claude token for the second org
   works there and sees that org's data, and stops working when that
-  membership is removed, while the first org is unaffected.
+  membership is removed, while the first org is unaffected. Sign out
+  everywhere logs the event in both orgs.
 - The full suite stays green.
 
 ## Risks
