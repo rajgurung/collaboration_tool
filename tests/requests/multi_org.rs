@@ -403,7 +403,7 @@ async fn switching_sets_the_cookie_and_pages_follow_it() {
 
         let res = switch(&request, &cookie, beta).await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(res.headers()["location"], "/dashboard");
+        assert_eq!(res.headers()["location"], "/dashboard?switched=1");
         let set = set_cookie(&res, "current_org").unwrap();
         assert!(set.starts_with(&format!("current_org={beta};")), "{set}");
         let res = dashboard(&request, &with_org(&cookie, beta)).await;
@@ -430,7 +430,7 @@ async fn switching_over_htmx_returns_hx_redirect_with_the_cookies() {
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
-        assert_eq!(res.headers()["HX-Redirect"], "/dashboard");
+        assert_eq!(res.headers()["HX-Redirect"], "/dashboard?switched=1");
         let set = set_cookie(&res, "current_org").unwrap();
         assert!(set.starts_with(&format!("current_org={};", in_beta.organisation_id)));
         assert!(clears(&res, "acting_org"));
