@@ -16,8 +16,8 @@ use serial_test::serial;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 use super::{
-    chat::{acme_id, acme_with_bob, approve, general, post, user_id, Cookie},
-    prepare_data::{join, sign_up},
+    chat::{acme_id, acme_with_bob, approve, general, post, user_id, TestMember},
+    prepare_data::{join, sign_up_member, AsMember},
 };
 
 const MISSING: &str = "This thread isn't available";
@@ -29,7 +29,7 @@ fn thread_path(conversation_id: i64, parent_id: i64) -> String {
 /// Replies in `parent_id`'s thread through the plain HTTP route.
 pub(super) async fn reply(
     request: &TestServer,
-    who: &Cookie,
+    who: &TestMember,
     conversation_id: i64,
     parent_id: i64,
     body: &str,
@@ -39,7 +39,7 @@ pub(super) async fn reply(
             "{}/replies",
             thread_path(conversation_id, parent_id)
         ))
-        .add_header(who.0.clone(), who.1.clone())
+        .as_member(who)
         .form(&serde_json::json!({ "body": body }))
         .await
 }
@@ -53,7 +53,7 @@ async fn find(ctx: &AppContext, body: &str) -> messages::Model {
         .unwrap()
 }
 
-async fn get(request: &TestServer, who: &Cookie, path: &str) -> axum_test::TestResponse {
+async fn get(request: &TestServer, who: &TestMember, path: &str) -> axum_test::TestResponse {
     request
         .get(path)
         .add_header(who.0.clone(), who.1.clone())
@@ -290,7 +290,7 @@ async fn threads_need_a_member_and_a_top_level_message_in_the_conversation() {
         reply(&request, &alice, general.id, in_general.id, "Morning").await;
         let a_reply = find(&ctx, "Morning").await;
         // A group of alice and carol, without bob.
-        join(&request, "acme", "carol", "carol@example.com").await;
+        join(&request, &ctx, "acme", "carol", "carol@example.com").await;
         let carol_id = approve(&ctx, "carol@example.com").await.id;
         let group = conversations::Model::create_group(
             &ctx.db,
@@ -305,8 +305,8 @@ async fn threads_need_a_member_and_a_top_level_message_in_the_conversation() {
         .unwrap();
         let in_group = post(&request, &ctx, &alice, group.id, "Salaries are in").await;
         // Dave has joined but is not approved yet.
-        let dave = join(&request, "acme", "dave", "dave@example.com").await;
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let dave = join(&request, &ctx, "acme", "dave", "dave@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let before = count(&ctx).await;
 
         let cases = [
@@ -482,7 +482,7 @@ async fn empty_and_overlong_replies_are_rejected() {
         for body in ["   ".to_string(), "x".repeat(1001)] {
             let res = request
                 .post(&format!("{}/replies", thread_path(general.id, parent.id)))
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))
                 .await;
@@ -497,7 +497,7 @@ async fn empty_and_overlong_replies_are_rejected() {
         for body in ["Done ✅🎉", family] {
             let res = request
                 .post(&format!("{}/replies", thread_path(general.id, parent.id)))
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))
                 .await;
@@ -554,7 +554,7 @@ async fn http_replies_publish_a_reply_event_and_no_message() {
                 "/chat/{}/messages/{}/reactions",
                 general.id, child.id
             ))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         let Ok(ChatEvent::Reactions { parent_id, .. }) = events.try_recv() else {
@@ -579,7 +579,7 @@ async fn deleting_the_parents_author_removes_the_thread() {
                 "/chat/{}/messages/{}/reactions",
                 general.id, child.id
             ))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 1);

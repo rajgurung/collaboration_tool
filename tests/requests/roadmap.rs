@@ -6,7 +6,7 @@ use loco_rs::testing::prelude::*;
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up};
+use super::prepare_data::{join, sign_up_member, AsMember};
 
 fn project_form(name: &str, lane: &str, owner_id: &str) -> serde_json::Value {
     serde_json::json!({
@@ -19,14 +19,14 @@ fn project_form(name: &str, lane: &str, owner_id: &str) -> serde_json::Value {
 #[serial]
 async fn creating_a_project_shows_it_in_its_lane() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();
 
         let res = request
             .post("/roadmap/projects")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&project_form(
                 "Design system",
@@ -61,7 +61,7 @@ async fn creating_a_project_shows_it_in_its_lane() {
         // current lane, "Now" by default, and the switcher counts it under "Next".
         let page = request
             .get("/roadmap")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();
         let next = page.split(r#"data-lane="next""#).nth(1).unwrap();
@@ -80,13 +80,13 @@ async fn creating_a_project_shows_it_in_its_lane() {
 #[serial]
 async fn invalid_projects_rerender_the_form_with_errors() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let mut form = project_form("", "someday", "");
         form["accent"] = serde_json::json!("red");
 
         let res = request
             .post("/roadmap/projects")
-            .add_header(owner.0, owner.1)
+            .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&form)
             .await;
@@ -109,9 +109,9 @@ async fn invalid_projects_rerender_the_form_with_errors() {
 #[serial]
 async fn owner_must_be_an_approved_member_of_the_same_org() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
-        join(&request, "acme", "bob", "bob@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        join(&request, &ctx, "acme", "bob", "bob@example.com").await;
         let gina = users::Model::find_by_email(&ctx.db, "gina@example.com")
             .await
             .unwrap();
@@ -122,7 +122,7 @@ async fn owner_must_be_an_approved_member_of_the_same_org() {
         for outsider in [gina.id, bob.id] {
             let res = request
                 .post("/roadmap/projects")
-                .add_header(owner.0.clone(), owner.1.clone())
+                .as_member(&owner)
                 .add_header("HX-Request", "true")
                 .form(&project_form("Launch", "now", &outsider.to_string()))
                 .await;
@@ -138,10 +138,10 @@ async fn owner_must_be_an_approved_member_of_the_same_org() {
 #[serial]
 async fn editing_updates_the_project_and_the_form_is_prefilled() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         request
             .post("/roadmap/projects")
-            .add_header(owner.0.clone(), owner.1.clone())
+            .as_member(&owner)
             .form(&project_form("Pricing", "now", ""))
             .await;
         let project = projects::Entity::find()
@@ -159,7 +159,7 @@ async fn editing_updates_the_project_and_the_form_is_prefilled() {
 
         let res = request
             .post(&format!("/roadmap/projects/{}", project.id))
-            .add_header(owner.0, owner.1)
+            .as_member(&owner)
             .form(&project_form("Pricing model", "later", ""))
             .await;
         assert_eq!(res.status_code(), 303);
@@ -179,11 +179,11 @@ async fn editing_updates_the_project_and_the_form_is_prefilled() {
 #[serial]
 async fn projects_from_other_orgs_are_invisible() {
     request::<App, _, _>(|request, ctx| async move {
-        let acme = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let globex = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let acme = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let globex = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         request
             .post("/roadmap/projects")
-            .add_header(globex.0.clone(), globex.1.clone())
+            .as_member(&globex)
             .form(&project_form("Secret plan", "now", ""))
             .await;
         let secret = projects::Entity::find()
@@ -204,7 +204,7 @@ async fn projects_from_other_orgs_are_invisible() {
         assert_eq!(edit.status_code(), 404);
         let update = request
             .post(&format!("/roadmap/projects/{}", secret.id))
-            .add_header(acme.0, acme.1)
+            .as_member(&acme)
             .form(&project_form("Hijacked", "now", ""))
             .await;
         assert_eq!(update.status_code(), 404);
@@ -222,11 +222,11 @@ async fn projects_from_other_orgs_are_invisible() {
 #[serial]
 async fn progress_is_the_share_of_tasks_done() {
     request::<App, _, _>(|request, ctx| async move {
-        let owner = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         for name in ["Launch", "Someday"] {
             request
                 .post("/roadmap/projects")
-                .add_header(owner.0.clone(), owner.1.clone())
+                .as_member(&owner)
                 .form(&project_form(name, "now", ""))
                 .await;
         }
@@ -244,7 +244,7 @@ async fn progress_is_the_share_of_tasks_done() {
         ] {
             request
                 .post("/tasks")
-                .add_header(owner.0.clone(), owner.1.clone())
+                .as_member(&owner)
                 .form(&serde_json::json!({
                     "title": title, "project_id": launch.id.to_string(),
                     "priority": "medium", "status": status,
@@ -254,7 +254,7 @@ async fn progress_is_the_share_of_tasks_done() {
 
         let page = request
             .get("/roadmap")
-            .add_header(owner.0, owner.1)
+            .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();
         let compact: String = page.split_whitespace().collect::<Vec<_>>().join(" ");

@@ -17,10 +17,10 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    prepare_data::{join, login, sign_up, USER_PASSWORD},
+    prepare_data::{join, login, sign_up_member, AsMember, USER_PASSWORD},
 };
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::TestMember;
 
 /// Someone who joined Acme and was approved with `role`.
 async fn member(
@@ -28,9 +28,9 @@ async fn member(
     ctx: &AppContext,
     name: &str,
     role: &str,
-) -> (Cookie, memberships::Model) {
+) -> (TestMember, memberships::Model) {
     let email = format!("{name}@example.com");
-    let cookie = join(request, "acme", name, &email).await;
+    let cookie = join(request, ctx, "acme", name, &email).await;
     let user = users::Model::find_by_email(&ctx.db, &email).await.unwrap();
     let pending = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
@@ -48,12 +48,12 @@ async fn member(
 
 async fn remove(
     request: &TestServer,
-    cookie: &Cookie,
+    cookie: &TestMember,
     target: &memberships::Model,
 ) -> (u16, String) {
     let res = request
         .post(&format!("/members/{}/remove", target.id))
-        .add_header(cookie.0.clone(), cookie.1.clone())
+        .as_member(cookie)
         .add_header("HX-Request", "true")
         .await;
     let toast = res
@@ -77,7 +77,7 @@ async fn status_of(ctx: &AppContext, id: i64) -> String {
 #[serial]
 async fn removing_someone_locks_them_out_of_everything() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (carol, carol_m) = member(&request, &ctx, "carol", "member").await;
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
@@ -99,14 +99,14 @@ async fn removing_someone_locks_them_out_of_everything() {
         // A mention carol has not seen yet.
         request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "@carol can you check?" }))
             .await;
         let mut notify = ctx.shared_store.get::<NotifyHub>().unwrap().subscribe();
 
         let res = request
             .post(&format!("/members/{}/remove", carol_m.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .await;
         let back = format!("/members/{}/rotate?removed=1", carol_m.id);
@@ -146,6 +146,7 @@ async fn removing_someone_locks_them_out_of_everything() {
 
         // Signing in again shows why, and nothing else.
         let carol = login(&request, "carol@example.com", USER_PASSWORD).await;
+        let carol = TestMember::new(carol, carol_m.organisation_id);
         let res = request
             .get("/dashboard")
             .add_header(carol.0.clone(), carol.1.clone())
@@ -155,7 +156,7 @@ async fn removing_someone_locks_them_out_of_everything() {
         let before = messages::Entity::find().count(&ctx.db).await.unwrap();
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(carol.0.clone(), carol.1.clone())
+            .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
         assert_eq!(res.status_code(), 403);
@@ -175,7 +176,7 @@ async fn removing_someone_locks_them_out_of_everything() {
                 "/chat/{}/messages/{}/reactions",
                 general.id, mention.id
             ))
-            .add_header(carol.0.clone(), carol.1.clone())
+            .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(res.status_code(), 403);
@@ -215,7 +216,7 @@ async fn removing_someone_locks_them_out_of_everything() {
         .unwrap();
         let res = request
             .post(&format!("/tasks/{}/notes/{}/reactions", task.id, note.id))
-            .add_header(carol.0.clone(), carol.1.clone())
+            .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(res.status_code(), 403);
@@ -238,7 +239,7 @@ async fn removing_someone_locks_them_out_of_everything() {
         }
         let res = request
             .post(&format!("{thread}/replies"))
-            .add_header(carol.0.clone(), carol.1.clone())
+            .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
         assert_eq!(res.status_code(), 403);
@@ -304,7 +305,7 @@ async fn removing_someone_locks_them_out_of_everything() {
 #[serial]
 async fn removal_rules() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let alice_m = memberships::Model::default_for_user(
             &ctx.db,
             users::Model::find_by_email(&ctx.db, "alice@example.com")
@@ -342,7 +343,7 @@ async fn removal_rules() {
         // A member can't remove anyone.
         let res = request
             .post(&format!("/members/{}/remove", erin_m.id))
-            .add_header(dan.0.clone(), dan.1.clone())
+            .as_member(&dan)
             .await;
         assert_eq!(res.status_code(), 403);
 
@@ -369,7 +370,7 @@ async fn removal_rules() {
         assert!(!page.contains(&format!("/members/{}/remove", alice_m.id)));
 
         // Pending requests are declined, not removed.
-        join(&request, "acme", "fay", "fay@example.com").await;
+        join(&request, &ctx, "acme", "fay", "fay@example.com").await;
         let fay = users::Model::find_by_email(&ctx.db, "fay@example.com")
             .await
             .unwrap();
@@ -387,7 +388,7 @@ async fn removal_rules() {
 #[serial]
 async fn a_super_admin_acting_inside_cannot_remove_anyone() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, carol_m) = member(&request, &ctx, "carol", "member").await;
         let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
@@ -404,6 +405,7 @@ async fn a_super_admin_acting_inside_cannot_remove_anyone() {
         let res = request
             .post(&format!("/members/{}/remove", carol_m.id))
             .add_header("cookie", acting)
+            .add_header("x-org-id", acme.id.to_string())
             .await;
         assert_eq!(res.status_code(), 403);
         assert_eq!(status_of(&ctx, carol_m.id).await, "active");

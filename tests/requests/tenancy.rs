@@ -13,7 +13,7 @@ use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up};
+use super::prepare_data::{join, sign_up_member, AsMember};
 
 const SECRET: &str = "GLOBEX-SECRET";
 
@@ -32,8 +32,8 @@ struct Globex {
 }
 
 async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
-    sign_up(request, "Globex", "gina", "gina@example.com").await;
-    join(request, "globex", "hank", "hank@example.com").await;
+    sign_up_member(request, "Globex", "gina", "gina@example.com").await;
+    join(request, ctx, "globex", "hank", "hank@example.com").await;
     let org = organisations::Model::find_by_slug(&ctx.db, "globex")
         .await
         .unwrap();
@@ -163,7 +163,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
 async fn org_a_cannot_reach_org_b() {
     request::<App, _, _>(|request, ctx| async move {
         let globex = build_globex(&request, &ctx).await;
-        let a = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let a = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let acme = organisations::Model::find_by_slug(&ctx.db, "acme").await.unwrap();
         let acme_project = projects::Model::create(
             &ctx.db,
@@ -245,7 +245,7 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/chat/{}/threads/{}/replies", globex.general.id, globex.message.id), serde_json::json!({ "body": "hijacked" })),
         ];
         for (path, form) in &posts {
-            let res = request.post(path).add_header(a.0.clone(), a.1.clone()).form(form).await;
+            let res = request.post(path).as_member(&a).form(form).await;
             assert_eq!(res.status_code(), 404, "POST {path}");
         }
         // Alice's own task with Globex's note.
@@ -265,7 +265,7 @@ async fn org_a_cannot_reach_org_b() {
         .unwrap();
         let res = request
             .post(&format!("/tasks/{}/notes/{}/reactions", acme_task.id, globex.note.id))
-            .add_header(a.0.clone(), a.1.clone())
+            .as_member(&a)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(res.status_code(), 404, "own task, Globex note");
@@ -273,7 +273,7 @@ async fn org_a_cannot_reach_org_b() {
 
         let res = request
             .post(&format!("/documents/folders/{}/files", globex.folder.id))
-            .add_header(a.0.clone(), a.1.clone())
+            .as_member(&a)
             .multipart(MultipartForm::new().add_part("file", Part::bytes(super::documents::PDF.to_vec()).file_name("x.pdf")))
             .await;
         assert_eq!(res.status_code(), 404, "upload into a Globex folder");
@@ -289,7 +289,7 @@ async fn org_a_cannot_reach_org_b() {
         for (path, body) in &refs {
             let res = request
                 .post(path)
-                .add_header(a.0.clone(), a.1.clone())
+                .as_member(&a)
                 .bytes(body.clone().into())
                 .content_type("application/x-www-form-urlencoded")
                 .await;
@@ -297,7 +297,7 @@ async fn org_a_cannot_reach_org_b() {
         }
         let dm = request
             .post("/chat/dms")
-            .add_header(a.0.clone(), a.1.clone())
+            .as_member(&a)
             .form(&serde_json::json!({ "user_id": globex.owner.id }))
             .await;
         assert_eq!(dm.status_code(), 400, "DM to a Globex member");
@@ -349,7 +349,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
         )
         .await;
         // Ivy was a member until gina removed her.
-        let ivy_cookie = join(&request, "globex", "ivy", "ivy@example.com").await;
+        let ivy_cookie = join(&request, &ctx, "globex", "ivy", "ivy@example.com").await;
         let ivy = users::Model::find_by_email(&ctx.db, "ivy@example.com")
             .await
             .unwrap();
@@ -373,7 +373,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
             super::prepare_data::USER_PASSWORD,
         )
         .await;
-        assert_ne!(ivy, ivy_cookie);
+        assert_ne!(ivy, ivy_cookie.cookie);
         let admin = super::admin::super_admin_cookie(&request, &ctx).await;
         let acting = format!(
             "{}; acting_org={}",
@@ -437,7 +437,9 @@ async fn documents_and_removal_need_your_own_active_membership() {
                 let res = send(path, Some(cookie.1.to_str().unwrap().to_string())).await;
                 assert_eq!(res.status_code(), 403, "{who} POST {path}");
             }
-            let res = send(path, Some(acting.clone())).await;
+            let res = send(path, Some(acting.clone()))
+                .add_header("x-org-id", globex.folder.organisation_id.to_string())
+                .await;
             assert_eq!(res.status_code(), 403, "acting POST {path}");
         }
         assert_eq!(

@@ -15,8 +15,8 @@ use serial_test::serial;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::{
-    chat::{acme_id, acme_with_bob, approve, general, post, user_id, Cookie},
-    prepare_data::{join, sign_up},
+    chat::{acme_id, acme_with_bob, approve, general, post, user_id, TestMember},
+    prepare_data::{join, sign_up_member, AsMember},
 };
 
 fn react_path(conversation_id: i64, message_id: i64) -> String {
@@ -30,14 +30,14 @@ fn actions_path(conversation_id: i64, message_id: i64) -> String {
 /// Sets `who`'s reaction through the route, as the page does.
 async fn react(
     request: &TestServer,
-    who: &Cookie,
+    who: &TestMember,
     message: &messages::Model,
     emoji: &str,
     on: bool,
 ) -> axum_test::TestResponse {
     request
         .post(&react_path(message.conversation_id, message.id))
-        .add_header(who.0.clone(), who.1.clone())
+        .as_member(who)
         .add_header("HX-Request", "true")
         .form(&serde_json::json!({ "emoji": emoji, "on": if on { "1" } else { "0" } }))
         .await
@@ -147,7 +147,7 @@ async fn only_the_six_reactions_are_accepted() {
         for form in &refused {
             let res = request
                 .post(&path)
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(form)
                 .await;
@@ -193,7 +193,7 @@ async fn reactions_need_a_member_of_the_conversation() {
         let general = general(&ctx).await;
         let in_general = post(&request, &ctx, &bob, general.id, "Morning all").await;
         // A group of alice and carol, without bob.
-        join(&request, "acme", "carol", "carol@example.com").await;
+        join(&request, &ctx, "acme", "carol", "carol@example.com").await;
         let carol_id = approve(&ctx, "carol@example.com").await.id;
         let group = conversations::Model::create_group(
             &ctx.db,
@@ -208,8 +208,8 @@ async fn reactions_need_a_member_of_the_conversation() {
         .unwrap();
         let in_group = post(&request, &ctx, &alice, group.id, "Salaries are in").await;
         // Dave has joined but is not approved yet.
-        let dave = join(&request, "acme", "dave", "dave@example.com").await;
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let dave = join(&request, &ctx, "acme", "dave", "dave@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
 
         let cases = [
             (
@@ -232,7 +232,7 @@ async fn reactions_need_a_member_of_the_conversation() {
         for (case, who, conversation_id, message_id, status) in cases {
             let res = request
                 .post(&react_path(conversation_id, message_id))
-                .add_header(who.0.clone(), who.1.clone())
+                .as_member(who)
                 .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
                 .await;
             assert_eq!(res.status_code(), status, "POST reactions: {case}");
@@ -334,6 +334,7 @@ async fn a_socket_only_gets_reactions_for_its_conversation() {
             react_path(hello.conversation_id, hello.id)
         ))
         .header("cookie", &cookie)
+        .header("x-org-id", hello.organisation_id.to_string())
         .form(&[("emoji", "🎉"), ("on", "1")])
         .send()
         .await
@@ -408,7 +409,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
-        join(&request, "acme", "carol", "carol@example.com").await;
+        join(&request, &ctx, "acme", "carol", "carol@example.com").await;
         approve(&ctx, "carol@example.com").await;
         let carol = super::prepare_data::login(
             &request,
@@ -416,6 +417,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
             super::prepare_data::USER_PASSWORD,
         )
         .await;
+        let carol = TestMember::new(carol, acme_id(&ctx).await);
         let message = post(&request, &ctx, &bob, general.id, "VAT is due 7 November").await;
         react(&request, &carol, &message, "👍", true).await;
         react(&request, &bob, &message, "👍", true).await;
@@ -474,7 +476,7 @@ async fn emoji_in_a_message_round_trip() {
         }
         let page = request
             .get(&format!("/chat/{}", general.id))
-            .add_header(bob.0, bob.1)
+            .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(page.contains("Done ✅🎉"));
@@ -484,7 +486,7 @@ async fn emoji_in_a_message_round_trip() {
         for (body, status) in [("✅".repeat(1000), 200), ("✅".repeat(1001), 422)] {
             let res = request
                 .post(&format!("/chat/{}/messages", general.id))
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))
                 .await;

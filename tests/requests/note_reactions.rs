@@ -14,8 +14,8 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    chat::{acme_id, acme_with_bob, user_id, Cookie},
-    prepare_data::{join, sign_up},
+    chat::{acme_id, acme_with_bob, user_id, TestMember},
+    prepare_data::{join, sign_up_member, AsMember},
 };
 
 fn react_path(note: &task_notes::Model) -> String {
@@ -58,7 +58,10 @@ async fn note_on(
 }
 
 /// alice and bob in Acme, with a task and bob's note on it.
-async fn acme_note(request: &TestServer, ctx: &AppContext) -> (Cookie, Cookie, task_notes::Model) {
+async fn acme_note(
+    request: &TestServer,
+    ctx: &AppContext,
+) -> (TestMember, TestMember, task_notes::Model) {
     let (alice, bob) = acme_with_bob(request, ctx).await;
     let task = task_in(ctx, acme_id(ctx).await, "Stock count").await;
     let bob_id = user_id(ctx, "bob@example.com").await;
@@ -69,14 +72,14 @@ async fn acme_note(request: &TestServer, ctx: &AppContext) -> (Cookie, Cookie, t
 /// Sets `who`'s reaction through the route, as the page does.
 async fn react(
     request: &TestServer,
-    who: &Cookie,
+    who: &TestMember,
     note: &task_notes::Model,
     emoji: &str,
     on: &str,
 ) -> (u16, String) {
     let res = request
         .post(&react_path(note))
-        .add_header(who.0.clone(), who.1.clone())
+        .as_member(who)
         .add_header("HX-Request", "true")
         .form(&serde_json::json!({ "emoji": emoji, "on": on }))
         .await;
@@ -186,7 +189,7 @@ async fn only_the_six_reactions_are_allowed() {
         for (emoji, on) in [("😀", "1"), ("❤", "1"), ("", "1"), ("👍", "2"), ("👍", "")] {
             let res = request
                 .post(&react_path(&note))
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "emoji": emoji, "on": on }))
                 .await;
@@ -204,8 +207,8 @@ async fn only_the_six_reactions_are_allowed() {
 async fn only_members_of_the_notes_organisation_can_react() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, _bob, note) = acme_note(&request, &ctx).await;
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
-        let dave = join(&request, "acme", "dave", "dave@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        let dave = join(&request, &ctx, "acme", "dave", "dave@example.com").await;
 
         assert_eq!(react(&request, &gina, &note, "👍", "1").await.0, 404);
         assert_eq!(
@@ -218,7 +221,7 @@ async fn only_members_of_the_notes_organisation_can_react() {
         let other = task_in(&ctx, acme_id(&ctx).await, "Rota").await;
         let res = request
             .post(&format!("/tasks/{}/notes/{}/reactions", other.id, note.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(res.status_code(), 404);
@@ -232,6 +235,7 @@ async fn only_members_of_the_notes_organisation_can_react() {
         let res = request
             .post(&react_path(&note))
             .add_header("cookie", acting)
+            .add_header("x-org-id", acme.id.to_string())
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(res.status_code(), 403);
@@ -296,7 +300,7 @@ async fn deleting_a_task_removes_its_note_reactions() {
         assert_eq!(count(&ctx).await, 2);
         request
             .post(&format!("/tasks/{}/delete", note.task_id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .await;
         assert_eq!(count(&ctx).await, 0);
     })

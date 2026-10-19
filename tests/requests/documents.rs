@@ -9,9 +9,9 @@ use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, IntoActiveModel, PaginatorTrait};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up};
+use super::prepare_data::{join, sign_up_member, AsMember};
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::TestMember;
 
 pub const PNG: &[u8] =
     b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
@@ -19,12 +19,15 @@ pub const PDF: &[u8] = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n
 const DOCX: &[u8] = b"PK\x03\x04\x14\0\x06\0\x08\0\0\0!\0";
 
 /// Acme with alice (owner), bob (member) and carol (admin).
-async fn acme(request: &TestServer, ctx: &AppContext) -> (Cookie, Cookie, Cookie, folders::Model) {
-    let alice = sign_up(request, "Acme", "alice", "alice@example.com").await;
+async fn acme(
+    request: &TestServer,
+    ctx: &AppContext,
+) -> (TestMember, TestMember, TestMember, folders::Model) {
+    let alice = sign_up_member(request, "Acme", "alice", "alice@example.com").await;
     let mut people = Vec::new();
     for (name, role) in [("bob", "member"), ("carol", "admin")] {
         let email = format!("{name}@example.com");
-        let cookie = join(request, "acme", name, &email).await;
+        let cookie = join(request, ctx, "acme", name, &email).await;
         let user = users::Model::find_by_email(&ctx.db, &email).await.unwrap();
         let pending = memberships::Model::default_for_user(&ctx.db, user.id)
             .await
@@ -53,14 +56,14 @@ async fn acme(request: &TestServer, ctx: &AppContext) -> (Cookie, Cookie, Cookie
 
 async fn upload(
     request: &TestServer,
-    cookie: &Cookie,
+    cookie: &TestMember,
     folder_id: i64,
     name: &str,
     bytes: &[u8],
 ) -> axum_test::TestResponse {
     request
         .post(&format!("/documents/folders/{folder_id}/files"))
-        .add_header(cookie.0.clone(), cookie.1.clone())
+        .as_member(cookie)
         .multipart(
             MultipartForm::new().add_part("file", Part::bytes(bytes.to_vec()).file_name(name)),
         )
@@ -89,7 +92,10 @@ async fn new_organisations_start_with_company_and_logins_folders() {
             folder.text().contains("Drag files here to add them."),
             "empty folders take drops too"
         );
-        let page = request.get("/documents").add_header(alice.0, alice.1).await;
+        let page = request
+            .get("/documents")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await;
         assert_eq!(page.status_code(), 200);
         let body = page.text();
         assert!(body.contains("Company"));
@@ -103,7 +109,7 @@ async fn new_organisations_start_with_company_and_logins_folders() {
 
         let body = request
             .get("/documents")
-            .add_header(bob.0, bob.1)
+            .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(!body.contains("New folder"), "members cannot");
@@ -165,7 +171,7 @@ async fn a_member_adds_a_photo_and_everyone_can_open_it() {
 
         let res = request
             .get(&format!("/documents/files/{}?download=1", file.id))
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert!(res.headers()["content-disposition"].to_str().unwrap().starts_with("attachment;"));
     })
@@ -190,7 +196,7 @@ async fn office_files_always_download() {
         );
         let res = request
             .get(&format!("/documents/files/{}", file.id))
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert!(res.headers()["content-disposition"]
             .to_str()
@@ -224,7 +230,7 @@ async fn pdfs_open_in_place_without_a_sandbox() {
         // The folder list counts it.
         let list = request
             .get("/documents")
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(list.contains("1 file · Updated"), "{list}");
@@ -297,7 +303,7 @@ async fn renaming_changes_the_name_but_never_the_extension() {
         let rename = |name: &'static str| {
             request
                 .post(&format!("/documents/files/{}/rename", file.id))
-                .add_header(bob.0.clone(), bob.1.clone())
+                .as_member(&bob)
                 .form(&serde_json::json!({ "name": name }))
         };
         assert_eq!(rename("Office front").await.status_code(), 200);
@@ -322,10 +328,10 @@ async fn only_the_uploader_owners_and_admins_delete_files() {
         let (alice, bob, carol, company) = acme(&request, &ctx).await;
         upload(&request, &alice, company.id, "alices.pdf", PDF).await;
         let alices = only_file(&ctx).await;
-        let delete = |cookie: &Cookie, id: i64| {
+        let delete = |cookie: &TestMember, id: i64| {
             request
                 .post(&format!("/documents/files/{id}/delete"))
-                .add_header(cookie.0.clone(), cookie.1.clone())
+                .as_member(cookie)
         };
         // A member cannot delete someone else's file, and is not offered it.
         assert_eq!(delete(&bob, alices.id).await.status_code(), 403);
@@ -371,10 +377,10 @@ async fn only_the_uploader_owners_and_admins_delete_files() {
 async fn owners_and_admins_manage_folders_and_only_empty_ones_go() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob, carol, company) = acme(&request, &ctx).await;
-        let create = |cookie: &Cookie, name: &'static str| {
+        let create = |cookie: &TestMember, name: &'static str| {
             request
                 .post("/documents/folders")
-                .add_header(cookie.0.clone(), cookie.1.clone())
+                .as_member(cookie)
                 .form(&serde_json::json!({ "name": name, "note": "Paper copies are in the blue box." }))
         };
         assert_eq!(create(&bob, "Bobs").await.status_code(), 403);
@@ -397,7 +403,7 @@ async fn owners_and_admins_manage_folders_and_only_empty_ones_go() {
         // Hidden characters are stripped from names and notes; line breaks in notes stay.
         let res = request
             .post("/documents/folders")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "name": "Tax\u{200B} and\u{202E} VAT\u{FEFF}", "note": "Line one\u{2028}\r\nLine two" }))
             .await;
         assert_eq!(res.status_code(), 303);
@@ -417,7 +423,7 @@ async fn owners_and_admins_manage_folders_and_only_empty_ones_go() {
 
         let res = request
             .post(&format!("/documents/folders/{}", insurance.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "name": "Insurance policies", "note": "" }))
             .await;
         assert_eq!(res.status_code(), 303);
@@ -426,10 +432,10 @@ async fn owners_and_admins_manage_folders_and_only_empty_ones_go() {
         assert_eq!(renamed.note, None);
 
         upload(&request, &bob, company.id, "a.pdf", PDF).await;
-        let delete = |cookie: &Cookie, id: i64| {
+        let delete = |cookie: &TestMember, id: i64| {
             request
                 .post(&format!("/documents/folders/{id}/delete"))
-                .add_header(cookie.0.clone(), cookie.1.clone())
+                .as_member(cookie)
         };
         assert_eq!(delete(&bob, insurance.id).await.status_code(), 403);
         let res = delete(&alice, company.id).await;

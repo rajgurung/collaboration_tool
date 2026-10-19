@@ -2,7 +2,7 @@ use collab::app::App;
 use loco_rs::testing::prelude::*;
 use serial_test::serial;
 
-use super::prepare_data::{sign_up, TENANT_PAGES};
+use super::prepare_data::{sign_up_member, TENANT_PAGES};
 
 #[tokio::test]
 #[serial]
@@ -23,7 +23,7 @@ async fn anonymous_visitors_are_sent_to_login() {
 #[serial]
 async fn active_members_reach_every_page_with_their_org_in_the_header() {
     request::<App, _, _>(|request, _ctx| async move {
-        let cookie = sign_up(&request, "Himalayan Ritual", "raj", "raj@example.com").await;
+        let cookie = sign_up_member(&request, "Himalayan Ritual", "raj", "raj@example.com").await;
         for page in TENANT_PAGES {
             let res = request
                 .get(page)

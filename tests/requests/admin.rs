@@ -5,15 +5,18 @@ use serial_test::serial;
 
 use super::{
     multi_org::{clears, set_cookie},
-    prepare_data::{login, sign_up},
+    prepare_data::{login, sign_up_member, AsMember},
 };
 
 #[tokio::test]
 #[serial]
 async fn admin_is_hidden_from_normal_users() {
     request::<App, _, _>(|request, _ctx| async move {
-        let cookie = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let res = request.get("/admin").add_header(cookie.0, cookie.1).await;
+        let cookie = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let res = request
+            .get("/admin")
+            .add_header(cookie.0.clone(), cookie.1.clone())
+            .await;
         assert_eq!(res.status_code(), 404);
     })
     .await;
@@ -44,7 +47,7 @@ async fn super_admin_reaches_admin_and_their_own_org() {
 
         let res = request
             .get("/dashboard")
-            .add_header(cookie.0, cookie.1)
+            .add_header(cookie.0.clone(), cookie.1.clone())
             .await;
         assert_eq!(res.status_code(), 200);
         assert!(res.text().contains("Himalayan Ritual"));
@@ -59,7 +62,7 @@ async fn super_admin_reaches_admin_and_their_own_org() {
 pub(super) async fn super_admin_cookie(
     request: &loco_rs::TestServer,
     ctx: &loco_rs::app::AppContext,
-) -> (axum::http::HeaderName, axum::http::HeaderValue) {
+) -> super::prepare_data::Cookie {
     run_task::<App>(
         ctx,
         Some(&"super_admin".to_string()),
@@ -74,12 +77,12 @@ pub(super) async fn super_admin_cookie(
 #[serial]
 async fn admin_lists_every_org_and_person() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        super::prepare_data::join(&request, "acme", "bob", "bob@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        super::prepare_data::join(&request, &ctx, "acme", "bob", "bob@example.com").await;
         let admin = super_admin_cookie(&request, &ctx).await;
         let body = request
             .get("/admin")
-            .add_header(admin.0, admin.1)
+            .add_header(admin.0.clone(), admin.1.clone())
             .await
             .text();
         for expected in [
@@ -99,7 +102,7 @@ async fn admin_lists_every_org_and_person() {
 #[serial]
 async fn super_admin_can_enter_and_leave_another_org() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let admin = super_admin_cookie(&request, &ctx).await;
         let acme = collab::models::organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
@@ -164,8 +167,8 @@ async fn super_admin_can_enter_and_leave_another_org() {
 #[serial]
 async fn the_acting_cookie_means_nothing_to_normal_users() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let globex = collab::models::organisations::Model::find_by_slug(&ctx.db, "globex")
             .await
             .unwrap();
@@ -180,10 +183,7 @@ async fn the_acting_cookie_means_nothing_to_normal_users() {
             format!("/admin/orgs/{}/enter", globex.id),
             "/admin/leave".to_string(),
         ] {
-            let res = request
-                .post(&path)
-                .add_header(alice.0.clone(), alice.1.clone())
-                .await;
+            let res = request.post(&path).as_member(&alice).await;
             assert_eq!(res.status_code(), 404, "{path}");
         }
     })
@@ -201,7 +201,7 @@ async fn org_id(ctx: &loco_rs::app::AppContext, slug: &str) -> i64 {
 #[serial]
 async fn acting_wins_over_current_org() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let admin = super_admin_cookie(&request, &ctx).await;
         let (acme, own) = (
             org_id(&ctx, "acme").await,
@@ -225,8 +225,8 @@ async fn acting_wins_over_current_org() {
 #[serial]
 async fn acting_with_a_stale_current_org_sends_no_clearing_cookie() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let admin = super_admin_cookie(&request, &ctx).await;
         let (acme, globex) = (org_id(&ctx, "acme").await, org_id(&ctx, "globex").await);
         // The admin is not a member of Globex, so current_org is stale.
@@ -246,7 +246,7 @@ async fn acting_with_a_stale_current_org_sends_no_clearing_cookie() {
 #[serial]
 async fn switching_ends_acting() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let admin = super_admin_cookie(&request, &ctx).await;
         let (acme, own) = (
             org_id(&ctx, "acme").await,
@@ -276,7 +276,7 @@ async fn switching_ends_acting() {
 #[serial]
 async fn a_super_admin_without_a_membership_gets_the_clearing_cookie_on_the_htmx_redirect() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let acme = org_id(&ctx, "acme").await;
         super::prepare_data::create_user(&ctx, "root@example.com", "root")
             .await

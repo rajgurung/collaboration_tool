@@ -14,9 +14,9 @@ use sea_orm::{
 };
 use serial_test::serial;
 
-use super::prepare_data::{join, login, sign_up, USER_PASSWORD};
+use super::prepare_data::{join, login, sign_up_member, AsMember, USER_PASSWORD};
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::TestMember;
 
 const SECRET: &str = "example-pass-123";
 const CODES: &str = "alpha-1111\nbravo-2222";
@@ -24,10 +24,10 @@ const CODES: &str = "alpha-1111\nbravo-2222";
 /// Acme with alice (owner), bob (member), carol (admin) and dave (member),
 /// and its Logins folder.
 struct Acme {
-    alice: Cookie,
-    bob: Cookie,
-    carol: Cookie,
-    dave: Cookie,
+    alice: TestMember,
+    bob: TestMember,
+    carol: TestMember,
+    dave: TestMember,
     org: organisations::Model,
     folder: folders::Model,
 }
@@ -40,11 +40,11 @@ async fn user_id(ctx: &AppContext, email: &str) -> i64 {
 }
 
 async fn acme(request: &TestServer, ctx: &AppContext) -> Acme {
-    let alice = sign_up(request, "Acme", "alice", "alice@example.com").await;
+    let alice = sign_up_member(request, "Acme", "alice", "alice@example.com").await;
     let mut people = Vec::new();
     for (name, role) in [("bob", "member"), ("carol", "admin"), ("dave", "member")] {
         let email = format!("{name}@example.com");
-        let cookie = join(request, "acme", name, &email).await;
+        let cookie = join(request, ctx, "acme", name, &email).await;
         let id = user_id(ctx, &email).await;
         let pending = memberships::Model::default_for_user(&ctx.db, id)
             .await
@@ -86,14 +86,10 @@ async fn acme(request: &TestServer, ctx: &AppContext) -> Acme {
     }
 }
 
-fn header(cookie: &Cookie) -> (axum::http::HeaderName, axum::http::HeaderValue) {
-    (cookie.0.clone(), cookie.1.clone())
-}
-
 /// Adds "Companies House" naming dave, as `cookie`.
 async fn add(
     request: &TestServer,
-    cookie: &Cookie,
+    cookie: &TestMember,
     folder_id: i64,
     extra: &[(&str, String)],
 ) -> axum_test::TestResponse {
@@ -115,10 +111,9 @@ async fn add(
         form.retain(|(k, _)| k != key || *key == "access");
         form.push((key, value.clone()));
     }
-    let (name, value) = header(cookie);
     request
         .post(&format!("/documents/folders/{folder_id}/logins"))
-        .add_header(name, value)
+        .as_member(cookie)
         .form(&form)
         .await
 }
@@ -131,15 +126,18 @@ async fn only_login(ctx: &AppContext) -> logins::Model {
 
 async fn post(
     request: &TestServer,
-    cookie: &Cookie,
+    cookie: &TestMember,
     path: &str,
     form: &[(&str, &str)],
 ) -> axum_test::TestResponse {
-    let (name, value) = header(cookie);
-    request.post(path).add_header(name, value).form(&form).await
+    request.post(path).as_member(cookie).form(&form).await
 }
 
-async fn unlock(request: &TestServer, cookie: &Cookie, password: &str) -> axum_test::TestResponse {
+async fn unlock(
+    request: &TestServer,
+    cookie: &TestMember,
+    password: &str,
+) -> axum_test::TestResponse {
     post(
         request,
         cookie,
@@ -149,7 +147,7 @@ async fn unlock(request: &TestServer, cookie: &Cookie, password: &str) -> axum_t
     .await
 }
 
-async fn reveal(request: &TestServer, cookie: &Cookie, id: i64) -> axum_test::TestResponse {
+async fn reveal(request: &TestServer, cookie: &TestMember, id: i64) -> axum_test::TestResponse {
     post(
         request,
         cookie,
@@ -304,7 +302,7 @@ async fn owners_add_logins_and_the_database_holds_no_plaintext() {
 async fn javascript_urls_and_people_from_other_organisations_are_refused() {
     request::<App, _, _>(|request, ctx| async move {
         let acme = acme(&request, &ctx).await;
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let gina = user_id(&ctx, "gina@example.com").await;
 
         let res = add(
@@ -413,6 +411,7 @@ async fn showing_a_password_needs_an_unlock_from_the_same_session() {
 
         // Another sign-in of the same person is not unlocked.
         let other = login(&request, "alice@example.com", USER_PASSWORD).await;
+        let other = TestMember::new(other, acme.alice.org_id);
         assert_eq!(reveal(&request, &other, id).await.status_code(), 423);
 
         // The unlock runs out.
@@ -434,7 +433,10 @@ async fn showing_a_password_needs_an_unlock_from_the_same_session() {
             200
         );
         let res = post(&request, &acme.alice, "/account/sign-out-everywhere", &[]).await;
-        let fresh = super::prepare_data::cookie_from(&res.headers().clone());
+        let fresh = TestMember::new(
+            super::prepare_data::cookie_from(&res.headers().clone()),
+            acme.alice.org_id,
+        );
         assert_eq!(reveal(&request, &fresh, id).await.status_code(), 423);
         assert_eq!(events(&ctx, "sign_out_everywhere").await.len(), 1);
     })
@@ -622,7 +624,10 @@ async fn five_wrong_app_passwords_lock_the_account_until_a_reset() {
             .await;
         assert_eq!(res.status_code(), 303);
         assert!(!users::Model::find_by_email(&ctx.db, "carol@example.com").await.unwrap().is_locked());
-        let carol = login(&request, "carol@example.com", "new-password-1").await;
+        let carol = TestMember::new(
+            login(&request, "carol@example.com", "new-password-1").await,
+            acme.carol.org_id,
+        );
         assert_eq!(unlock(&request, &carol, "new-password-1").await.status_code(), 200);
         assert_eq!(reveal(&request, &carol, id).await.status_code(), 200);
         let mail = deliveries(&ctx);
@@ -663,7 +668,7 @@ async fn keys_are_bound_to_their_login_and_version_and_made_once() {
         assert!(versioned.reveal(&ctx.db, &kek, "password").await.is_err());
 
         // Many first uses at once agree on one key.
-        sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
             .await
             .unwrap();
@@ -844,7 +849,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
         let acme = acme(&request, &ctx).await;
         add(&request, &acme.alice, acme.folder.id, &[]).await;
         let id = only_login(&ctx).await.id;
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         assert_eq!(
             unlock(&request, &gina, USER_PASSWORD).await.status_code(),
             200
@@ -890,11 +895,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
             ("field", "password"),
         ];
         for path in &posts {
-            let res = request
-                .post(path)
-                .add_header(gina.0.clone(), gina.1.clone())
-                .form(&form)
-                .await;
+            let res = request.post(path).as_member(&gina).form(&form).await;
             if !path.ends_with("/unlock") {
                 assert_eq!(res.status_code(), 404, "other org POST {path}");
             }
@@ -907,6 +908,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
             let res = request
                 .post(path)
                 .add_header("cookie", acting.clone())
+                .add_header("x-org-id", acme.org.id.to_string())
                 .form(&form)
                 .await;
             assert_eq!(res.status_code(), 403, "acting POST {path}");
@@ -924,10 +926,9 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
 async fn the_logins_folder_takes_no_files() {
     request::<App, _, _>(|request, ctx| async move {
         let acme = acme(&request, &ctx).await;
-        let (name, value) = header(&acme.alice);
         let res = request
             .post(&format!("/documents/folders/{}/files", acme.folder.id))
-            .add_header(name, value)
+            .as_member(&acme.alice)
             .multipart(
                 axum_test::multipart::MultipartForm::new().add_part(
                     "file",
@@ -1015,14 +1016,20 @@ async fn an_old_cookie_without_a_sign_in_id_gets_one_when_it_unlocks() {
         let old = loco_rs::auth::jwt::JWT::new(&config.secret)
             .generate_token(config.expiration, alice.pid.to_string(), claims)
             .unwrap();
-        let old: Cookie = (
-            axum::http::HeaderName::from_static("cookie"),
-            axum::http::HeaderValue::from_str(&format!("auth_token={old}")).unwrap(),
+        let old = TestMember::new(
+            (
+                axum::http::HeaderName::from_static("cookie"),
+                axum::http::HeaderValue::from_str(&format!("auth_token={old}")).unwrap(),
+            ),
+            acme.alice.org_id,
         );
         assert_eq!(reveal(&request, &old, id).await.status_code(), 423);
         let res = unlock(&request, &old, USER_PASSWORD).await;
         assert_eq!(res.status_code(), 200);
-        let new = super::prepare_data::cookie_from(&res.headers().clone());
+        let new = TestMember::new(
+            super::prepare_data::cookie_from(&res.headers().clone()),
+            acme.alice.org_id,
+        );
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
             .unwrap();
@@ -1109,7 +1116,7 @@ async fn the_rotate_list_stays_inside_its_organisation() {
         )
         .await;
         let path = format!("/members/{}/rotate", dave_m.id);
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let res = request
             .get(&path)
             .add_header(gina.0.clone(), gina.1.clone())

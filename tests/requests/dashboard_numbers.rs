@@ -5,7 +5,7 @@ use collab::{
 use loco_rs::{app::AppContext, testing::prelude::*};
 use serial_test::serial;
 
-use super::prepare_data::sign_up;
+use super::prepare_data::sign_up_member;
 
 async fn add_task(
     ctx: &AppContext,
@@ -36,7 +36,7 @@ async fn add_task(
 #[serial]
 async fn dashboard_numbers_follow_the_tasks() {
     request::<App, _, _>(|request, ctx| async move {
-        let cookie = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let cookie = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
             .unwrap();
@@ -80,7 +80,7 @@ async fn dashboard_numbers_follow_the_tasks() {
 
         let body = request
             .get("/dashboard")
-            .add_header(cookie.0, cookie.1)
+            .add_header(cookie.0.clone(), cookie.1.clone())
             .await
             .text();
         let compact: String = body.split_whitespace().collect::<Vec<_>>().join(" ");

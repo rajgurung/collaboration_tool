@@ -6,7 +6,7 @@ use loco_rs::testing::prelude::*;
 use serial_test::serial;
 
 use super::{
-    prepare_data::sign_up,
+    prepare_data::{sign_up_member, AsMember, TestMember},
     tasks::{approved_member, project_in, task_form},
 };
 
@@ -18,14 +18,14 @@ fn compact(html: &str) -> String {
 #[serial]
 async fn the_owners_checklist_ticks_itself() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
-        let home = |cookie: (axum::http::HeaderName, axum::http::HeaderValue)| {
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let home = |cookie: TestMember| {
             let request = &request;
             async move {
                 compact(
                     &request
                         .get("/dashboard")
-                        .add_header(cookie.0, cookie.1)
+                        .add_header(cookie.0.clone(), cookie.1.clone())
                         .await
                         .text(),
                 )
@@ -42,7 +42,7 @@ async fn the_owners_checklist_ticks_itself() {
         let project = project_in(&ctx, "acme", "Launch").await;
         request
             .post("/tasks")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&task_form("Book the venue", project.id, ""))
             .await;
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
@@ -53,7 +53,7 @@ async fn the_owners_checklist_ticks_itself() {
             .unwrap();
         request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "Hello team, welcome @bob" }))
             .await;
 
@@ -68,12 +68,12 @@ async fn the_owners_checklist_ticks_itself() {
 #[serial]
 async fn people_who_join_get_their_own_steps() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let page = compact(
             &request
                 .get("/dashboard")
-                .add_header(bob.0, bob.1)
+                .add_header(bob.0.clone(), bob.1.clone())
                 .await
                 .text(),
         );
@@ -91,12 +91,12 @@ async fn people_who_join_get_their_own_steps() {
 #[serial]
 async fn closing_the_guide_is_remembered_until_brought_back() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
 
         let res = request
             .post("/guide/dismiss")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
@@ -117,19 +117,16 @@ async fn closing_the_guide_is_remembered_until_brought_back() {
         assert!(!home.contains(r#"id="guide""#), "stays closed");
         let bobs = request
             .get("/dashboard")
-            .add_header(bob.0, bob.1)
+            .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(bobs.contains(r#"id="guide""#), "closing is per person");
 
-        let res = request
-            .post("/guide/show")
-            .add_header(alice.0.clone(), alice.1.clone())
-            .await;
+        let res = request.post("/guide/show").as_member(&alice).await;
         assert_eq!(res.status_code(), 303);
         let home = request
             .get("/dashboard")
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(home.contains(r#"id="guide""#), "back on Home");
@@ -141,7 +138,7 @@ async fn closing_the_guide_is_remembered_until_brought_back() {
 #[serial]
 async fn the_welcome_shows_once() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let first = request
             .get("/dashboard")
             .add_header(alice.0.clone(), alice.1.clone())
@@ -151,13 +148,13 @@ async fn the_welcome_shows_once() {
 
         let res = request
             .post("/guide/welcomed")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
         let again = request
             .get("/dashboard")
-            .add_header(alice.0, alice.1)
+            .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(!again.contains("data-welcome"));

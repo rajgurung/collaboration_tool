@@ -6,13 +6,16 @@ use loco_rs::testing::prelude::*;
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, IntoActiveModel};
 use serial_test::serial;
 
-use super::{prepare_data::sign_up, tasks::approved_member};
+use super::{
+    prepare_data::{sign_up_member, AsMember, TestMember},
+    tasks::approved_member,
+};
 
 #[tokio::test]
 #[serial]
 async fn organisations_read_times_in_their_own_zone() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
             .unwrap();
@@ -24,7 +27,7 @@ async fn organisations_read_times_in_their_own_zone() {
             .unwrap();
         request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "Stand-up notes are in" }))
             .await;
         let message = messages::Entity::find()
@@ -37,13 +40,13 @@ async fn organisations_read_times_in_their_own_zone() {
             ActiveValue::Set(chrono::DateTime::parse_from_rfc3339("2026-10-08T17:00:00Z").unwrap());
         active.update(&ctx.db).await.unwrap();
 
-        let chat = |cookie: (axum::http::HeaderName, axum::http::HeaderValue)| {
+        let chat = |cookie: TestMember| {
             let request = &request;
             let path = format!("/chat/{}", general.id);
             async move {
                 request
                     .get(&path)
-                    .add_header(cookie.0, cookie.1)
+                    .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
@@ -52,7 +55,7 @@ async fn organisations_read_times_in_their_own_zone() {
 
         let res = request
             .post("/members/timezone")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "timezone": "America/New_York" }))
             .await;
         assert_eq!(res.status_code(), 303);
@@ -79,7 +82,7 @@ async fn organisations_read_times_in_their_own_zone() {
 #[serial]
 async fn only_owners_and_admins_change_the_zone() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
 
         let page = request
@@ -100,14 +103,14 @@ async fn only_owners_and_admins_change_the_zone() {
 
         let res = request
             .post("/members/timezone")
-            .add_header(bob.0, bob.1)
+            .as_member(&bob)
             .form(&serde_json::json!({ "timezone": "Asia/Kathmandu" }))
             .await;
         assert_eq!(res.status_code(), 403);
 
         let res = request
             .post("/members/timezone")
-            .add_header(alice.0, alice.1)
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "timezone": "Mars/Olympus" }))
             .await;

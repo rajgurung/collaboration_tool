@@ -15,12 +15,12 @@ use super::{
     admin::super_admin_cookie,
     mcp::{rpc, RESOURCE},
     multi_org::{alice_in_two_orgs, with_org},
-    prepare_data::{sign_up, USER_PASSWORD},
+    prepare_data::{sign_up_member, AsMember, USER_PASSWORD},
 };
 
-type Cookie = (axum::http::HeaderName, axum::http::HeaderValue);
+use super::prepare_data::Cookie;
 
-const CLAUDE: &str = "https://claude.ai/api/mcp/auth_callback";
+pub(super) const CLAUDE: &str = "https://claude.ai/api/mcp/auth_callback";
 const VERIFIER: &str = "a-fairly-long-pkce-verifier-that-is-at-least-43-characters-long";
 
 fn form_body(fields: &[(&str, &str)]) -> axum::body::Bytes {
@@ -30,14 +30,14 @@ fn form_body(fields: &[(&str, &str)]) -> axum::body::Bytes {
         .into()
 }
 
-fn location(headers: &axum::http::HeaderMap) -> String {
+pub(super) fn location(headers: &axum::http::HeaderMap) -> String {
     headers
         .get("location")
         .map(|l| l.to_str().unwrap().to_string())
         .unwrap_or_default()
 }
 
-fn query_of(location: &str) -> std::collections::HashMap<String, String> {
+pub(super) fn query_of(location: &str) -> std::collections::HashMap<String, String> {
     url::Url::parse(location)
         .unwrap()
         .query_pairs()
@@ -45,7 +45,7 @@ fn query_of(location: &str) -> std::collections::HashMap<String, String> {
         .collect()
 }
 
-async fn register(request: &TestServer, redirect: &str) -> String {
+pub(super) async fn register(request: &TestServer, redirect: &str) -> String {
     let res = request
         .post("/oauth/register")
         .json(&json!({ "client_name": "Claude", "redirect_uris": [redirect] }))
@@ -92,7 +92,7 @@ async fn shown_org_id(request: &TestServer, cookie: &Cookie, client_id: &str) ->
 }
 
 /// Posts the Allow page's form with this `org_id` (left out when `None`).
-async fn post_decision(
+pub(super) async fn post_decision(
     request: &TestServer,
     cookie: &Cookie,
     client_id: &str,
@@ -267,7 +267,7 @@ async fn registration_is_public_and_allowlisted() {
 #[serial]
 async fn the_whole_flow_from_sign_in_to_a_tool_call() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let url = authorize_url(&client_id, CLAUDE);
 
@@ -359,7 +359,7 @@ async fn the_whole_flow_from_sign_in_to_a_tool_call() {
 #[serial]
 async fn deny_goes_back_with_access_denied() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let back = decide(&request, &alice, &client_id, CLAUDE, "deny").await;
         let query = query_of(&back);
@@ -374,7 +374,7 @@ async fn deny_goes_back_with_access_denied() {
 #[serial]
 async fn bad_clients_and_redirects_get_a_page_not_a_redirect() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
 
         let res = request
@@ -412,7 +412,7 @@ async fn bad_clients_and_redirects_get_a_page_not_a_redirect() {
 #[serial]
 async fn codes_must_match_and_work_once() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let base = |code: &str| {
             vec![
@@ -503,7 +503,7 @@ async fn usable(db: &sea_orm::DatabaseConnection, token: &str) -> bool {
 #[serial]
 async fn racing_for_one_code_lets_one_win_then_revokes_it() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let client = oauth_clients::Model::find_by_client_id(&ctx.db, &client_id)
             .await
@@ -537,7 +537,7 @@ async fn racing_for_one_code_lets_one_win_then_revokes_it() {
 #[serial]
 async fn refresh_rotates_and_reuse_revokes_the_grant() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let other_client = register(&request, CLAUDE).await;
         let code = code_for(&request, &alice, &client_id).await;
@@ -598,7 +598,7 @@ async fn refresh_rotates_and_reuse_revokes_the_grant() {
 #[serial]
 async fn racing_refreshes_let_one_win_then_revoke_it() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let client = oauth_clients::Model::find_by_client_id(&ctx.db, &client_id)
             .await
@@ -627,7 +627,7 @@ async fn racing_refreshes_let_one_win_then_revoke_it() {
 #[serial]
 async fn a_super_admin_acting_elsewhere_is_asked_to_leave_first() {
     request::<App, _, _>(|request, ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
             .await
             .unwrap();
@@ -668,7 +668,7 @@ async fn a_super_admin_acting_elsewhere_is_asked_to_leave_first() {
 #[serial]
 async fn login_next_survives_a_failed_login_and_refuses_other_places() {
     request::<App, _, _>(|request, _ctx| async move {
-        sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let next = "/oauth/authorize?client_id=abc&state=1";
         let res = request
             .post("/login")
@@ -718,7 +718,7 @@ async fn login_next_survives_a_failed_login_and_refuses_other_places() {
 #[serial]
 async fn revoking_a_connector_ends_every_token_in_it() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let code = code_for(&request, &alice, &client_id).await;
         let (_, first) = exchange(&request, &client_id, &code).await;
@@ -751,7 +751,7 @@ async fn revoking_a_connector_ends_every_token_in_it() {
             .grant_id;
         let res = request
             .post(&format!("/settings/claude/grants/{grant}/revoke"))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .await;
         assert_eq!(res.status_code(), 303);
         assert!(!works(&request, access).await);
@@ -770,7 +770,7 @@ async fn revoking_a_connector_ends_every_token_in_it() {
 #[serial]
 async fn only_old_clients_that_never_got_a_code_are_pruned() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let used = register(&request, CLAUDE).await;
         code_for(&request, &alice, &used).await;
         let old_unused = register(&request, CLAUDE).await;
@@ -861,7 +861,7 @@ async fn allow_after_a_switch_is_refused() {
 #[serial]
 async fn allow_with_a_missing_empty_or_non_numeric_org_is_refused() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         for org_id in [None, Some(""), Some("acme"), Some("1 OR 1=1")] {
             let res = post_decision(&request, &alice, &client_id, CLAUDE, "allow", org_id).await;
@@ -876,7 +876,7 @@ async fn allow_with_a_missing_empty_or_non_numeric_org_is_refused() {
 #[serial]
 async fn deny_without_an_org_still_goes_back_with_access_denied() {
     request::<App, _, _>(|request, _ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let client_id = register(&request, CLAUDE).await;
         let res = post_decision(&request, &alice, &client_id, CLAUDE, "deny", None).await;
         assert_eq!(res.status_code(), 302, "{}", res.text());

@@ -10,7 +10,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilt
 use serial_test::serial;
 
 use super::{
-    prepare_data::{join, sign_up},
+    prepare_data::{join, sign_up_member, AsMember, TestMember},
     tasks::{approved_member, form_body, project_in, task_form},
 };
 
@@ -38,7 +38,7 @@ async fn user_id(ctx: &AppContext, email: &str) -> i64 {
 #[serial]
 async fn chat_mentions_notify_people_who_can_see_the_conversation() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let (_, carol_id) =
             approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
@@ -52,7 +52,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
 
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "Can @bob and @Carol look? cc @alice @nobody" }))
             .await;
@@ -84,7 +84,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
         // A group bob is not in: mentioning him there tells him nothing.
         request
             .post("/chat/groups")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "name": "leads" }))
             .await;
         let group = conversations::Entity::find()
@@ -95,7 +95,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
             .unwrap();
         request
             .post(&format!("/chat/{}/messages", group.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "secret plan for @bob" }))
             .await;
         assert_eq!(inbox(&ctx, bob_id).await.len(), 1);
@@ -108,7 +108,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
         assert!(page.contains("mentioned you in #general"));
         let badge = request
             .get("/notifications/unread")
-            .add_header(bob.0, bob.1)
+            .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(badge.contains(">1<"), "{badge}");
@@ -120,13 +120,13 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
 #[serial]
 async fn everyone_tells_each_active_member_once() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let (_, carol_id) =
             approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
         let (_, dave_id) =
             approved_member(&request, &ctx, &alice, "dave", "dave@example.com").await;
-        join(&request, "acme", "erin", "erin@example.com").await;
+        join(&request, &ctx, "acme", "erin", "erin@example.com").await;
         let erin_id = user_id(&ctx, "erin@example.com").await;
         let alice_id = user_id(&ctx, "alice@example.com").await;
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
@@ -175,7 +175,7 @@ async fn everyone_tells_each_active_member_once() {
 
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "@everyone launch at 3, @bob runs it" }))
             .await;
@@ -205,7 +205,7 @@ async fn everyone_tells_each_active_member_once() {
         // Tagging yourself alongside everyone is still one reminder.
         request
             .post(&format!("/chat/{}/messages", general.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "@everyone @alice check the doc" }))
             .await;
         assert_eq!(
@@ -224,14 +224,14 @@ async fn everyone_tells_each_active_member_once() {
 #[serial]
 async fn everyone_stays_inside_groups_and_dms() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let (_, carol_id) =
             approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
 
         request
             .post("/chat/groups")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .content_type("application/x-www-form-urlencoded")
             .bytes(format!("name=leads&member_ids={bob_id}").into())
             .await;
@@ -243,7 +243,7 @@ async fn everyone_stays_inside_groups_and_dms() {
             .unwrap();
         request
             .post(&format!("/chat/{}/messages", group.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "@everyone standup moved" }))
             .await;
         assert_eq!(
@@ -261,7 +261,7 @@ async fn everyone_stays_inside_groups_and_dms() {
         // In a DM it reaches the one other person; the picker doesn't offer it.
         request
             .post("/chat/dms")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "user_id": carol_id }))
             .await;
         let dm = conversations::Entity::find()
@@ -279,7 +279,7 @@ async fn everyone_stays_inside_groups_and_dms() {
         assert!(!page.contains("data-everyone-hint"), "no @everyone in a DM");
         request
             .post(&format!("/chat/{}/messages", dm.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({ "body": "@everyone hi" }))
             .await;
         assert_eq!(
@@ -298,7 +298,7 @@ async fn everyone_stays_inside_groups_and_dms() {
 #[serial]
 async fn assignments_and_notes_notify_the_right_people() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let (carol, carol_id) =
             approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
@@ -307,7 +307,7 @@ async fn assignments_and_notes_notify_the_right_people() {
 
         request
             .post("/tasks")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
                 ("title", "Write the FAQ".into()),
@@ -333,7 +333,7 @@ async fn assignments_and_notes_notify_the_right_people() {
         // Adding carol tells carol only; bob was already on it.
         request
             .post(&format!("/tasks/{}", task.id))
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
                 ("title", "Write the FAQ".into()),
@@ -351,7 +351,7 @@ async fn assignments_and_notes_notify_the_right_people() {
         // Carol's note mentions alice: alice gets the mention, bob the note, carol nothing new.
         request
             .post(&format!("/tasks/{}/notes", task.id))
-            .add_header(carol.0.clone(), carol.1.clone())
+            .as_member(&carol)
             .form(&serde_json::json!({ "body": "Draft is up, @alice please review" }))
             .await;
         assert_eq!(
@@ -378,12 +378,12 @@ async fn assignments_and_notes_notify_the_right_people() {
         // Tagging yourself in a note reads as a reminder to you.
         request
             .post(&format!("/tasks/{}/notes", task.id))
-            .add_header(carol.0.clone(), carol.1.clone())
+            .as_member(&carol)
             .form(&serde_json::json!({ "body": "Note to self @carol" }))
             .await;
         let own = request
             .get("/notifications")
-            .add_header(carol.0, carol.1)
+            .add_header(carol.0.clone(), carol.1.clone())
             .await
             .text();
         assert!(own.contains("<strong>You</strong> mentioned yourself on “Write the FAQ”"));
@@ -395,11 +395,11 @@ async fn assignments_and_notes_notify_the_right_people() {
 #[serial]
 async fn project_owners_hear_about_new_and_blocked_tasks() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         request
             .post("/roadmap/projects")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&serde_json::json!({
                 "name": "Launch", "lane": "now", "status": "In progress", "progress": "40",
                 "accent": "#72e5b4", "owner_id": bob_id.to_string(), "summary": "",
@@ -417,14 +417,14 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
 
         request
             .post("/tasks")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&task_form("Book the venue", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         for _ in 0..2 {
             request
                 .post(&format!("/tasks/{}/status", task.id))
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .form(&serde_json::json!({ "status": "blocked" }))
                 .await;
         }
@@ -442,7 +442,7 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
         // An owner who is also assigned gets one notification, not two.
         request
             .post("/tasks")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&task_form("Print badges", project.id, &bob_id.to_string()))
             .await;
         let last = inbox(&ctx, bob_id).await;
@@ -456,14 +456,14 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
 #[serial]
 async fn opening_marks_read_and_stays_private() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
-        let gina = sign_up(&request, "Globex", "gina", "gina@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         for title in ["One", "Two"] {
             request
                 .post("/tasks")
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .form(&task_form(title, project.id, &bob_id.to_string()))
                 .await;
         }
@@ -484,7 +484,7 @@ async fn opening_marks_read_and_stays_private() {
         for cookie in [&alice, &gina] {
             let res = request
                 .post(&format!("/notifications/{}/open", first.id))
-                .add_header(cookie.0.clone(), cookie.1.clone())
+                .as_member(cookie)
                 .await;
             assert_eq!(res.status_code(), 404);
             let page = request
@@ -497,7 +497,7 @@ async fn opening_marks_read_and_stays_private() {
 
         let res = request
             .post(&format!("/notifications/{}/open", first.id))
-            .add_header(bob.0.clone(), bob.1.clone())
+            .as_member(&bob)
             .await;
         assert_eq!(res.status_code(), 303);
         assert_eq!(
@@ -514,21 +514,18 @@ async fn opening_marks_read_and_stays_private() {
             task.id
         )));
 
-        let badge = |cookie: (axum::http::HeaderName, axum::http::HeaderValue)| {
+        let badge = |cookie: TestMember| {
             let request = &request;
             async move {
                 request
                     .get("/notifications/unread")
-                    .add_header(cookie.0, cookie.1)
+                    .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
         };
         assert!(badge(bob.clone()).await.contains(">1<"));
-        request
-            .post("/notifications/read")
-            .add_header(bob.0.clone(), bob.1.clone())
-            .await;
+        request.post("/notifications/read").as_member(&bob).await;
         assert_eq!(badge(bob).await, "");
     })
     .await;
@@ -552,7 +549,7 @@ async fn age_notifications(ctx: &AppContext, minutes: i64) {
 #[serial]
 async fn unseen_mentions_are_emailed_once() {
     request::<App, _, _>(|request, ctx| async move {
-        let alice = sign_up(&request, "Acme", "alice", "alice@example.com").await;
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (bob, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
         let org = organisations::Model::find_by_slug(&ctx.db, "acme")
@@ -565,14 +562,14 @@ async fn unseen_mentions_are_emailed_once() {
         for body in ["Can @bob and @carol look?", "@everyone one more thing"] {
             request
                 .post(&format!("/chat/{}/messages", general.id))
-                .add_header(alice.0.clone(), alice.1.clone())
+                .as_member(&alice)
                 .form(&serde_json::json!({ "body": body }))
                 .await;
         }
         // An assignment is not a mention, so it is never emailed.
         request
             .post("/tasks")
-            .add_header(alice.0.clone(), alice.1.clone())
+            .as_member(&alice)
             .form(&task_form(
                 "Book the venue",
                 project.id,
@@ -584,10 +581,7 @@ async fn unseen_mentions_are_emailed_once() {
         assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 0);
 
         // Bob reads his mentions; carol hasn't opened either of hers.
-        request
-            .post("/notifications/read")
-            .add_header(bob.0, bob.1)
-            .await;
+        request.post("/notifications/read").as_member(&bob).await;
         age_notifications(&ctx, 20).await;
 
         assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 1);
@@ -610,8 +604,8 @@ async fn unseen_mentions_are_emailed_once() {
 async fn team_of_four(
     request: &loco_rs::TestServer,
     ctx: &AppContext,
-) -> (Vec<(super::chat::Cookie, i64)>, conversations::Model) {
-    let raj = sign_up(request, "Acme", "raj", "raj@example.com").await;
+) -> (Vec<(super::chat::TestMember, i64)>, conversations::Model) {
+    let raj = sign_up_member(request, "Acme", "raj", "raj@example.com").await;
     let raj_id = user_id(ctx, "raj@example.com").await;
     let mut people = vec![(raj.clone(), raj_id)];
     for name in ["shusma", "kreepa", "samir"] {
@@ -707,7 +701,7 @@ async fn replies_tell_the_parents_author_and_earlier_repliers_once() {
             .unwrap();
         let open = request
             .post(&format!("/notifications/{}/open", notice.id))
-            .add_header(shusma_c.0.clone(), shusma_c.1.clone())
+            .as_member(&shusma_c)
             .await;
         assert_eq!(
             open.headers()["location"],
@@ -854,7 +848,7 @@ async fn reply_notices_stay_inside_groups_and_dms() {
         // A group of raj, shusma and samir. Samir starts a thread, then is removed.
         request
             .post("/chat/groups")
-            .add_header(raj_c.0.clone(), raj_c.1.clone())
+            .as_member(&raj_c)
             .content_type("application/x-www-form-urlencoded")
             .bytes(format!("name=shop&member_ids={shusma}&member_ids={samir}").into())
             .await;
@@ -874,7 +868,7 @@ async fn reply_notices_stay_inside_groups_and_dms() {
             .unwrap();
         request
             .post(&format!("/members/{}/remove", samir_m.id))
-            .add_header(raj_c.0.clone(), raj_c.1.clone())
+            .as_member(&raj_c)
             .await;
 
         super::chat_threads::reply(&request, &shusma_c, group.id, parent.id, "@kreepa £150?").await;
@@ -885,7 +879,7 @@ async fn reply_notices_stay_inside_groups_and_dms() {
         // A DM has no place in the wording.
         request
             .post("/chat/dms")
-            .add_header(raj_c.0.clone(), raj_c.1.clone())
+            .as_member(&raj_c)
             .form(&serde_json::json!({ "user_id": shusma }))
             .await;
         let dm = conversations::Entity::find()
@@ -939,13 +933,13 @@ async fn acme_task(ctx: &AppContext, title: &str, assignees: Vec<i64>) -> tasks:
 
 async fn add_note(
     request: &loco_rs::TestServer,
-    who: &super::chat::Cookie,
+    who: &super::chat::TestMember,
     task: &tasks::Model,
     body: &str,
 ) {
     let res = request
         .post(&format!("/tasks/{}/notes", task.id))
-        .add_header(who.0.clone(), who.1.clone())
+        .as_member(who)
         .add_header("HX-Request", "true")
         .form(&serde_json::json!({ "body": body }))
         .await;
@@ -965,7 +959,7 @@ async fn everyone_in_a_note_tells_the_whole_team_once() {
     request::<App, _, _>(|request, ctx| async move {
         let (people, _) = team_of_four(&request, &ctx).await;
         let [(_, raj), (_, shusma), (_, kreepa), (samir_c, samir)] = people.try_into().unwrap();
-        join(&request, "acme", "pete", "pete@example.com").await;
+        join(&request, &ctx, "acme", "pete", "pete@example.com").await;
         let pete = user_id(&ctx, "pete@example.com").await;
         let task = acme_task(&ctx, "Stock count", vec![]).await;
 
@@ -1072,6 +1066,7 @@ async fn an_acting_super_admin_cannot_notify_everyone() {
         let res = request
             .post(&format!("/tasks/{}/notes", task.id))
             .add_header("cookie", acting)
+            .add_header("x-org-id", acme.id.to_string())
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "@everyone hi" }))
             .await;
