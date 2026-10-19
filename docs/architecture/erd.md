@@ -153,10 +153,12 @@ Rules:
 - Several `users` columns (`email_verification_*`, `magic_link_*`) are left
   from the Loco starter. Sign-in does not use them (see `docs/notes/auth.md`).
 
-Multi-org is in progress. PR #41 ("Multi-org 1: stop assuming one membership
-per user") is open. Its aim is that one user can belong to several
-organisations. Today the unique index on `memberships.user_id` allows one, and
-`memberships::Model::find_for_user` assumes it.
+Multi-org is in progress (seven PRs). PR #41, merged on 19 October 2026,
+stopped the code assuming one membership per user: `memberships::for_user`
+returns them all and `default_for_user` picks the oldest active one. The
+unique index on `memberships.user_id` still allows one membership per user
+until the next PR replaces it with one per user per organisation. The plan is
+`docs/plans/multi-org-1.md`.
 
 ## Work: projects, tasks and meetings
 

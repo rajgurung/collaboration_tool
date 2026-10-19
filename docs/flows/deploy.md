@@ -19,7 +19,7 @@ flowchart TD
     Mig --> Serve[app serves on 0.0.0.0:PORT]
     Serve --> Health{GET /_health within 120 s}
     Health -->|ok| Live[new version live]
-    Health -->|fails| Old[Railway keeps the old version, unverified]
+    Health -->|fails| Old[Old version behaviour: unverified]
 ```
 
 ## What the repo says
@@ -41,15 +41,18 @@ flowchart TD
 
 ## What lives outside the repo
 
-These come from the team's notes and the README. They are not in any file in
-this repo, so treat them as unverified here:
+These are set in GitHub and Railway, not in any file here:
 
 - Railway deploys automatically on every push to `main`. The trigger is set
-  in Railway, not in `railway.toml`.
-- `main` is protected and needs one approval.
-- Whether Railway waits for CI to pass before deploying.
+  in Railway, not in `railway.toml`. Seen on every merge in October 2026.
+- `main` is protected: one approving review, and a new push dismisses an
+  earlier approval. Admins can bypass it. No status checks are required by
+  the rule (checked with the GitHub API on 19 October 2026), so CI passing is
+  a team rule, not one GitHub enforces.
+- Railway does not wait for CI. The deploy starts as soon as `main` moves,
+  while CI on `main` is still running (seen on PR #37's merge).
 - What Railway does with the old container when the new one fails its health
-  check.
+  check: unverified.
 
 ## Migrations
 
