@@ -1,6 +1,6 @@
 # Multi-org 2: one membership per organisation, and the current_org cookie
 
-Status: Reviewed, waiting on Raj (staff: approve with changes, applied; security: approve with changes, applied) · PR 2 of 7 · Owner: Raj · 19 October 2026
+Status: Approved by Raj 19 October 2026, all five decisions as recommended (staff: approve with changes, applied; security: approve with changes, applied) · PR 2 of 7 · Owner: Raj · 19 October 2026
 
 ## Summary
 
