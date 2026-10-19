@@ -5,16 +5,12 @@ type ToastKind = "success" | "error" | "info";
 type ToastDetail = { kind?: ToastKind; message: string };
 
 function showToast({ kind = "info", message }: ToastDetail) {
-  // A modal dialog sits in the top layer, above any z-index, so a toast for
-  // it goes inside it to be seen.
-  const dialogs = document.querySelectorAll<HTMLDialogElement>("dialog[open]");
-  const host = dialogs[dialogs.length - 1] ?? document.body;
-  let region = host.querySelector<HTMLElement>(":scope > .toast-region");
+  let region = document.querySelector<HTMLElement>(".toast-region");
   if (!region) {
     region = document.createElement("div");
     region.className = "toast-region";
     region.setAttribute("role", "status");
-    host.append(region);
+    document.body.append(region);
   }
   const toast = document.createElement("div");
   toast.className = `toast toast-${kind}`;
