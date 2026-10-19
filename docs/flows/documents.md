@@ -141,6 +141,10 @@ Rules:
 - 5 wrong app passwords lock the account until a password reset
   (`src/models/auth_attempts.rs:29`). Too many tries from one IP gives 429
   for 15 minutes instead.
+- A lock revokes the person's Claude tokens and unused OAuth codes in every
+  organisation, not only the one where it happened
+  (`access_tokens::Model::revoke_all_for_user`). After the reset they
+  connect Claude again. Only the lock's organisation's owners are told.
 - The event is logged before decrypting. If logging fails, nothing is shown.
 - Owners are emailed after each reveal or copy. A failed email is only
   logged; the activity log already has the event.
