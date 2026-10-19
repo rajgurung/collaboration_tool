@@ -198,8 +198,11 @@ document.addEventListener("click", (event) => {
 function probeOrg() {
   if (pageOrgId()) void htmx.ajax("GET", "/orgs/current", { swap: "none" });
 }
+// Back or forward: a page from the back-forward cache, or one the browser
+// drew again from its own cache, may be for the old org.
 window.addEventListener("pageshow", (event) => {
-  if (event.persisted) probeOrg();
+  const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  if (event.persisted || nav?.type === "back_forward") probeOrg();
 });
 
 // After a switch or a stale-tab move, drop ?switched= and ?from= from Home's
