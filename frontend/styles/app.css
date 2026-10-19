@@ -839,7 +839,7 @@
   @keyframes stale-flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: var(--shadow-1); } }
   @media (prefers-reduced-motion: reduce) { .stale-banner.flash { animation: none; outline: 2px solid var(--accent); } }
   /* In chat it sits under the header, and the feed shrinks to make room. */
-  .chat-screen > .stale-banner { flex-shrink: 0; margin: 8px 12px; max-height: 45dvh; overflow-y: auto; }
+  .chat-screen > .stale-banner { flex-shrink: 0; box-sizing: border-box; width: calc(100% - 24px); margin: 8px 12px; max-height: 45dvh; overflow-y: auto; }
   .chat-list-pane > .stale-banner { margin: 8px 12px; }
 
   /* Landing page. Every class is prefixed lp- so it never picks up the app's own .card, .chip, .toast and so on. */
