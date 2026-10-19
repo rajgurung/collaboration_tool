@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: organisation switcher (multi-org PR 3)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+/* ---------- Tokens: copied from frontend/styles/app.css ----------
+   Scoped to [data-theme] on any element (not just <html>) so the mockup can
+   show a light and a dark copy of each screen side by side. */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f3ef; --side: #eceae4; --surface: #ffffff; --lane: #f8f7f4; --line: #e2dfd7; --line-soft: #eceae4;
+  --chip: #e9e7e0; --text: #1a1814; --muted: #625e57; --link: #8a5300; --accent: #f2a93b; --accent-hover: #f6b858;
+  --on-accent: #1a1814; --active-bg: #fbebd0; --scrim: rgba(20, 18, 15, 0.45);
+  --todo: #8a867d; --progress: #3b6fe0; --blocked: #d4552f; --blocked-bg: #fce9e2; --done: #2f9e6b; --danger: #c2410c; --on-danger: #ffffff;
+  --shadow: 0 1px 2px rgba(23, 20, 15, 0.08);
+  --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
+  --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
+  --canvas: #e4e1d9;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121214; --side: #17171a; --surface: #1f1f23; --lane: #18181c; --line: #2c2c32; --line-soft: #29292f;
+  --chip: #26262b; --text: #edece8; --muted: #a6a29b; --link: #ffc77a; --accent: #ffb454; --accent-hover: #ffc475;
+  --on-accent: #1b1300; --active-bg: #4a3618; --scrim: rgba(0, 0, 0, 0.6);
+  --todo: #a6a29b; --progress: #7c9dff; --blocked: #ff8466; --blocked-bg: #3a2019; --done: #4cc38a; --danger: #ff8466; --on-danger: #1b1300;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45); --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
+  --canvas: #0b0b0c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--canvas); color: var(--text); font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; cursor: pointer; color: inherit; }
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ic { flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.meta { font-size: 13px; color: var(--muted); }
+.truncate-1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ---------- Mockup chrome (not part of the app) ---------- */
+.mock-bar { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 32px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.mock-bar h1 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; min-width: 260px; }
+.mock-bar nav { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; font-weight: 600; color: var(--link); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
+.seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.section { padding: 36px 32px 48px; border-bottom: 1px solid var(--line); }
+.section > h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+.section > p.lead { margin: 0 0 24px; max-width: 860px; color: var(--muted); }
+.shots { display: flex; flex-wrap: wrap; gap: 36px 32px; align-items: flex-start; }
+.shot { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.shot-wide { flex-basis: 100%; }
+.shot-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.ann { width: 360px; padding: 16px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; }
+.ann-wide { width: auto; max-width: 860px; }
+.ann h3 { margin: 0 0 8px; font-size: 15px; }
+.ann h3 + * { margin-top: 0; }
+.ann ol, .ann ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ann p + p, .ann p + ul, .ann ul + p, .ann ol + h3, .ann ul + h3, .ann p + h3 { margin-top: 10px; }
+.ann code, .lead code { font-size: 12.5px; padding: 1px 4px; border-radius: 4px; background: var(--chip); }
+.ann table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ann th, .ann td { padding: 6px 8px 6px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line-soft); }
+.ann th { font-weight: 700; color: var(--muted); }
+kbd { display: inline-block; min-width: 20px; padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--lane); font: 600 12px/18px "Plus Jakarta Sans", sans-serif; text-align: center; }
+.q { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--active-bg); color: var(--text); font-size: 13.5px; }
+.q b { display: block; margin-bottom: 2px; }
+.later { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
+
+/* Light, dark, or both side by side */
+.pair { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.pair.stack { flex-direction: column; flex-wrap: nowrap; width: 100%; }
+.th { color: var(--text); }
+body[data-mode="light"] .th-dark, body[data-mode="dark"] .th-light { display: none; }
+body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { display: none; }
+.desk-holder { position: relative; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow-lift); }
+
+/* ---------- Device frames ---------- */
+.frame-phone { box-sizing: content-box; position: relative; display: flex; flex-direction: column; width: 390px; height: 844px; overflow: hidden; border: 10px solid #0e0e10; border-radius: 48px; background: var(--bg); box-shadow: var(--shadow-lift); }
+.statusbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 6px 30px 0; font-size: 15px; font-weight: 700; background: var(--bg); }
+.statusbar.surface { background: var(--surface); }
+.home-ind { position: absolute; left: 50%; bottom: 8px; z-index: 60; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: var(--text); opacity: 0.85; }
+.phone-body { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.frame-desk { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); width: 1440px; height: 900px; overflow: hidden; background: var(--bg); transform-origin: top left; }
+
+/* ---------- App components, copied or adapted from app.css ---------- */
+.avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
+.avatar-xs { width: 22px; height: 22px; font-size: 10px; font-weight: 700; }
+.avatar-sm { width: 28px; height: 28px; font-size: 12px; }
+.avatar-md { width: 36px; height: 36px; font-size: 14px; }
+.avatar-lg { width: 44px; height: 44px; font-size: 16px; }
+.avatar-stack { display: inline-flex; }
+.avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
+.avatar-stack > .avatar + .avatar { margin-left: -6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn-tall { min-height: 44px; }
+.icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--text); flex-shrink: 0; }
+.icon-btn:hover { background: var(--chip); }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; box-shadow: var(--shadow-1); }
+.list { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-1); }
+.list-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; }
+.list > * + * { border-top: 1px solid var(--line-soft); }
+.section-label { margin: 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.section-head a { color: var(--link); font-size: 15px; padding: 10px 0; }
+.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
+.pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 10px; background: var(--chip); font-size: 12px; font-weight: 600; }
+.dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: var(--dot, var(--muted)); }
+.dot-ring { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+.bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 3px; background: var(--bar, var(--accent)); }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 12px; font-size: 16px; }
+.input.focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.toast-error { background: var(--danger); color: var(--on-danger); }
+.toast-region { position: absolute; z-index: 80; display: grid; gap: 8px; pointer-events: none; }
+.phone-body .toast-region { left: 16px; right: 16px; bottom: 96px; justify-items: center; }
+.frame-desk .toast-region { right: 24px; bottom: 24px; justify-items: end; }
+
+/* Shell */
+.sidebar { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); }
+.side-link { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-weight: 500; }
+.side-link[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.side-link[aria-current="page"] .ic { color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 0 8px 0 16px; background: var(--bg); }
+.topbar h1 { flex: 1; min-width: 0; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.tabbar { position: absolute; inset: auto 0 0 0; z-index: 40; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 8px 8px 26px; background: var(--surface); border-top: 1px solid var(--line); }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.tab-icon { display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.tab[aria-current="page"] { color: var(--text); font-weight: 600; }
+.tab[aria-current="page"] .tab-icon { background: var(--active-bg); }
+.page { padding: 4px 16px 110px; display: flex; flex-direction: column; gap: 20px; }
+.d-main { min-width: 0; display: flex; flex-direction: column; }
+.d-page { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; max-width: 1192px; }
+
+/* Home */
+.greet-date { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.greet { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.frame-desk .greet { font-size: 32px; }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.frame-desk .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.phone-body .stat { gap: 10px; padding: 14px; }
+.stat > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
+.phone-body .stat-icon { width: 36px; height: 36px; }
+.stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.project-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.home-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 28px; align-items: start; }
+.cards-3 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.task-line { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px; font-size: 15px; font-weight: 500; }
+
+/* ===== NEW: the switcher button at the top of the sidebar ===== */
+.org-static, .org-switch { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; margin-bottom: 16px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; }
+.org-switch:hover, .org-switch.hover { background: var(--chip); }
+.org-switch[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
+.org-switch.kbd-focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.org-btn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.org-btn-text strong { font-size: 15px; }
+.org-btn-text .sub { display: inline-flex; align-items: center; gap: 4px; margin-top: 1px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.org-switch .chev { color: var(--muted); }
+.logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.logo-lg { width: 36px; height: 36px; border-radius: 11px; font-size: 15px; }
+.logo-wait { background: var(--chip); color: var(--muted); box-shadow: none; }
+
+/* ===== NEW: the menu (desktop popover) and the rows (shared with the phone sheet) ===== */
+.org-menu { position: absolute; top: 64px; left: 12px; z-index: 50; width: 300px; padding: 6px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lift); }
+.org-menu-label { padding: 8px 10px 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.org-scroll { max-height: 404px; overflow-y: auto; }
+.org-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 10px; border: 0; border-radius: 10px; background: none; color: var(--text); text-align: left; }
+.org-row:hover:not([aria-disabled="true"]), .org-row.hover { background: var(--chip); }
+.org-row.focus, .org-row:focus-visible { outline: none; background: var(--chip); box-shadow: inset 0 0 0 2px var(--accent); }
+.org-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.org-name { font-size: 15px; font-weight: 600; }
+.org-row[aria-checked="true"] .org-name { font-weight: 700; }
+.org-row .meta { display: inline-flex; align-items: center; gap: 4px; }
+.org-row .tick { color: var(--link); }
+.org-row[aria-disabled="true"] { cursor: default; }
+.org-row[aria-disabled="true"] .org-name { color: var(--muted); font-weight: 500; }
+.org-row.loading .meta { color: var(--text); }
+.org-row.dim { opacity: 0.55; }
+.org-sep { height: 1px; margin: 6px 4px; background: var(--line-soft); }
+.org-note { margin: 4px 10px 6px; font-size: 12.5px; color: var(--muted); }
+
+/* Phone: header button on Home, and the sheet */
+.org-head { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 10px; background: none; color: var(--text); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; text-align: left; }
+.org-head span { min-width: 0; }
+.org-head .ic { color: var(--muted); }
+.org-head-static { flex: 1; min-width: 0; margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.m-scrim { position: absolute; inset: 0; z-index: 45; background: var(--scrim); }
+.m-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; flex-direction: column; max-height: calc(100% - 48px); border-radius: 20px 20px 0 0; background: var(--surface); }
+.sheet-handle { display: grid; place-items: center; padding-top: 8px; flex-shrink: 0; }
+.sheet-handle::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+.sheet-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 20px; }
+.sheet-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 700; }
+.sheet-body { min-height: 0; overflow-y: auto; padding: 0 12px 34px; }
+.m-sheet .org-row { min-height: 60px; padding: 8px 10px; gap: 14px; }
+.m-sheet .org-name { font-size: 16px; }
+
+/* Acting banner (exists today, unchanged) */
+.acting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--active-bg); font-size: 14px; }
+.frame-desk .acting .btn { min-height: 36px; }
+.phone-body .acting .btn { min-height: 44px; }
+
+/* ===== NEW: the notice after a stale tab moves ===== */
+.notice { display: flex; align-items: flex-start; gap: 12px; padding: 14px 4px 14px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.frame-desk .notice { max-width: 760px; }
+.notice-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 999px; background: var(--active-bg); color: var(--link); }
+.notice-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 1px; }
+.notice-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.notice > .icon-btn { margin-top: -10px; color: var(--muted); }
+.draft { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); }
+.draft-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.draft-field { display: flex; flex-direction: column; gap: 1px; }
+.draft-field .field-label { font-size: 12px; }
+.draft-field p { font-size: 15px; overflow-wrap: anywhere; }
+.file-line { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+
+/* Stale-tab story strip */
+.story { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; max-width: 1180px; }
+.story-step { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; }
+.story-step b { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.tabchip { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 30px; padding: 0 10px 0 4px; border-radius: 8px; background: var(--chip); font-size: 13px; font-weight: 600; }
+.tabchip .logo { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+
+/* Specimens at real size */
+.specimen { position: relative; width: 248px; padding: 16px 12px; border-radius: 16px; background: var(--side); border: 1px solid var(--line); }
+.specimen .org-static, .specimen .org-switch { margin-bottom: 0; }
+.spec-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.live { position: relative; width: 248px; height: 600px; padding: 16px 12px; border-radius: 16px; background: var(--side); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.live .org-menu { top: 64px; }
+.live .toast-region { left: 12px; right: -120px; bottom: 16px; justify-items: start; }
+</style>
+</head>
+<body data-view="both" data-mode="light">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-clock-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-list-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></symbol>
+  <symbol id="i-meetings" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></symbol>
+  <symbol id="i-log-out" viewBox="0 0 24 24"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></symbol>
+  <symbol id="i-monitor-smartphone" viewBox="0 0 24 24"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></symbol>
+  <symbol id="i-status-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-status-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+  <symbol id="i-status-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+</svg>
+
+<header class="mock-bar">
+  <h1>Organisation switcher · multi-org PR 3 · mockup</h1>
+  <nav aria-label="Sections">
+    <a href="#desktop">1 Desktop</a><a href="#phone">2 Phone</a><a href="#after">3 After a switch</a><a href="#stale">4 Stale tab</a><a href="#acting">5 Super admin</a><a href="#roles">6 Roles and states</a><a href="#later">7 PR 4 and 6</a><a href="#questions">8 Questions</a>
+  </nav>
+  <div class="seg" role="group" aria-label="Theme"><button type="button" data-mode-set="light" aria-pressed="true">Light</button><button type="button" data-mode-set="dark" aria-pressed="false">Dark</button><button type="button" data-mode-set="both" aria-pressed="false">Light and dark</button></div>
+  <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
+</header>
+
+<!-- ============================== 1. DESKTOP ============================== -->
+<section class="section" id="desktop">
+  <h2>1. Desktop: the org name becomes the switcher</h2>
+  <p class="lead">Priya is owner of Acme Studio and a member of Northwind Bakery. She asked to join Himalayan Ritual and is waiting. The logo and name at the top of the sidebar become one button. It opens a small menu right under it.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · menu open, keyboard focus on Northwind Bakery</span><div id="d-open"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>The button keeps today's look: amber initial, name, 44px tall. It gains a quiet up-down chevron and a hover fill. Nothing else in the sidebar moves.</li>
+        <li>The menu opens under the button, 300px wide, so long names have room. It overlaps the page a little, like any menu.</li>
+        <li>Each row: initial, name, your role in that org. A tick (in <code>--link</code>, since amber is too faint for an icon on white) marks where you are.</li>
+        <li>Active orgs are listed A to Z, not by last use, so they never jump around.</li>
+        <li>Pending requests sit under a hairline: grey initial, grey name, a clock and "Waiting for approval". They do nothing when clicked.</li>
+        <li>Declined and removed memberships are not listed. There is nothing you can do with them.</li>
+        <li>Picking an org posts to <code>/orgs/{id}/switch</code>. Picking the one you are in just closes the menu.</li>
+        <li>No create or join rows yet. See section 7.</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>Keyboard</h3>
+      <table>
+        <tr><th>Key</th><th>On the button</th></tr>
+        <tr><td><kbd>Enter</kbd> <kbd>Space</kbd> <kbd>↓</kbd></td><td>Open, focus on the current org</td></tr>
+        <tr><td><kbd>↑</kbd></td><td>Open, focus on the last row</td></tr>
+        <tr><th>Key</th><th>In the menu</th></tr>
+        <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Move, wrapping at the ends</td></tr>
+        <tr><td><kbd>Home</kbd> <kbd>End</kbd></td><td>First or last row</td></tr>
+        <tr><td>A letter</td><td>Next org starting with it</td></tr>
+        <tr><td><kbd>Enter</kbd> <kbd>Space</kbd></td><td>Switch. On a pending row, nothing.</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Close, focus back on the button</td></tr>
+        <tr><td><kbd>Tab</kbd></td><td>Close and move on</td></tr>
+      </table>
+      <p class="meta" style="margin-top:10px">ARIA: the button has <code>aria-haspopup="menu"</code> and <code>aria-expanded</code>. The list is <code>role="menu"</code> labelled "Your organisations". Active orgs are <code>menuitemradio</code> with <code>aria-checked</code>. Pending rows are <code>menuitem</code> with <code>aria-disabled="true"</code>. They stay focusable, so a screen reader hears "Himalayan Ritual, waiting for approval, unavailable".</p>
+      <p class="meta">Build note: one <code>&lt;form method="post"&gt;</code> around the menu, and each row a <code>&lt;button formaction="/orgs/31/switch"&gt;</code>. It works without JavaScript. JavaScript adds the arrow keys and the loading state.</p>
+    </div>
+    <div class="shot">
+      <span class="shot-label">Try it · real size · click or Tab to the button</span>
+      <div id="live"></div>
+    </div>
+    <div class="shot">
+      <span class="shot-label">Close up · every state of the button and menu</span>
+      <div class="pair" id="spec-desk"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 2. PHONE ============================== -->
+<section class="section" id="phone">
+  <h2>2. Phone: tap the org name on Home</h2>
+  <p class="lead">Home's header already shows the org name on phones. It becomes a button with a small chevron, and opens a bottom sheet. More gets the same entry as its first row, so you can switch without going back to Home.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · Home, closed</span><div id="p-home"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · sheet open</span><div id="p-sheet"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · switching to Northwind Bakery</span><div id="p-loading"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · More</span><div id="p-more"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Home's header, because that is where the name already is on a phone. It stays where your thumb expects it. No new header on every tab.</li>
+        <li>More gets one row at the top: initial, name, role, "Switch". It opens the same sheet. People who look for settings find it there.</li>
+        <li>The sheet is the app's existing <code>dialog.sheet</code>: handle, title "Your organisations", a 44px close button. Rows are 60px, bigger than desktop, for thumbs.</li>
+        <li>Tapping a row shows a spinner and "Switching…" on that row. The other rows dim and do nothing. Then the whole page loads fresh on Home.</li>
+        <li>The sheet closes on a backdrop tap, a swipe down, the close button or Esc, as the other sheets do.</li>
+        <li>With one org, the header stays plain text and More shows no row, exactly as today.</li>
+      </ol>
+      <div class="q"><b>Question for Raj: phone placement</b>Home header plus a row on More (recommended), or More only. More only is quieter but takes two taps from every tab, and Home's name would look tappable without being so.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 3. AFTER A SWITCH ============================== -->
+<section class="section" id="after">
+  <h2>3. After a switch</h2>
+  <p class="lead">You land on Home in the new org. A toast says where you are, then fades after 3.5 seconds like every other toast. The sidebar, the header and every count are now Northwind Bakery's.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · Home in Northwind Bakery</span><div id="p-after"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Copy: "You're now in Northwind Bakery". Plain, from Priya's side. No "Switched organisation successfully".</li>
+        <li>A normal toast (the dark one), not the green success one. It is information, not an achievement.</li>
+        <li>Toast placement as today: above the tab bar on phones, bottom right on desktop.</li>
+        <li>How it gets there: the switch redirects to <code>/dashboard?switched=1</code>. Home renders the existing <code>flash</code> with the org it actually resolved, so a hand-made link can only ever state the truth. <code>app.ts</code> then removes <code>?switched=1</code> with <code>history.replaceState</code>, so a reload does not repeat it. This is the same pattern as <code>/more?signed_out=1</code>.</li>
+        <li>Errors stay in the menu or sheet (section 6): a toast, and the list stays open.</li>
+      </ol>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Home in Northwind Bakery, toast bottom right</span><div id="d-after"></div></div>
+  </div>
+</section>
+
+<!-- ============================== 4. STALE TAB ============================== -->
+<section class="section" id="stale">
+  <h2>4. A tab left on the old org</h2>
+  <p class="lead">The cookie is per browser, so a switch in one tab moves every tab. PR 3's server check answers 409 when a tab's org no longer matches. Here is what the person in that tab sees.</p>
+  <div class="shots">
+    <div class="shot shot-wide">
+      <span class="shot-label">What happens</span>
+      <div class="story">
+        <div class="story-step"><b>1 · Tab A</b><span class="tabchip"><span class="logo">A</span>Acme Studio · Tasks</span>Priya starts a new task for Lumen Café.</div>
+        <div class="story-step"><b>2 · Tab B</b><span class="tabchip"><span class="logo">N</span>Northwind Bakery · Home</span>She switches to Northwind Bakery here. The browser's <code>current_org</code> is now Northwind.</div>
+        <div class="story-step"><b>3 · Tab A again</b><span class="tabchip"><span class="logo">A</span>still shows Acme</span>Her next request gets 409: pressing Save, any click that loads something, or the badge check that runs every 60 seconds by itself.</div>
+        <div class="story-step"><b>4 · Tab A moves</b><span class="tabchip"><span class="logo">N</span>Northwind Bakery · Home</span>Tab A opens Home in Northwind Bakery with the notice below. Nothing was saved anywhere.</div>
+      </div>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · tab A after it moved, with the task she was typing</span><div id="d-stale-draft"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · before: tab A, typing in Acme's #design</span><div id="p-stale-before"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · after: the message is kept to copy</span><div id="p-stale-draft"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · after: nothing was being typed</span><div id="p-stale"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · after: an upload was refused</span><div id="p-stale-upload"></div></div>
+    <div class="ann">
+      <h3>The notice</h3>
+      <ol>
+        <li>A card at the top of the page, not a toast. It must not vanish before it is read, and it can hold a draft.</li>
+        <li>Title, always: "This tab was showing Acme Studio. You're now in Northwind Bakery."</li>
+        <li>Why, in one line: "You switched organisation in another tab, and every tab follows."</li>
+        <li>"Back to Acme Studio" switches the browser back. "Dismiss" (the X) closes it. It also goes away on the next page.</li>
+        <li><code>role="status"</code>, so a screen reader announces it. It does not take focus.</li>
+        <li>The tab opened by the switch itself shows the toast from section 3, never this notice.</li>
+      </ol>
+      <div class="q"><b>Question for Raj: where the stale tab lands</b>Home in the new org (recommended). The plan says <code>HX-Refresh</code>, which reloads the same address. On an address with an id from the old org, like <code>/tasks/58</code> or <code>/chat/12</code>, that reload is a 404 page in the new org. Sending <code>HX-Redirect: /dashboard</code> instead matches what a switch does, and always lands somewhere that works.</div>
+      <div class="q"><b>Question for Raj: offer "Back to Acme Studio"?</b>Recommended yes. It is what Priya wanted in this tab. The cost: tab B now becomes the stale one and gets the same notice next time it loads anything.</div>
+    </div>
+    <div class="ann">
+      <h3>Can the draft be kept? Yes, the text, in this tab.</h3>
+      <p>What is feasible in PR 3, all in <code>frontend/app.ts</code> with no server change:</p>
+      <ul>
+        <li><b>Catch it before the page moves.</b> HTMX fires <code>htmx:beforeOnLoad</code> before it acts on <code>HX-Redirect</code>. On a 409, copy every filled text field on the page into <code>sessionStorage</code>: its label and its value. Plain (non-HTMX) forms are copied in the same submit listener that adds the hidden <code>_org</code> field.</li>
+        <li><b>Show it after.</b> The new page reads it, shows it in the notice with "Copy text", then deletes it. Session storage is per tab and gone when the tab closes.</li>
+        <li><b>Only text.</b> Task title and description, notes, meeting notes, chat messages, comments.</li>
+        <li><b>Never passwords or logins.</b> Skip <code>type="password"</code> and any form marked <code>data-no-draft</code> (the logins and unlock forms). They must not sit in browser storage in plain text.</li>
+        <li><b>Not files.</b> A browser cannot put a file back into a file field. The notice names the file so Priya knows to upload it again.</li>
+      </ul>
+      <p><b>Not in PR 3:</b> putting the draft back into the form by itself after switching back. It needs the old address and a match on form and org. Possible later.</p>
+      <p class="meta">Unverified: the order of <code>htmx:beforeOnLoad</code> and the <code>HX-Redirect</code> handling in the vendored HTMX build. The engineer should check it before relying on it.</p>
+      <div class="q"><b>Question for Raj: drafts</b>Keep text to copy, in this tab only (recommended for PR 3). Or drop drafts and only show the notice, which is less work but loses what was typed when the 60-second check fires mid-sentence.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 5. SUPER ADMIN ============================== -->
+<section class="section" id="acting">
+  <h2>5. Super admin acting in an org</h2>
+  <p class="lead">Raj is super admin, owner of Zen Scale, and has entered Acme Studio from <code>/admin</code>. The banner exists today and does not change: "You are inside Acme Studio as platform admin. Changes you make are real." with Leave.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · acting in Acme Studio, menu open</span><div id="d-acting"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · acting, sheet open</span><div id="p-acting"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>The button shows the acting org with a second line: a shield and "Platform admin". So the sidebar says it too, not only the banner.</li>
+        <li>The menu splits in two. "Acting in": Acme Studio, ticked, role "Platform admin". Then "Your organisations": the orgs Raj really belongs to.</li>
+        <li>Picking one of your own orgs switches to it and ends acting, as the endpoint already does. The note under the list says so: "Switching ends acting in Acme Studio."</li>
+        <li>Leave stays in the banner only. One way out, in one place.</li>
+        <li>No list of every org in the menu. Entering another org stays on <code>/admin</code>, which already lists them.</li>
+        <li>A super admin acting with no membership of their own has nothing to switch to, so the button is plain, as in the single-org case.</li>
+        <li>Acting in an org you also belong to: it shows once under "Acting in". Your own row for it stays under "Your organisations" without a tick. Picking it drops acting and gives you your real role there.</li>
+      </ol>
+    </div>
+    <div class="shot">
+      <span class="shot-label">Close up · acting</span>
+      <div class="pair" id="spec-acting"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 6. ROLES AND STATES ============================== -->
+<section class="section" id="roles">
+  <h2>6. Roles, few and many, errors</h2>
+  <p class="lead">Owner, admin and member see the same switcher. Only the role under each name changes. Dawa does the books for nine local businesses: eight active, one waiting.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · many orgs, the list scrolls</span><div id="p-many"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the switch failed</span><div id="p-error"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · one org: as today</span><div id="p-single"></div></div>
+    <div class="ann">
+      <h3>States</h3>
+      <table>
+        <tr><th>State</th><th>What shows</th></tr>
+        <tr><td>One org, nothing pending</td><td>Plain name, no chevron, links to Home. Exactly as today.</td></tr>
+        <tr><td>One org plus a pending request</td><td>The switcher, so the request is visible. (Only possible after PR 6.)</td></tr>
+        <tr><td>Two to six orgs</td><td>The whole list, no scrolling.</td></tr>
+        <tr><td>Seven or more</td><td>The list scrolls inside the menu (404px desktop) or the sheet. Pending stay at the end.</td></tr>
+        <tr><td>Switching</td><td>Spinner and "Switching…" on the row. Others dim.</td></tr>
+        <tr><td>No connection</td><td>Toast: "Couldn't switch to Northwind Bakery. Check your connection and try again." The list stays open.</td></tr>
+        <tr><td>404 (membership changed since the page loaded)</td><td>Toast: "You can't open Northwind Bakery any more." The list reloads without it.</td></tr>
+        <tr><td>Empty</td><td>Cannot happen. A page in the app always has a current org.</td></tr>
+      </table>
+      <h3 style="margin-top:14px">Roles</h3>
+      <p>Owner, Admin and Member, written as the More page writes them. A super admin acting shows "Platform admin".</p>
+      <div class="q"><b>Question for Raj: one org</b>No affordance at all (recommended). Until PR 4 ships, everyone has one org, so a chevron would open a menu with one row in it. The switcher appears the day a second membership exists.</div>
+    </div>
+    <div class="shot">
+      <span class="shot-label">Close up · desktop menu, many orgs</span>
+      <div class="pair" id="spec-many"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 7. LATER ============================== -->
+<section class="section" id="later">
+  <h2>7. Room for PR 4 and PR 6</h2>
+  <p class="lead">PR 4 adds "create another organisation" and PR 6 "join with an existing account". The recommendation is to show neither until it works.</p>
+  <div class="shots">
+    <div class="ann ann-wide">
+      <h3>Recommendation: do not show them yet</h3>
+      <ol>
+        <li>A greyed "Coming soon" row is a promise the app cannot keep, sitting in a menu people open every day.</li>
+        <li>Nobody sees the menu before PR 4 anyway, because nobody has two orgs. A stub would only reach the switcher's first users once PR 4 is out, by which time "create" is real.</li>
+        <li>The room is already there. The menu ends with the list, so PR 4 adds a hairline and one row under it ("New organisation", plus icon), and PR 6 a second ("Join with a link"). The phone sheet gets the same two rows. Nothing in this design has to move.</li>
+        <li>One consequence to accept: with the stubs hidden, a one-org person has no way to reach "create" from the switcher. PR 4 will need the switcher to show for one org too, as a menu with your org plus "New organisation". That is PR 4's design call.</li>
+      </ol>
+      <div class="later">Not drawn on purpose. Per the design rules, features outside PR 3 are listed here, not shown in the screens.</div>
+      <div class="q"><b>Question for Raj: stubs</b>Hide until built (recommended), or disabled "Coming soon" rows.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 8. QUESTIONS ============================== -->
+<section class="section" id="questions">
+  <h2>8. Questions for Raj</h2>
+  <p class="lead">Each with a recommendation.</p>
+  <div class="ann ann-wide">
+    <ol>
+      <li><b>One org:</b> no dropdown affordance at all. Recommend: yes, plain name as today.</li>
+      <li><b>PR 4 and PR 6 entry points:</b> hide until built, or show disabled stubs. Recommend: hide.</li>
+      <li><b>Phone placement:</b> Home header plus a row on More, or More only. Recommend: both.</li>
+      <li><b>Where a stale tab lands:</b> Home in the new org (<code>HX-Redirect: /dashboard</code>), or reload the same address (<code>HX-Refresh</code>, as the plan says). Recommend: Home. Reloading an id page from the old org gives a 404. This changes the plan's wording.</li>
+      <li><b>Drafts in a stale tab:</b> keep text to copy, in this tab only, never passwords or files. Recommend: yes for PR 3. Restoring into the form after switching back can come later.</li>
+      <li><b>"Back to Acme Studio" in the notice:</b> recommend offering it, knowing the other tab then becomes stale.</li>
+      <li><b>Unread dots for other orgs.</b> The multi-org-2 plan lists them under PR 3's scope. This brief does not, so they are not drawn. Recommend: leave them for a later PR. They need a count per org for every page load, and a dot on the button would need explaining.</li>
+      <li><b>Order:</b> A to Z with pending at the end. Recommend: yes, over most recently used, so rows never move.</li>
+      <li><b>Declined and removed memberships:</b> not listed. Recommend: yes. They can't be acted on, and listing "Removed" in a menu is unkind.</li>
+    </ol>
+  </div>
+</section>
+
+<script>
+/* ---------- Data ---------- */
+const PRIYA = { name: "priya", color: "#df85ff" };
+const RAJ = { name: "raj", color: "#ffb454" };
+const DAWA = { name: "dawa", color: "#72e5b4" };
+const ACME = { id: 12, name: "Acme Studio", role: "Owner" };
+const NORTH = { id: 31, name: "Northwind Bakery", role: "Member" };
+const HIMAL = { id: 47, name: "Himalayan Ritual", pending: true };
+const PRIYA_ORGS = [ACME, NORTH, HIMAL];
+const ZEN = { id: 1, name: "Zen Scale", role: "Owner" };
+const DAWA_ORGS = [
+  { name: "Acme Studio", role: "Admin" }, { name: "Brightside Dental", role: "Member" }, { name: "Fernhill Primary PTA", role: "Admin" },
+  { name: "Kathmandu Coffee Co.", role: "Owner" }, { name: "Northwind Bakery", role: "Member" }, { name: "Oakline Joinery", role: "Member" },
+  { name: "Riverside Community Climbing Club and Café", role: "Member" }, { name: "Thornbury Vets", role: "Admin" },
+  { name: "Little Lantern Nursery", pending: true },
+];
+const HOME = {
+  "Acme Studio": {
+    stats: [6, 1, 4, 3],
+    projects: [["Lumen Café rebrand", "Active", 62, "#f2a93b", "8 of 13 done", ["maya", "priya", "sam"]], ["Studio website refresh", "Active", 35, "#3b6fe0", "6 of 17 done", ["kai", "priya"]], ["Spring lookbook", "Planned", 0, "#2f9e6b", "No tasks yet", ["ana"]]],
+    tasks: [["progress", "Send Lumen Café the logo proofs"], ["blocked", "Fix the hero image crop on mobile"], ["todo", "Book the photographer for 4 November"]],
+    chat: [["design", "maya: New colour swatches are in Documents"], ["general", "sam: Office closed on Friday afternoon"]],
+  },
+  "Northwind Bakery": {
+    stats: [2, 0, 3, 5],
+    projects: [["Saturday market stall", "Active", 40, "#f2a93b", "4 of 10 done", ["oli", "priya"]], ["Wholesale price list", "Active", 75, "#2f9e6b", "6 of 8 done", ["ben", "oli"]], ["Christmas pre-orders", "Planned", 0, "#3b6fe0", "No tasks yet", ["ben"]]],
+    tasks: [["progress", "Order oat flour for Saturday"], ["todo", "Update the allergen labels"], ["todo", "Reply to Harbour Deli about croissants"]],
+    chat: [["general", "oli: Oven 2 is fixed, back to full bakes"], ["orders", "ben: Harbour Deli wants 40 more for Friday"]],
+  },
+  "Zen Scale": { stats: [3, 0, 1, 0], projects: [], tasks: [], chat: [] },
+};
+const COLORS = { maya: "#ff758f", sam: "#6cb6ff", kai: "#c9d76a", ana: "#72e5b4", oli: "#6cb6ff", ben: "#c9d76a", priya: "#df85ff", raj: "#ffb454", dawa: "#72e5b4" };
+
+/* ---------- Helpers ---------- */
+const ic = (name, size = 18, cls = "") => `<svg class="ic ${cls}" width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const av = (n, size = "sm") => `<span class="avatar avatar-${size}" style="background:${COLORS[n] || "#e8dfce"}" aria-hidden="true">${n[0].toUpperCase()}</span>`;
+const logo = (org, cls = "") => `<span class="logo ${org.pending ? "logo-wait" : ""} ${cls}">${org.name[0]}</span>`;
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/* Render light and dark copies of the same markup. */
+function both(html, stack = false) {
+  return `<div class="pair${stack ? " stack" : ""}"><div class="th th-light" data-theme="light">${html}</div><div class="th th-dark" data-theme="dark">${html}</div></div>`;
+}
+const put = (id, html) => { document.getElementById(id).innerHTML = both(html); };
+const DESK = {};
+const putDesk = (id, fn) => { DESK[id] = fn; document.getElementById(id).innerHTML = both(`<div class="desk-holder">${fn()}</div>`, true); };
+
+/* One row of the menu or the sheet. */
+function orgRow(org, o = {}) {
+  if (org.pending) {
+    return `<div class="org-row" role="menuitem" aria-disabled="true" tabindex="-1">${logo(org, o.big ? "logo-lg" : "")}<span class="org-text"><span class="org-name truncate-1">${org.name}</span><span class="meta">${ic("clock-3", 13)}Waiting for approval</span></span></div>`;
+  }
+  const cur = o.current === org.name;
+  const cls = [o.focus === org.name ? "focus" : "", o.loading === org.name ? "loading" : "", o.loading && o.loading !== org.name ? "dim" : ""].join(" ");
+  const role = o.roleOverride && cur ? `${ic("shield", 13)}${o.roleOverride}` : org.role;
+  const right = o.loading === org.name ? ic("loader-circle", 20, "spin") : cur ? ic("check", 20, "tick") : "";
+  return `<button type="button" class="org-row ${cls}" role="menuitemradio" aria-checked="${cur}" tabindex="-1" data-org="${esc(org.name)}">${logo(org, o.big ? "logo-lg" : "")}<span class="org-text"><span class="org-name truncate-1">${org.name}</span><span class="meta">${o.loading === org.name ? "Switching…" : role}</span></span>${right}</button>`;
+}
+function orgList(orgs, o = {}) {
+  const active = orgs.filter((x) => !x.pending);
+  const pending = orgs.filter((x) => x.pending);
+  return active.map((x) => orgRow(x, o)).join("") + (pending.length ? `<div class="org-sep" role="separator"></div>` + pending.map((x) => orgRow(x, o)).join("") : "");
+}
+function actingList(o) {
+  return `<div class="org-menu-label">Acting in</div>${orgRow(o.acting, { ...o, current: o.acting.name, roleOverride: "Platform admin" })}<div class="org-sep" role="separator"></div><div class="org-menu-label">Your organisations</div>${orgList(o.own, { ...o, current: null })}<p class="org-note">Switching ends acting in ${o.acting.name}.</p>`;
+}
+function menu(orgs, o = {}) {
+  const inner = o.acting ? actingList(o) : `<div class="org-menu-label">Your organisations</div><div class="${o.scroll ? "org-scroll" : ""}">${orgList(orgs, o)}</div>`;
+  return `<div class="org-menu" role="menu" aria-label="Your organisations"${o.style ? ` style="${o.style}"` : ""}>${inner}</div>`;
+}
+/* The top of the sidebar. */
+function orgButton(org, o = {}) {
+  if (o.single) return `<a href="#" class="org-static">${logo(org)}<strong class="truncate-1" style="font-size:15px">${org.name}</strong></a>`;
+  const sub = o.acting ? `<span class="sub">${ic("shield", 12)}Platform admin</span>` : "";
+  return `<button type="button" class="org-switch ${o.hover ? "hover" : ""} ${o.kbd ? "kbd-focus" : ""}" aria-haspopup="menu" aria-expanded="${!!o.open}">${logo(org)}<span class="org-btn-text"><strong class="truncate-1">${org.name}</strong>${sub}</span>${ic("chevrons-up-down", 16, "chev")}</button>`;
+}
+function sidebar(org, o = {}) {
+  const links = [["house", "Home"], ["bell", "Notifications"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["map", "Roadmap"], ["meetings", "Meetings"], ["folder", "Documents"], ["users", "Members"]].filter(([, l]) => !(o.acting && l === "Documents"));
+  if (o.superAdmin) links.push(["shield", "Admin"]);
+  const me = o.me || PRIYA;
+  return `<nav class="sidebar">${orgButton(org, o)}${links.map(([i, l]) => `<a href="#" class="side-link"${l === (o.active || "Home") ? ' aria-current="page"' : ""}>${ic(i, 20)}<span style="flex:1">${l}</span>${l === "Chat" && o.chat ? `<span class="badge">${o.chat}</span>` : ""}</a>`).join("")}<div class="side-foot">${av(me.name, "md")}<span class="truncate-1" style="flex:1;font-size:14px;font-weight:500">${me.name}</span><span class="icon-btn">${ic("sun-moon", 20)}</span><span class="icon-btn">${ic("log-out", 20)}</span></div>${o.menu || ""}</nav>`;
+}
+const actingBanner = (name) => `<div class="acting"><span>You are inside <strong>${name}</strong> as platform admin. Changes you make are real.</span><button class="btn btn-secondary">Leave</button></div>`;
+
+/* Home content, desktop and phone. */
+function stats(orgName) {
+  const s = HOME[orgName].stats;
+  const items = [["var(--progress)", "Your open tasks"], ["var(--blocked)", "Blocked"], ["var(--accent)", "Due this week"], ["var(--done)", "Unread messages"]];
+  return `<div class="stats">${items.map(([c, l], i) => `<a class="stat" style="--dot:${c}"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">${s[i]}</span><span class="meta">${l}</span></span></a>`).join("")}</div>`;
+}
+function projectCard(p) {
+  return `<a class="project-card" style="--accent-bar:${p[3]}"><span style="display:flex;align-items:center;gap:8px"><span class="truncate-1" style="flex:1;font-weight:700">${p[0]}</span><span class="pill">${p[1]}</span></span><span style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1;--bar:${p[3]}"><span style="width:${p[2]}%"></span></span><span class="meta">${p[2]}%</span></span><span style="display:flex;align-items:center;gap:8px"><span class="meta" style="flex:1">${p[4]}</span><span class="avatar-stack">${p[5].map((n) => av(n, "xs")).join("")}</span></span></a>`;
+}
+const statusIc = (s) => `<span style="color:var(--${s === "progress" ? "progress" : s === "blocked" ? "blocked" : "todo"});display:inline-grid">${ic("status-" + s, 20)}</span>`;
+function homeDesk(orgName, me, extra = "") {
+  const h = HOME[orgName];
+  return `<div class="d-page">${extra}<div style="display:flex;align-items:flex-end;gap:12px"><div style="flex:1"><p class="greet-date">Sunday 19 October</p><p class="greet">Good morning, ${me.name}</p></div><a class="btn btn-primary">${ic("plus", 16)}New task</a></div>${stats(orgName)}<div class="home-grid"><div style="display:flex;flex-direction:column;gap:24px"><section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Roadmap: now</h2><a>Full roadmap</a></div><div class="cards-3">${h.projects.slice(0, 2).map(projectCard).join("")}</div></section><section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>My tasks</h2><a>All tasks</a></div><div class="list">${h.tasks.map(([s, t]) => `<div class="task-line">${statusIc(s)}${t}</div>`).join("")}</div></section></div><section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Recent chat</h2><a>Open chat</a></div><div class="list">${h.chat.map(([c, t]) => `<div class="task-line"><span style="color:var(--muted);display:inline-grid">${ic("hash", 18)}</span><span style="display:flex;flex-direction:column;min-width:0"><strong style="font-size:14px">${c}</strong><span class="meta truncate-1">${t}</span></span></div>`).join("")}</div></section></div></div>`;
+}
+function homePhone(orgName, me, extra = "") {
+  const h = HOME[orgName];
+  return `<div class="page">${extra}<div><p class="greet-date">Sunday 19 October</p><p class="greet">Good morning, ${me.name}</p></div>${stats(orgName)}<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Roadmap: now</h2><a>Full roadmap</a></div>${projectCard(h.projects[0] || ["", "", 0, "", "", []])}</section></div>`;
+}
+const tabbar = (active = "Home") => `<nav class="tabbar">${[["house", "Home"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["ellipsis", "More"]].map(([i, l]) => `<a class="tab"${l === active ? ' aria-current="page"' : ""}><span class="tab-icon">${ic(i, 22)}</span>${l}</a>`).join("")}</nav>`;
+function phoneHeader(orgName, me, o = {}) {
+  const title = o.single ? `<h1 class="org-head-static truncate-1">${orgName}</h1>` : `<button type="button" class="org-head" aria-haspopup="dialog"><span class="truncate-1">${orgName}</span>${ic("chevron-down", 18)}</button>`;
+  return `<header class="topbar">${title}<a class="icon-btn" aria-label="Account and settings">${av(me.name, "sm")}</a><a class="icon-btn" aria-label="Notifications">${ic("bell", 22)}</a></header>`;
+}
+const phone = (inner, bar = "") => `<div class="frame-phone"><div class="statusbar ${bar}"><span>9:41</span><span style="font-size:13px">●●● ▮</span></div><div class="phone-body">${inner}</div><span class="home-ind"></span></div>`;
+function sheet(body, title = "Your organisations") {
+  return `<div class="m-scrim"></div><div class="m-sheet" role="dialog" aria-label="${title}"><div class="sheet-handle"></div><div class="sheet-head"><h2>${title}</h2><button class="icon-btn" aria-label="Close">${ic("x", 20)}</button></div><div class="sheet-body" role="menu" aria-label="${title}">${body}</div></div>`;
+}
+const toast = (msg, cls = "") => `<div class="toast-region" role="status"><div class="toast ${cls}">${msg}</div></div>`;
+
+/* The stale-tab notice. */
+function notice(o = {}) {
+  let extra = "";
+  if (o.draft) {
+    extra = `<div class="draft"><div class="draft-head">${ic(o.draft.icon || "list-todo", 15)}<span style="flex:1">${o.draft.head}</span></div>${o.draft.fields.map(([l, v]) => `<div class="draft-field"><span class="field-label">${l}</span><p>${v}</p></div>`).join("")}</div>`;
+  }
+  if (o.file) {
+    extra = `<div class="draft"><div class="draft-head">${ic("upload", 15)}<span>Upload to Documents › Clients</span></div><div class="file-line">${ic("paperclip", 18)}<span class="truncate-1" style="flex:1">${o.file}</span><span class="meta">4.2 MB</span></div></div>`;
+  }
+  const why = o.why || "You switched organisation in another tab, and every tab follows.";
+  const lost = o.draft ? `<p class="meta" style="font-size:14px">What you were typing wasn't saved. Here it is, so you can copy it.</p>` : o.file ? `<p class="meta" style="font-size:14px">The upload didn't go through. Switch back and upload it again.</p>` : "";
+  const copy = o.draft ? `<button class="btn btn-secondary btn-tall">${ic("copy", 16)}Copy text</button>` : "";
+  return `<div class="notice" role="status"><span class="notice-icon">${ic("rotate-ccw", 18)}</span><div class="notice-body"><p class="notice-title">This tab was showing Acme Studio. You're now in Northwind Bakery.</p><p class="meta" style="font-size:14px">${why}</p>${lost}${extra}<div class="notice-actions">${copy}<button class="btn btn-secondary btn-tall">Back to Acme Studio</button></div></div><button class="icon-btn" aria-label="Dismiss">${ic("x", 20)}</button></div>`;
+}
+
+/* ---------- 1. Desktop ---------- */
+putDesk("d-open", () => `<div class="frame-desk">${sidebar(ACME, { open: true, chat: 3, menu: menu(PRIYA_ORGS, { current: "Acme Studio", focus: "Northwind Bakery" }) })}<div class="d-main">${homeDesk("Acme Studio", PRIYA)}</div></div>`);
+
+const specs = [
+  ["One org: exactly as today", orgButton(ACME, { single: true })],
+  ["Two or more: closed", orgButton(ACME)],
+  ["Hover", orgButton(ACME, { hover: true })],
+  ["Keyboard focus", orgButton(ACME, { kbd: true })],
+  ["Long name truncates", orgButton({ name: "Riverside Community Climbing Club and Café" })],
+  ["Open", `<div style="position:relative;height:262px">${orgButton(ACME, { open: true })}${menu(PRIYA_ORGS, { current: "Acme Studio", style: "top:52px;left:0" })}</div>`],
+  ["Switching", `<div style="position:relative;height:262px">${orgButton(ACME, { open: true })}${menu(PRIYA_ORGS, { current: "Acme Studio", loading: "Northwind Bakery", style: "top:52px;left:0" })}</div>`],
+];
+document.getElementById("spec-desk").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}" style="display:flex;flex-wrap:wrap;gap:16px;max-width:560px;align-items:flex-start">${specs.map(([l, h]) => `<div class="specimen"${l === "Open" || l === "Switching" ? ' style="width:340px"' : ""}><p class="spec-label">${l}</p>${h}</div>`).join("")}</div>`).join("");
+
+/* Live, keyboard-driven demo. */
+function liveHTML() {
+  return `<div class="live"><button type="button" class="org-switch" aria-haspopup="menu" aria-expanded="false" aria-controls="m">${logo(ACME)}<span class="org-btn-text"><strong class="truncate-1" data-name>Acme Studio</strong></span>${ic("chevrons-up-down", 16, "chev")}</button>${[["house", "Home"], ["bell", "Notifications"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["map", "Roadmap"]].map(([i, l]) => `<a href="#live" class="side-link"${l === "Home" ? ' aria-current="page"' : ""}>${ic(i, 20)}${l}</a>`).join("")}<div data-menu-slot></div><div data-toast-slot></div></div>`;
+}
+document.getElementById("live").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}">${liveHTML()}</div>`).join("");
+document.getElementById("live").classList.add("pair");
+document.querySelectorAll(".live").forEach((root) => {
+  let current = "Acme Studio";
+  const btn = root.querySelector(".org-switch");
+  const slot = root.querySelector("[data-menu-slot]");
+  const items = () => [...slot.querySelectorAll("[role^=menuitem]")];
+  const isOpen = () => btn.getAttribute("aria-expanded") === "true";
+  function render(loading) {
+    slot.innerHTML = menu(PRIYA_ORGS, { current, loading });
+    items().forEach((el) => el.addEventListener("click", () => pick(el)));
+    slot.querySelector("[role=menu]").addEventListener("keydown", onKey);
+  }
+  function open(which = "current") {
+    btn.setAttribute("aria-expanded", "true");
+    render();
+    const list = items();
+    const target = which === "last" ? list[list.length - 1] : list.find((el) => el.getAttribute("aria-checked") === "true") || list[0];
+    target.focus();
+  }
+  function close(focusBtn = true) {
+    btn.setAttribute("aria-expanded", "false");
+    slot.innerHTML = "";
+    if (focusBtn) btn.focus();
+  }
+  function pick(el) {
+    if (el.getAttribute("aria-disabled") === "true") return;
+    const name = el.dataset.org;
+    if (name === current) return close();
+    render(name);
+    setTimeout(() => {
+      current = name;
+      root.querySelector("[data-name]").textContent = name;
+      root.querySelector(".org-switch .logo").textContent = name[0];
+      close();
+      const ts = root.querySelector("[data-toast-slot]");
+      ts.innerHTML = toast(`You're now in ${name}`);
+      setTimeout(() => (ts.innerHTML = ""), 3500);
+    }, 900);
+  }
+  function onKey(e) {
+    const list = items();
+    const i = list.indexOf(document.activeElement);
+    const go = (n) => { e.preventDefault(); list[(n + list.length) % list.length].focus(); };
+    if (e.key === "ArrowDown") go(i + 1);
+    else if (e.key === "ArrowUp") go(i - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(list.length - 1);
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key === "Tab") close(false);
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(list[i]); }
+    else if (e.key.length === 1 && /\S/.test(e.key)) {
+      const k = e.key.toLowerCase();
+      for (let s = 1; s <= list.length; s++) {
+        const el = list[(i + s) % list.length];
+        if (el.textContent.trim().toLowerCase().startsWith(k)) { el.focus(); break; }
+      }
+    }
+  }
+  btn.addEventListener("click", () => (isOpen() ? close() : open()));
+  btn.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); open(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); open("last"); }
+  });
+  document.addEventListener("click", (e) => { if (isOpen() && !root.contains(e.target)) close(false); });
+});
+
+/* ---------- 2. Phone ---------- */
+put("p-home", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar()));
+put("p-sheet", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar() + sheet(orgList(PRIYA_ORGS, { current: "Acme Studio", big: true }))));
+put("p-loading", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar() + sheet(orgList(PRIYA_ORGS, { current: "Acme Studio", loading: "Northwind Bakery", big: true }))));
+function morePage(org, me) {
+  const row = (i, l, end = ic("chevron-right", 18, "") ) => `<div class="list-row">${ic(i, 20)}<span style="flex:1;font-size:16px">${l}</span><span style="color:var(--muted);display:inline-grid">${end}</span></div>`;
+  return `<header class="topbar"><h1>More</h1><a class="icon-btn">${ic("bell", 22)}</a></header><div class="page">
+    <div class="card" style="display:flex;align-items:center;gap:12px;padding:14px">${av(me.name, "lg")}<div style="flex:1;min-width:0"><p style="font-size:17px;font-weight:600">${me.name}</p><p class="meta">${org.role} · ${org.name}</p></div></div>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Organisation</h2><div class="list"><button type="button" class="list-row" style="width:100%;border:0;background:none;text-align:left;color:inherit;min-height:60px" aria-haspopup="dialog">${logo(org, "logo-lg")}<span style="flex:1;min-width:0;display:flex;flex-direction:column"><span class="truncate-1" style="font-size:16px;font-weight:600">${org.name}</span><span class="meta">${org.role}</span></span><span style="color:var(--link);font-weight:600;font-size:15px">Switch</span><span style="color:var(--muted);display:inline-grid">${ic("chevron-right", 18)}</span></button></div></section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Workspace</h2><div class="list">${row("map", "Roadmap")}${row("meetings", "Meetings")}${row("folder", "Documents")}${row("users", "Members")}</div></section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Account</h2><div class="list">${row("sun-moon", "Appearance", '<span class="meta">System</span>')}${row("plug", "Connect Claude")}</div></section>
+  </div>`;
+}
+put("p-more", phone(morePage(ACME, PRIYA) + tabbar("More")));
+
+/* ---------- 3. After a switch ---------- */
+put("p-after", phone(phoneHeader("Northwind Bakery", PRIYA) + homePhone("Northwind Bakery", PRIYA) + tabbar() + toast("You're now in Northwind Bakery")));
+putDesk("d-after", () => `<div class="frame-desk">${sidebar(NORTH, { chat: 5 })}<div class="d-main">${homeDesk("Northwind Bakery", PRIYA)}</div>${toast("You're now in Northwind Bakery")}</div>`);
+
+/* ---------- 4. Stale tab ---------- */
+const TASK_DRAFT = { head: "New task in Acme Studio", fields: [["Title", "Send Lumen Café the logo proofs"], ["Description", "Three options, as PDF and PNG. Ask Jo for feedback by Friday so we can lock the palette."]] };
+putDesk("d-stale-draft", () => `<div class="frame-desk">${sidebar(NORTH, { chat: 5 })}<div class="d-main">${homeDesk("Northwind Bakery", PRIYA, notice({ draft: TASK_DRAFT }))}</div></div>`);
+function chatBefore() {
+  const msgs = [["maya", "New colour swatches are in Documents"], ["sam", "Client review is at 2pm tomorrow"]];
+  return `<div style="display:flex;align-items:center;gap:4px;min-height:56px;padding:0 8px 0 4px;background:var(--surface);border-bottom:1px solid var(--line)"><span class="icon-btn">${ic("chevron-left", 22)}</span><span style="display:flex;flex-direction:column;flex:1"><strong style="font-size:17px">#design</strong><span class="meta">Acme Studio · 6 members</span></span></div>
+  <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:10px;padding:12px">${msgs.map(([n, t]) => `<div style="display:flex;gap:8px;align-items:flex-end">${av(n)}<div><p class="meta" style="margin:0 0 2px 12px;font-size:12px;font-weight:600">${n}</p><div style="padding:7px 12px;border:1px solid var(--line);border-radius:18px 18px 18px 6px;background:var(--surface)">${t}</div></div></div>`).join("")}</div>
+  <div style="display:flex;align-items:flex-end;gap:8px;padding:8px 12px 30px;background:var(--surface);border-top:1px solid var(--line)"><div class="input focus" style="border-radius:22px;background:var(--bg)">Can we push the client review to 3pm? Jo is stuck on a train</div><span class="btn btn-primary" style="width:44px;height:44px;padding:0">${ic("send", 18)}</span></div>`;
+}
+put("p-stale-before", phone(chatBefore(), "surface"));
+const CHAT_DRAFT = { head: "Message to #design in Acme Studio", icon: "message-circle", fields: [["Message", "Can we push the client review to 3pm? Jo is stuck on a train"]] };
+put("p-stale-draft", phone(phoneHeader("Northwind Bakery", PRIYA) + homePhone("Northwind Bakery", PRIYA, notice({ draft: CHAT_DRAFT })) + tabbar()));
+put("p-stale", phone(phoneHeader("Northwind Bakery", PRIYA) + homePhone("Northwind Bakery", PRIYA, notice()) + tabbar()));
+put("p-stale-upload", phone(phoneHeader("Northwind Bakery", PRIYA) + homePhone("Northwind Bakery", PRIYA, notice({ file: "Lumen Café brand guide v3.pdf" })) + tabbar()));
+
+/* ---------- 5. Super admin ---------- */
+putDesk("d-acting", () => `<div class="frame-desk">${sidebar(ACME, { acting: true, open: true, superAdmin: true, me: RAJ, menu: menu([], { acting: ACME, own: [ZEN], focus: "Zen Scale" }) })}<div class="d-main">${actingBanner("Acme Studio")}${homeDesk("Acme Studio", RAJ)}</div></div>`);
+put("p-acting", phone(actingBanner("Acme Studio") + phoneHeader("Acme Studio", RAJ) + homePhone("Acme Studio", RAJ) + tabbar() + sheet(actingList({ acting: ACME, own: [ZEN], big: true }))));
+document.getElementById("spec-acting").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}" style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+  <div class="specimen"><p class="spec-label">Acting, closed</p>${orgButton(ACME, { acting: true })}</div>
+  <div class="specimen"><p class="spec-label">Acting, no membership of their own</p>${orgButton(ACME, { single: true })}</div>
+  <div class="specimen" style="width:340px"><p class="spec-label">Acting, switching to Zen Scale</p><div style="position:relative;height:300px">${orgButton(ACME, { acting: true, open: true })}${menu([], { acting: ACME, own: [ZEN], loading: "Zen Scale", style: "top:56px;left:0" })}</div></div>
+</div>`).join("");
+
+/* ---------- 6. Roles and states ---------- */
+const DAWA_CUR = "Kathmandu Coffee Co.";
+put("p-many", phone(phoneHeader(DAWA_CUR, DAWA) + homePhone("Northwind Bakery", DAWA) + tabbar() + sheet(orgList(DAWA_ORGS, { current: DAWA_CUR, big: true }))));
+put("p-error", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar() + sheet(orgList(PRIYA_ORGS, { current: "Acme Studio", big: true })) + `<div class="toast-region" role="status" style="z-index:90;bottom:300px"><div class="toast toast-error">Couldn't switch to Northwind Bakery. Check your connection and try again.</div></div>`));
+put("p-single", phone(phoneHeader("Acme Studio", PRIYA, { single: true }) + homePhone("Acme Studio", PRIYA) + tabbar()));
+document.getElementById("spec-many").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}"><div class="specimen" style="width:340px"><div style="position:relative;height:520px">${orgButton({ name: DAWA_CUR })}${menu(DAWA_ORGS, { current: DAWA_CUR, scroll: true, style: "top:52px;left:0" })}</div></div></div>`).join("");
+
+/* ---------- Desktop frames, scaled to fit ---------- */
+function renderDesk() {
+  document.querySelectorAll(".desk-holder").forEach((h) => {
+    const frame = h.firstElementChild;
+    const avail = h.closest(".shot").clientWidth;
+    const w = Math.min(1440, avail || 1440);
+    const z = w / 1440;
+    h.style.width = `${1440 * z}px`;
+    h.style.height = `${900 * z}px`;
+    frame.style.transform = `scale(${z})`;
+  });
+}
+renderDesk();
+addEventListener("resize", renderDesk);
+document.querySelectorAll("[data-mode-set]").forEach((b) => b.addEventListener("click", () => {
+  const m = b.dataset.modeSet;
+  document.body.dataset.mode = m;
+  document.documentElement.dataset.theme = m === "dark" ? "dark" : "light";
+  document.querySelectorAll("[data-mode-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+document.querySelectorAll("[data-view-set]").forEach((b) => b.addEventListener("click", () => {
+  document.body.dataset.view = b.dataset.viewSet;
+  document.querySelectorAll("[data-view-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+</script>
+</body>
+</html>
