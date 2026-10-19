@@ -43,29 +43,51 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
-    /// Every user's membership (if any), for the platform admin.
+    /// Each user's default membership (see [`Self::default_for_user`]), for
+    /// the platform admin.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn all_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
-        Ok(Entity::find()
+    pub async fn default_by_user<C: ConnectionTrait>(db: &C) -> ModelResult<HashMap<i64, Self>> {
+        let mut by_user = HashMap::new();
+        for m in Entity::find()
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
             .all(db)
             .await?
-            .into_iter()
-            .map(|m| (m.user_id, m))
-            .collect())
+        {
+            by_user.entry(m.user_id).or_insert(m);
+        }
+        Ok(by_user)
     }
 
-    /// A user belongs to at most one organisation.
+    /// Every membership of the user, in any status, oldest first.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn find_for_user<C: ConnectionTrait>(
+    pub async fn for_user<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<Vec<Self>> {
+        Ok(Entity::find()
+            .filter(Column::UserId.eq(user_id))
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
+            .all(db)
+            .await?)
+    }
+
+    /// The membership to use when no organisation has been chosen: the
+    /// oldest, in any status. To check access to a given organisation, use
+    /// [`Self::active_in`] with that organisation's id instead.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn default_for_user<C: ConnectionTrait>(
         db: &C,
         user_id: i64,
     ) -> ModelResult<Option<Self>> {
         Ok(Entity::find()
             .filter(Column::UserId.eq(user_id))
+            .order_by_asc(Column::CreatedAt)
+            .order_by_asc(Column::Id)
             .one(db)
             .await?)
     }

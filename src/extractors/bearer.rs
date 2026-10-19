@@ -54,9 +54,9 @@ async fn authenticate(
     else {
         return Ok(None);
     };
-    let Some(membership) = memberships::Model::find_for_user(&ctx.db, row.user_id)
-        .await?
-        .filter(|m| m.is_active() && m.organisation_id == row.organisation_id)
+    // The token is for one organisation: check the membership in that one.
+    let Some(membership) =
+        memberships::Model::active_in(&ctx.db, row.organisation_id, row.user_id).await?
     else {
         return Ok(None);
     };

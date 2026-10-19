@@ -34,7 +34,7 @@ async fn signup_creates_owner_org_and_general_channel() {
         assert_eq!(org.name, "Himalayan Ritual");
         assert_eq!(org.created_by_id, Some(user.id));
 
-        let membership = memberships::Model::find_for_user(&ctx.db, user.id)
+        let membership = memberships::Model::default_for_user(&ctx.db, user.id)
             .await
             .unwrap()
             .unwrap();

@@ -153,7 +153,7 @@ impl FromRequestParts<AppContext> for CurrentMember {
             }
         }
 
-        let membership = memberships::Model::find_for_user(&ctx.db, user.id)
+        let membership = memberships::Model::default_for_user(&ctx.db, user.id)
             .await
             .map_err(|e| Error::from(e).into_response())?;
         let Some(membership) = membership else {

@@ -28,7 +28,7 @@ pub(super) async fn acme_with_bob(
     let bob_user = users::Model::find_by_email(&ctx.db, "bob@example.com")
         .await
         .unwrap();
-    let membership = memberships::Model::find_for_user(&ctx.db, bob_user.id)
+    let membership = memberships::Model::default_for_user(&ctx.db, bob_user.id)
         .await
         .unwrap()
         .unwrap();
@@ -435,7 +435,7 @@ async fn legacy_chat_links_redirect() {
 
 pub(super) async fn approve(ctx: &AppContext, email: &str) -> users::Model {
     let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
-    let membership = memberships::Model::find_for_user(&ctx.db, user.id)
+    let membership = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .unwrap()
         .unwrap();

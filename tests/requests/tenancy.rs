@@ -43,7 +43,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
     let hank = users::Model::find_by_email(&ctx.db, "hank@example.com")
         .await
         .unwrap();
-    let pending = memberships::Model::find_for_user(&ctx.db, hank.id)
+    let pending = memberships::Model::default_for_user(&ctx.db, hank.id)
         .await
         .unwrap()
         .unwrap();
@@ -353,7 +353,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
         let ivy = users::Model::find_by_email(&ctx.db, "ivy@example.com")
             .await
             .unwrap();
-        let ivy_m = memberships::Model::find_for_user(&ctx.db, ivy.id)
+        let ivy_m = memberships::Model::default_for_user(&ctx.db, ivy.id)
             .await
             .unwrap()
             .unwrap();

@@ -29,7 +29,7 @@ async fn index(
     let orgs = organisations::Model::admin_overview(&ctx.db).await?;
     let names: std::collections::HashMap<i64, String> =
         orgs.iter().map(|o| (o.id, o.name.clone())).collect();
-    let memberships = memberships::Model::all_by_user(&ctx.db).await?;
+    let memberships = memberships::Model::default_by_user(&ctx.db).await?;
     let people: Vec<serde_json::Value> = users::Model::all_newest_first(&ctx.db)
         .await?
         .into_iter()

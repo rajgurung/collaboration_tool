@@ -147,10 +147,8 @@ async fn sign_out_everywhere(
     client: Client,
 ) -> Result<Response> {
     users::Model::bump_session_version(&ctx, user.id).await?;
-    if let Some(membership) = memberships::Model::find_for_user(&ctx.db, user.id)
-        .await?
-        .filter(memberships::Model::is_active)
-    {
+    let memberships = memberships::Model::for_user(&ctx.db, user.id).await?;
+    for membership in memberships.iter().filter(|m| m.is_active()) {
         login_events::Model::record(
             &ctx.db,
             &client,
@@ -259,17 +257,15 @@ async fn tell_about_reset(ctx: &AppContext, user: &users::Model) {
     }
 }
 
+/// Checked in every organisation the person is an approved member of.
 async fn tell_owners_about_reset(ctx: &AppContext, user: &users::Model) -> Result<()> {
-    let Some(membership) = memberships::Model::find_for_user(&ctx.db, user.id)
-        .await?
-        .filter(memberships::Model::is_active)
-    else {
-        return Ok(());
-    };
-    let org_id = membership.organisation_id;
-    if logins::Model::any_visible_to(&ctx.db, org_id, user.id, &membership.role).await? {
-        let org = organisations::Model::find_by_id(&ctx.db, org_id).await?;
-        SecurityMailer::member_password_changed(ctx, &org, user, &membership.username).await?;
+    let memberships = memberships::Model::for_user(&ctx.db, user.id).await?;
+    for membership in memberships.iter().filter(|m| m.is_active()) {
+        let org_id = membership.organisation_id;
+        if logins::Model::any_visible_to(&ctx.db, org_id, user.id, &membership.role).await? {
+            let org = organisations::Model::find_by_id(&ctx.db, org_id).await?;
+            SecurityMailer::member_password_changed(ctx, &org, user, &membership.username).await?;
+        }
     }
     Ok(())
 }
