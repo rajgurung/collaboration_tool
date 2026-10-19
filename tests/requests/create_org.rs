@@ -852,3 +852,60 @@ async fn the_page_form_keeps_its_page_buttons_after_a_422() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn an_old_org_link_is_an_app_404_naming_only_the_current_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = alice(&request).await;
+        let project = super::tasks::project_in(&ctx, "acme-studio", "Studio website").await;
+        request
+            .post("/tasks")
+            .as_member(&alice)
+            .form(&super::tasks::task_form("Send the logo proofs", project.id, ""))
+            .await;
+        let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
+        let lumen = lumen(&request, &alice).await;
+        let path = format!("/tasks/{}", task.id);
+        let res = request
+            .get(&path)
+            .add_header(lumen.0.clone(), lumen.1.clone())
+            .add_header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+            .await;
+        assert_eq!(res.status_code(), 404);
+        let page = res.text();
+        assert!(page.contains("<html"), "a page");
+        assert!(page.contains("We couldn't find that in Lumen Café"), "{page}");
+        assert!(page.contains("It may be in another of your organisations. Switch from the menu, then open the link again."));
+        assert!(page.contains(r#"href="/dashboard" class="btn btn-primary btn-tall mt-2">Go to Home</a>"#));
+        assert!(!page.contains("Acme Studio"), "never names another org");
+        assert_eq!(page_org_id(&page), Some(lumen.org_id));
+
+        // HTMX and API 404s are left alone.
+        let res = request
+            .get(&path)
+            .add_header(lumen.0.clone(), lumen.1.clone())
+            .add_header("Accept", "text/html")
+            .add_header("HX-Request", "true")
+            .add_header("x-org-id", lumen.org_id.to_string())
+            .await;
+        assert_eq!(res.status_code(), 404);
+        assert!(!res.text().contains("<html"));
+        let res = request
+            .get(&path)
+            .add_header(lumen.0.clone(), lumen.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 404);
+        assert!(!res.text().contains("<html"), "no Accept: text/html");
+
+        // Signed out: the plain page, no org at all.
+        let res = request
+            .get("/no-such-page")
+            .add_header("Accept", "text/html")
+            .await;
+        assert_eq!(res.status_code(), 404);
+        assert!(res.text().contains("We couldn't find that"));
+        assert!(!res.text().contains("Acme Studio") && !res.text().contains("Lumen"));
+    })
+    .await;
+}

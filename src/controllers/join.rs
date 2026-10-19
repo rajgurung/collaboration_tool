@@ -82,7 +82,7 @@ fn render_form(
 fn not_found_page(v: &TeraView) -> Result<Response> {
     format::render()
         .status(404)
-        .view(v, "errors/not_found.html", data!({}))
+        .view(v, "errors/not_found_public.html", data!({}))
 }
 
 pub fn routes() -> Routes {
