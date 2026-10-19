@@ -176,16 +176,17 @@ fn has_switcher(page: &str) -> bool {
 
 #[tokio::test]
 #[serial]
-async fn one_org_shows_a_plain_name() {
+async fn one_org_shows_the_switcher() {
     request::<App, _, _>(|request, _ctx| async move {
         let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let home = get(&request, &alice, "/dashboard").await.text();
-        assert!(!has_switcher(&home));
-        assert!(!home.contains("data-org-sheet"));
-        assert!(home.contains(r#"<h1 class="text-[17px]! min-[900px]:hidden">Acme</h1>"#));
+        assert!(has_switcher(&home), "the menu, for New organisation");
+        assert!(home.contains("data-org-sheet"), "the phone header");
+        assert!(home.contains(r#"id="org-sheet""#));
         let more = get(&request, &alice, "/more").await.text();
-        assert!(!more.contains("data-org-sheet"), "no Organisation row");
-        assert!(!more.contains(r#"id="org-sheet""#));
+        assert!(more.contains(r#"<h2 class="section-label">Organisation</h2>"#));
+        assert!(!more.contains(">Switch<"), "nothing to switch to");
+        assert!(!more.contains("data-org-sheet"));
     })
     .await;
 }

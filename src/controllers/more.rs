@@ -16,6 +16,10 @@ async fn index(
     ViewEngine(v): ViewEngine<TeraView>,
     Query(query): Query<MoreQuery>,
 ) -> Result<Response> {
+    // "Switch" needs somewhere to switch to. While acting the acting org is
+    // one, so any org of their own counts.
+    let (active, pending) = memberships::Model::switcher_counts(&ctx.db, member.user.id).await?;
+    let can_switch = active + pending >= if member.acting { 1 } else { 2 };
     let waiting = if member.can_manage() {
         memberships::Model::list_for_org(&ctx.db, member.org.id)
             .await?
@@ -32,6 +36,7 @@ async fn index(
             "more",
             data!({
                 "waiting": waiting,
+                "can_switch": can_switch,
                 "flash": query.signed_out.map(|_| data!({
                     "kind": "success",
                     "message": "Signed out on every other device.",
