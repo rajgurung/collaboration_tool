@@ -106,20 +106,48 @@ function hasUnsavedWork(): boolean {
 let staleHome = "";
 function goHomeOrHold(home: string): boolean {
   staleHome = home;
-  if (!document.querySelector("[data-stale-banner]") && !hasUnsavedWork()) {
+  const shown = visibleBanner();
+  if (shown) {
+    // Already up: show it again rather than adding a second one.
+    shown.scrollIntoView({ block: "nearest" });
+    shown.classList.remove("flash");
+    void shown.offsetWidth;
+    shown.classList.add("flash");
+    window.setTimeout(() => shown.classList.remove("flash"), 1200);
+    return true;
+  }
+  if (!hasUnsavedWork()) {
     window.location.href = home;
     return false;
   }
-  if (document.querySelector("[data-stale-banner]")) return true;
   const banner = document.querySelector<HTMLTemplateElement>("#stale-banner-template")?.content.firstElementChild?.cloneNode(true);
   if (!(banner instanceof HTMLElement)) {
     window.location.href = home;
     return false;
   }
-  // Inside an open sheet, so it shows above it; otherwise at the top of the page.
-  const host = document.querySelector("dialog[open] .sheet-body") ?? document.querySelector("main.page") ?? document.body;
-  host.prepend(banner);
+  placeBanner(banner);
   return true;
+}
+
+// The banner, if one is on screen. One left in a closed sheet can't be seen,
+// so it goes, and the tab is judged again.
+function visibleBanner(): HTMLElement | null {
+  const banner = document.querySelector<HTMLElement>("[data-stale-banner]");
+  if (banner && banner.getClientRects().length === 0) {
+    banner.remove();
+    return null;
+  }
+  return banner;
+}
+
+// Inside an open sheet, so it shows above it; in chat, under the header, so
+// the composer stays on screen; otherwise at the top of the page.
+function placeBanner(banner: HTMLElement) {
+  const sheet = document.querySelector("dialog[open] .sheet-body");
+  const chatHead = document.querySelector(".chat-screen > .chat-head");
+  if (sheet) sheet.prepend(banner);
+  else if (chatHead) chatHead.after(banner);
+  else (document.querySelector("main.page") ?? document.querySelector(".chat-list-pane") ?? document.body).prepend(banner);
 }
 
 // For raw fetch calls: true when the response was a stale-tab refusal, which
@@ -1315,7 +1343,7 @@ function queueUpload(file: File) {
 async function startNextUpload() {
   const form = uploadForm();
   const input = form?.querySelector<HTMLInputElement>("input[type=file]");
-  if (currentUpload || !form || !input || document.querySelector("[data-stale-banner]")) return;
+  if (currentUpload || !form || !input || visibleBanner()) return;
   const next = uploadQueue.shift();
   if (!next) return;
   try {
@@ -1701,7 +1729,9 @@ document.addEventListener("submit", (event) => {
   // Copy has to begin inside this tap, so it waits on the unlock itself.
   if (ask.kind === "copy") copySecret(ask, unlocking);
   void unlocking.then(async (res) => {
-    if (staleRefusal(res)) return dialog.close();
+    // Closed first, so the banner (if any) isn't left inside a hidden sheet.
+    if (res.status === 409) dialog.close();
+    if (staleRefusal(res)) return;
     if (res.ok && !res.redirected) {
       pendingSecret = null;
       dialog.close();
