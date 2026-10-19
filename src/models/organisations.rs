@@ -143,7 +143,8 @@ impl Model {
             },
         )
         .await?;
-        let org = Self::create_with_owner(&txn, &params.organisation_name, &user).await?;
+        let org =
+            Self::create_with_owner(&txn, &params.organisation_name, &user, &user.name).await?;
         txn.commit().await?;
         Ok((user, org))
     }
@@ -158,6 +159,7 @@ impl Model {
         db: &C,
         name: &str,
         owner: &users::Model,
+        username: &str,
     ) -> ModelResult<Self> {
         let name = name.trim().to_string();
         let org = ActiveModel {
@@ -168,7 +170,7 @@ impl Model {
         }
         .insert(db)
         .await?;
-        memberships::Model::create_owner(db, &org, owner).await?;
+        memberships::Model::create_owner(db, &org, owner, username).await?;
         conversations::Model::create_general(db, &org, owner).await?;
         folders::Model::create_starters(db, org.id, owner.id).await?;
         Ok(org)

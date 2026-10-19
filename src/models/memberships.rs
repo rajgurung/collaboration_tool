@@ -167,16 +167,19 @@ impl Model {
             .await?)
     }
 
+    /// Makes `user` the active owner of `org`, known there as `username`.
+    ///
     /// # Errors
     /// On database errors.
     pub async fn create_owner<C: ConnectionTrait>(
         db: &C,
         org: &organisations::Model,
         user: &users::Model,
+        username: &str,
     ) -> ModelResult<Self> {
         Ok(ActiveModel {
             user_id: ActiveValue::Set(user.id),
-            username: ActiveValue::Set(user.name.clone()),
+            username: ActiveValue::Set(username.to_string()),
             role: ActiveValue::Set(role::OWNER.to_string()),
             status: ActiveValue::Set(status::ACTIVE.to_string()),
             approved_at: ActiveValue::Set(Some(chrono::Utc::now().into())),

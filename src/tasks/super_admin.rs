@@ -55,7 +55,12 @@ impl Task for SuperAdmin {
                     .name
             }
             None => {
-                organisations::Model::create_with_owner(&txn, &config.organisation, &user)
+                organisations::Model::create_with_owner(
+                    &txn,
+                    &config.organisation,
+                    &user,
+                    &user.name,
+                )
                     .await?
                     .name
             }
