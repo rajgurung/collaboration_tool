@@ -1257,3 +1257,68 @@ async fn locking_revokes_claude_tokens_in_every_org() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn a_creator_resetting_their_password_gets_no_owner_notice_from_their_own_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        // carol becomes a second owner of Acme, so Acme has someone to tell.
+        let carol_id = user_id(&ctx, "carol@example.com").await;
+        let mut carol = memberships::Model::active_in(&ctx.db, acme.org.id, carol_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        carol.role = ActiveValue::Set(memberships::role::OWNER.to_string());
+        carol.update(&ctx.db).await.unwrap();
+        add(&request, &acme.alice, acme.folder.id, &[]).await;
+
+        let res = request
+            .post("/orgs")
+            .as_member(&acme.alice)
+            .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let lumen = organisations::Model::find_by_slug(&ctx.db, "lumen-caf")
+            .await
+            .unwrap();
+        let lumen_logins = folders::Model::list_for_org(&ctx.db, lumen.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|s| s.folder.name == "Logins")
+            .unwrap()
+            .folder;
+        let in_lumen = super::multi_org::with_org(&acme.alice, lumen.id);
+        assert_eq!(
+            add(&request, &in_lumen, lumen_logins.id, &[]).await.status_code(),
+            303
+        );
+
+        let before = deliveries(&ctx).len();
+        request
+            .post("/forgot")
+            .form(&serde_json::json!({ "email": "alice@example.com" }))
+            .await;
+        let token = users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap()
+            .reset_token
+            .unwrap();
+        let res = request
+            .post(&format!("/reset/{token}"))
+            .form(&serde_json::json!({ "password": "new-password-1", "password_confirmation": "new-password-1" }))
+            .await;
+        assert_eq!(res.status_code(), 303);
+        let notices: Vec<String> = deliveries(&ctx)[before..]
+            .iter()
+            .filter(|m| m.contains("alice's password was changed"))
+            .cloned()
+            .collect();
+        assert_eq!(notices.len(), 1, "Acme's other owner only");
+        assert!(notices[0].contains("To: carol@example.com"));
+        assert!(!notices.iter().any(|m| m.contains("To: alice@example.com")));
+    })
+    .await;
+}
