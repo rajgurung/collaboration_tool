@@ -437,6 +437,9 @@ stored.
 >   write for anyone with two orgs. Redeploying any Railway image older than
 >   `44db5ab` is the same as reverting PR 3.
 >
+> Reverting PR 4 itself brings back the one-org-only token revoke on an
+> account lock.
+>
 > PR 2 and PR 3 are forward-only from here.
 
 The PR 2 duplicate-row query is not needed. The live unique index
@@ -448,8 +451,13 @@ What people see once they have two orgs:
 
 - A mention email's item link (`/tasks/5`, `/chat/12`), opened while the
   browser is in the other org, gives a 404. They switch from the menu and
-  open the link again. Which 404 page they get is unverified. Check it by
-  hand and screenshot it for the PR.
+  open the link again. Done in this PR, not deferred to PR 7: checked by
+  hand, it was Loco's raw JSON body, so a page load's 404 is now an app
+  page (`src/app.rs`, `not_found_page`): "We couldn't find that in
+  {current org}. It may be in another of your organisations. Switch from
+  the menu, then open the link again." with "Go to Home". It names only the
+  current org and never looks up where the item is. HTMX and API 404s are
+  unchanged.
 - The mention email's "all notifications" link (`/notifications`) opens the
   browser's current org, not the email's, without saying so.
 - A security email's "Login activity" link (`/documents/activity`) also opens
@@ -671,7 +679,8 @@ the upload probe after a 502, and the gate 3 and 4 checks.
 - "Create your own organisation" on the waiting, declined and removed pages;
 - the `/admin` people table listing every membership;
 - transferring ownership;
-- unread dots per org in the switcher.
+- unread dots per org in the switcher;
+- password reset revokes Claude tokens (follow-up before PR 6).
 
 ## Risks
 
