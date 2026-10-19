@@ -775,6 +775,66 @@
   .mention-menu li[aria-selected="true"], .mention-menu li:hover { background: var(--chip); }
   .msg-own .mention { color: inherit; background: color-mix(in srgb, var(--own-text) 10%, transparent); }
 
+  /* Organisation switcher (docs/designs/org-switcher.html): the sidebar button and menu, the phone sheet and header, and the stale-tab notice. */
+  .org-switch { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; margin-bottom: 16px; padding: 0 8px; box-sizing: border-box; border-radius: 10px; color: var(--text); }
+  .org-switch:hover { background: var(--chip); }
+  .org-switch[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
+  .org-btn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+  .org-btn-text strong { font-size: 15px; }
+  .org-btn-text .sub { display: inline-flex; align-items: center; gap: 4px; margin-top: 1px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .org-switch .chev { flex-shrink: 0; color: var(--muted); }
+  .org-menu { position: absolute; top: 64px; left: 12px; z-index: 50; width: 300px; padding: 6px; box-sizing: border-box; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lift); }
+  .org-menu[hidden] { display: none; }
+  .org-menu-label { padding: 8px 10px 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .org-menu .org-scroll { max-height: 404px; overflow-y: auto; }
+  .org-logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+  .org-logo-lg { width: 36px; height: 36px; border-radius: 11px; font-size: 15px; }
+  .org-logo-wait { background: var(--chip); color: var(--muted); box-shadow: none; }
+  .org-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 10px; box-sizing: border-box; border: 0; border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .org-row:hover:not([aria-disabled="true"]) { background: var(--chip); }
+  .org-row:focus-visible { outline: none; background: var(--chip); box-shadow: inset 0 0 0 2px var(--accent); }
+  .org-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+  .org-name { font-size: 15px; font-weight: 600; }
+  .org-row[aria-checked="true"] .org-name { font-weight: 700; }
+  .org-row .meta { display: inline-flex; align-items: center; gap: 4px; }
+  .org-row .tick { flex-shrink: 0; color: var(--link); }
+  .org-row[aria-disabled="true"] { cursor: default; }
+  .org-row[aria-disabled="true"] .org-name { color: var(--muted); font-weight: 500; }
+  .org-spinner { display: none; }
+  .org-row.loading .org-spinner { display: inline-grid; }
+  .org-row.loading .meta { color: var(--text); }
+  .org-row.dim { opacity: 0.55; pointer-events: none; }
+  .org-sep { height: 1px; margin: 6px 4px; background: var(--line-soft); }
+  .org-note { margin: 4px 10px 6px; font-size: 12.5px; color: var(--muted); }
+  .org-sheet-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 20px; }
+  .org-sheet-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 700; }
+  .org-sheet .sheet-body { padding: 0 12px 34px; }
+  .org-sheet .org-row { min-height: 60px; padding: 8px 10px; gap: 14px; }
+  .org-sheet .org-name { font-size: 16px; }
+  .org-sheet .org-logo { width: 36px; height: 36px; border-radius: 11px; font-size: 15px; }
+  .org-sheet .org-menu-only { display: none; }
+  .org-head { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; min-height: 44px; margin-left: -8px; padding: 0 8px; box-sizing: border-box; border-radius: 10px; color: var(--text); }
+  .org-head span { min-width: 0; }
+  .org-head svg { flex-shrink: 0; color: var(--muted); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 0.9s linear infinite; }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+  @media (min-width: 900px) {
+    /* Above the sticky top bar, so the menu can overlap the page. */
+    .sidebar { z-index: 31; }
+    .org-sheet-head { padding: 12px 12px 4px 24px; }
+    .org-sheet .sheet-body { padding: 0 12px 16px; }
+  }
+  .notice { display: flex; align-items: flex-start; gap: 12px; padding: 14px 4px 14px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+  @media (min-width: 900px) { .notice { max-width: 760px; } }
+  .notice-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 999px; background: var(--active-bg); color: var(--link); }
+  .notice-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 1px; }
+  .notice-title { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.4; }
+  .notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+  .notice > .icon-btn { margin-top: -10px; color: var(--muted); }
+  .btn-tall { min-height: 44px; }
+  .stale-banner { margin-bottom: 16px; padding-right: 14px; }
+
   /* Landing page. Every class is prefixed lp- so it never picks up the app's own .card, .chip, .toast and so on. */
   .landing { --lp-mono: ui-monospace, "SF Mono", Menlo, monospace; font-size: 16px; line-height: 1.6; }
   .landing h1, .landing h2, .landing h3 { text-wrap: balance; }
