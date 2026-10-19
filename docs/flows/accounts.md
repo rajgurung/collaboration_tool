@@ -194,8 +194,11 @@ left on the old org must not write into the new one.
   in place, keeps the text, and offers "Back to Acme Studio" (which switches
   the browser back without leaving the page) and "Go to Home".
 - `app.ts` also asks `GET /orgs/current` when the chat socket closes, when
-  the notification stream comes back, on a back-forward cache restore and
-  before each upload, so a stale tab moves within seconds.
+  the notification stream comes back, on a back or forward load and before
+  each upload, so a stale tab moves within seconds.
+- The check runs when a request starts. An upload already in flight when a
+  switch happens finishes into the org the page showed. The person is still
+  a member there, so it is not a cross-org write.
 
 The Claude Allow page and the token form keep their own `org_id` pin and
 skip this check (`PinnedMember`), so they can answer better than the generic
