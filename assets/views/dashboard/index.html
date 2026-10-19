@@ -1,11 +1,28 @@
 {% extends "layouts/app.html" %}
 {% block title %}Home · {{ org.name }}{% endblock title %}
 {% block topbar %}
+{% if org_menu %}
+<h1 class="text-[17px]! min-[900px]:hidden"><a href="/orgs" class="org-head" role="button" aria-haspopup="dialog" data-org-sheet><span class="truncate-1">{{ org.name }}</span>{{<icon name="chevron-down" class="h-[18px] w-[18px]"/>}}</a></h1>
+{% else %}
 <h1 class="text-[17px]! min-[900px]:hidden">{{ org.name }}</h1>
+{% endif %}
 <a href="/more" class="icon-btn min-[900px]:hidden" aria-label="Account and settings">{{<avatar name={me.username} color={me.color} size="sm"/>}}</a>
 {% endblock topbar %}
 {% block content %}
 <div class="flex flex-col gap-6">
+  {% if stale %}
+  {# After a stale tab was sent here. Names the old org only if you are in it. #}
+  <div class="notice" role="status" data-stale-notice>
+    <span class="notice-icon">{{<icon name="rotate-ccw" class="h-[18px] w-[18px]"/>}}</span>
+    <div class="notice-body">
+      <p class="notice-title">This tab was showing {% if stale.name %}{{ stale.name }}{% else %}another organisation{% endif %}. You're now in {{ org.name }}.</p>
+      <p class="meta m-0 text-[14px]">You switched organisation in another tab, and every tab follows. Nothing was saved.</p>
+      {% if stale.id %}<form method="post" action="/orgs/{{ stale.id }}/switch" class="notice-actions"><button type="submit" class="btn btn-secondary btn-tall">Back to {{ stale.name }}</button></form>{% endif %}
+    </div>
+    <button type="button" class="icon-btn" aria-label="Dismiss" data-dismiss-notice>{{<icon name="x" class="h-5 w-5"/>}}</button>
+  </div>
+  {% endif %}
+
   <div class="flex flex-wrap items-end gap-3">
     <div class="flex-1">
       <p class="meta m-0 mb-1 text-[14px]">{{ today }}</p>
