@@ -135,8 +135,9 @@ Rules:
   admin, and for a login in another organisation. Otherwise owners and admins
   can, and so can members named on the login (`src/models/logins.rs:446`).
 - The unlock lasts 5 minutes and is tied to the sign-in id in the session
-  cookie, so unlocking on one device does not unlock another
-  (`src/models/users.rs:410`).
+  cookie, so unlocking on one device does not unlock another. It is also tied
+  to the organisation it happened in, so it never counts in another one, and
+  switching organisation ends it (`src/models/users.rs:411`).
 - 5 wrong app passwords lock the account until a password reset
   (`src/models/auth_attempts.rs:29`). Too many tries from one IP gives 429
   for 15 minutes instead.
@@ -145,8 +146,8 @@ Rules:
   logged; the activity log already has the event.
 - Signing out everywhere ends the unlock too.
 
-Files: `src/controllers/logins.rs:373` (unlock), `:458` (checks), `:518`
-(reveal), `:549` (copy).
+Files: `src/controllers/logins.rs:376` (unlock), `:461` (checks), `:524`
+(reveal), `:555` (copy).
 
 ## The audit log
 

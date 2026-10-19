@@ -64,7 +64,7 @@ Rules:
   A stray `current_org` is cleared on the way.
 
 The decision happens in `CurrentMember::from_request_parts`
-(`src/extractors/current_member.rs:135`).
+(`src/extractors/current_member.rs:151`).
 
 ## What acting allows and blocks
 
@@ -84,10 +84,10 @@ check `acting` and refuse.
 | Chat | Only conversations they are a member of. They are not added to the organisation's `#general`. |
 
 The blocks come from `CurrentMember::require_own_membership`
-(`src/extractors/current_member.rs:99`) and direct `member.acting` checks in
+(`src/extractors/current_member.rs:116`) and direct `member.acting` checks in
 `src/controllers/members.rs:48`, `src/controllers/tasks.rs:910`,
-`src/controllers/notifications.rs:192`, `src/controllers/claude.rs:90`,
-`src/controllers/oauth.rs:318` and `:356`, and `src/models/logins.rs:451`.
+`src/controllers/notifications.rs:192`, `src/controllers/claude.rs:105`,
+`src/controllers/oauth.rs:324` and `:363`, and `src/models/logins.rs:451`.
 
 Unverified: chat routes have no `acting` check. Creating a group or starting
 a DM while acting is not blocked in the code. Whether the UI offers it was not

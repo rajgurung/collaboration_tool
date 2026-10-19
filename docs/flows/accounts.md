@@ -8,7 +8,7 @@ Background: a session is a 7-day JWT in an `HttpOnly` cookie called
 `session_version` (claim `sv`) and a random sign-in id (claim `sid`).
 `CurrentUser` refuses a token whose version no longer matches
 (`src/models/users.rs`, `is_current_session`). `CurrentMember` then requires an
-`active` membership (`src/extractors/current_member.rs:135`).
+`active` membership (`src/extractors/current_member.rs:151`).
 
 ## Sign up a new organisation
 
@@ -103,7 +103,7 @@ stateDiagram-v2
     removed --> [*]
 ```
 
-What each state sees on any app page (`src/extractors/current_member.rs:174`):
+What each state sees on any app page (`src/extractors/current_member.rs:211`):
 
 | Status | Page | HTTP |
 |---|---|---|
@@ -263,7 +263,7 @@ Rules:
   hit, so the form cannot be used to find accounts.
 - Reset links expire 60 minutes after they are sent and work once
   (`src/models/users.rs:26` and `:235`).
-- A reset is the only way out of a lock (`src/models/users.rs:646`).
+- A reset is the only way out of a lock (`src/models/users.rs:684`).
 - The reset ends every session and closes live connections. It also clears
   failed sign-in and app-password counts for that email.
 - Owners are emailed when the person can see at least one login's password,
@@ -271,7 +271,7 @@ Rules:
   (`src/controllers/auth.rs:250`).
 
 Files: `src/controllers/auth.rs:181` (forgot) and `:222` (reset),
-`src/models/users.rs:535` (`reset_password_everywhere`).
+`src/models/users.rs:573` (`reset_password_everywhere`).
 
 ## Sign out, and sign out everywhere
 
@@ -285,7 +285,7 @@ Files: `src/controllers/auth.rs:181` (forgot) and `:222` (reset),
   on `/more?signed_out=1`. It keeps its `current_org`, so it stays in the
   same organisation. Other browsers' `current_org` cookies do nothing without
   a session, and their next sign-in clears them. A `sign_out_everywhere` row goes into the login
-  activity log (`src/controllers/auth.rs:143`).
+  activity log (`src/controllers/auth.rs:145`).
 
 ```mermaid
 flowchart LR

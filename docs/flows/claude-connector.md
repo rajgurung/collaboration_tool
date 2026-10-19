@@ -43,9 +43,12 @@ Rules:
   loopback `/callback` for Claude Code (`src/models/oauth_clients.rs:19`).
 - The Allow page is never framed or cached. Unknown clients and bad redirect
   URIs get an error page, never a redirect.
-- The Allow form is checked again on POST (`src/controllers/oauth.rs:345`).
+- The Allow form is checked again on POST (`src/controllers/oauth.rs:352`).
+- The Allow form carries the organisation it was shown for. If the browser
+  switched organisation since, Allow is refused and no code is issued. Deny
+  still goes through.
 - A super admin acting inside another organisation sees a "leave first" page
-  instead (`src/controllers/oauth.rs:262`).
+  instead (`src/controllers/oauth.rs:270`).
 - Codes and tokens are stored only as SHA-256 hashes.
 - Refresh tokens rotate on every use. Using a code twice, or a refresh token
   that was already swapped, revokes the whole grant
@@ -58,7 +61,9 @@ Rules:
 ## Personal tokens
 
 - Made at More, Connect Claude (`POST /settings/claude/tokens`,
-  `src/controllers/claude.rs:83`). Shown once, prefixed `collab_pat_`.
+  `src/controllers/claude.rs:98`). Shown once, prefixed `collab_pat_`.
+- The form carries the organisation it was shown for. After a switch it is
+  refused with a 409 and no token is made.
 - They do not expire. At most 10 live ones per person.
 - Not available while a super admin is acting in another organisation.
 - Revoke at `POST /settings/claude/grants/<grant_id>/revoke`. Revoking ends
