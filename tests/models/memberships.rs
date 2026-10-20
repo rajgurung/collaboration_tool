@@ -1,12 +1,21 @@
+use std::time::Duration;
+
 use collab::{
     app::App,
     models::{
-        memberships,
+        access_tokens::{self, CodeExchange, Issued, PersonalParams},
+        login_events::Client,
+        memberships, oauth_clients,
+        oauth_codes::{self, Consent},
         organisations::{self, SignupParams},
+        users,
     },
 };
 use loco_rs::{app::AppContext, prelude::TenantActiveModelExt, testing::prelude::*};
-use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
+};
 use serial_test::serial;
 
 macro_rules! configure_insta {
@@ -177,4 +186,351 @@ async fn for_user_with_orgs_sorts_active_by_name_then_pending() {
             .map(|(n, s)| (n.to_string(), s.to_string()))
             .collect::<Vec<_>>()
     );
+}
+
+pub(super) const RESOURCE: &str = "http://localhost:5150/mcp";
+const CLAUDE: &str = "https://claude.ai/api/mcp/auth_callback";
+const VERIFIER: &str = "a-fairly-long-pkce-verifier-that-is-at-least-43-characters-long";
+
+/// Alice owns Acme and is an active member of Beta, which Bob owns.
+pub(super) struct TwoOrgs {
+    pub alice: i64,
+    pub bob: i64,
+    pub acme: i64,
+    pub beta: i64,
+    pub in_beta: memberships::Model,
+}
+
+pub(super) async fn alice_in_two_orgs(ctx: &AppContext) -> TwoOrgs {
+    let (alice, acme) = sign_up(ctx, "Acme", "alice").await;
+    let (bob, beta) = sign_up(ctx, "Beta", "bob").await;
+    let in_beta = add_member(ctx, beta, alice, "alice").await.unwrap();
+    TwoOrgs {
+        alice,
+        bob,
+        acme,
+        beta,
+        in_beta,
+    }
+}
+
+fn client() -> Client {
+    Client {
+        ip: "127.0.0.1".to_string(),
+        user_agent: "test".to_string(),
+    }
+}
+
+async fn remove_alice_from_beta(ctx: &AppContext, orgs: &TwoOrgs) {
+    memberships::Model::remove(ctx, orgs.beta, orgs.bob, orgs.in_beta.id, &client())
+        .await
+        .unwrap();
+}
+
+pub(super) async fn personal_token(ctx: &AppContext, org_id: i64, user_id: i64) -> String {
+    access_tokens::Model::create_personal(
+        &ctx.db,
+        org_id,
+        user_id,
+        &PersonalParams {
+            name: "Laptop".to_string(),
+        },
+        RESOURCE,
+    )
+    .await
+    .unwrap()
+    .1
+}
+
+pub(super) async fn claude_client(ctx: &AppContext) -> oauth_clients::Model {
+    oauth_clients::Model::register(
+        &ctx.db,
+        &oauth_clients::RegisterParams {
+            client_name: Some("Claude".to_string()),
+            redirect_uris: vec![CLAUDE.to_string()],
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// An unused authorization code for `user_id` in `org_id`.
+pub(super) async fn code_for(
+    ctx: &AppContext,
+    client: &oauth_clients::Model,
+    org_id: i64,
+    user_id: i64,
+) -> String {
+    let challenge = oauth_codes::challenge_for(VERIFIER);
+    oauth_codes::Model::issue(
+        &ctx.db,
+        &Consent {
+            client,
+            org_id,
+            user_id,
+            redirect_uri: CLAUDE,
+            code_challenge: &challenge,
+            resource: RESOURCE,
+            scope: access_tokens::SCOPE,
+        },
+    )
+    .await
+    .unwrap()
+    .1
+}
+
+pub(super) async fn exchange(
+    db: &sea_orm::DatabaseConnection,
+    client: &oauth_clients::Model,
+    code: &str,
+) -> Option<Issued> {
+    access_tokens::Model::exchange_code(
+        db,
+        &CodeExchange {
+            code,
+            code_verifier: VERIFIER,
+            redirect_uri: CLAUDE,
+            resource: RESOURCE,
+            client,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// OAuth tokens for `user_id` in `org_id`.
+pub(super) async fn oauth_tokens(ctx: &AppContext, org_id: i64, user_id: i64) -> Issued {
+    let client = claude_client(ctx).await;
+    let code = code_for(ctx, &client, org_id, user_id).await;
+    exchange(&ctx.db, &client, &code).await.unwrap()
+}
+
+pub(super) async fn usable(ctx: &AppContext, token: &str) -> bool {
+    access_tokens::Model::find_usable(&ctx.db, token, RESOURCE)
+        .await
+        .unwrap()
+        .is_some()
+}
+
+/// A second connection pool to the test database. The app's pool has one
+/// connection, so calls through it never overlap; races need two.
+pub(super) async fn second_connection(ctx: &AppContext) -> sea_orm::DatabaseConnection {
+    sea_orm::Database::connect(&ctx.config.database.uri)
+        .await
+        .unwrap()
+}
+
+/// How long the racing transaction holds its lock before committing.
+pub(super) const HOLD: Duration = Duration::from_millis(500);
+
+#[tokio::test]
+#[serial]
+async fn removal_keeps_the_session_version() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let before = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+
+    remove_alice_from_beta(ctx, &orgs).await;
+
+    let after = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+    assert_eq!(after.session_version, before.session_version);
+    assert!(
+        memberships::Model::active_in(&ctx.db, orgs.acme, orgs.alice)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn removal_ends_an_unlock_for_that_org() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    assert!(
+        users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.beta)
+            .await
+            .unwrap()
+    );
+
+    remove_alice_from_beta(ctx, &orgs).await;
+
+    let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+    assert!(!alice.secrets_unlocked(Some("sid-1"), orgs.beta));
+    assert_eq!(alice.secrets_unlocked_org_id, None);
+    assert_eq!(alice.secrets_unlocked_sid, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn removal_keeps_an_unlock_for_another_org() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    assert!(
+        users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.acme)
+            .await
+            .unwrap()
+    );
+
+    remove_alice_from_beta(ctx, &orgs).await;
+
+    let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+    assert!(alice.secrets_unlocked(Some("sid-1"), orgs.acme));
+}
+
+#[tokio::test]
+#[serial]
+async fn removal_revokes_tokens_in_that_org_only() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let claude = claude_client(ctx).await;
+    let acme_token = personal_token(ctx, orgs.acme, orgs.alice).await;
+    let beta_token = personal_token(ctx, orgs.beta, orgs.alice).await;
+    let acme_oauth = oauth_tokens(ctx, orgs.acme, orgs.alice).await;
+    let beta_oauth = oauth_tokens(ctx, orgs.beta, orgs.alice).await;
+    let acme_code = code_for(ctx, &claude, orgs.acme, orgs.alice).await;
+    let beta_code = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
+
+    remove_alice_from_beta(ctx, &orgs).await;
+
+    assert!(!usable(ctx, &beta_token).await);
+    assert!(!usable(ctx, &beta_oauth.access_token).await);
+    assert!(exchange(&ctx.db, &claude, &beta_code).await.is_none());
+    assert!(usable(ctx, &acme_token).await);
+    assert!(usable(ctx, &acme_oauth.access_token).await);
+    assert!(
+        exchange(&ctx.db, &claude, &acme_code).await.is_some(),
+        "Acme's unused code still works"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn in_org_for_user_returns_any_status() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let (_, gamma) = sign_up(ctx, "Gamma", "gail").await;
+    let (_, delta) = sign_up(ctx, "Delta", "dina").await;
+    add_with_status(ctx, gamma, orgs.alice, memberships::status::PENDING).await;
+    remove_alice_from_beta(ctx, &orgs).await;
+
+    let status = |org_id| async move {
+        memberships::Model::in_org_for_user(&ctx.db, org_id, orgs.alice)
+            .await
+            .unwrap()
+            .map(|m| m.status)
+    };
+    assert_eq!(status(orgs.acme).await.as_deref(), Some("active"));
+    assert_eq!(status(orgs.beta).await.as_deref(), Some("removed"));
+    assert_eq!(status(gamma).await.as_deref(), Some("pending"));
+    assert_eq!(status(delta).await, None);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_personal_token_is_refused_for_a_removed_membership() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    remove_alice_from_beta(ctx, &orgs).await;
+
+    let refused = access_tokens::Model::create_personal(
+        &ctx.db,
+        orgs.beta,
+        orgs.alice,
+        &PersonalParams {
+            name: "Laptop".to_string(),
+        },
+        RESOURCE,
+    )
+    .await;
+    assert!(refused.is_err());
+    let beta_tokens = access_tokens::Entity::find()
+        .filter(access_tokens::Column::OrganisationId.eq(orgs.beta))
+        .filter(access_tokens::Column::UserId.eq(orgs.alice))
+        .count(&ctx.db)
+        .await
+        .unwrap();
+    assert_eq!(beta_tokens, 0);
+}
+
+/// A removal holds the membership `FOR UPDATE` on another connection while a
+/// token is minted and logins are unlocked. Each waits, then sees the
+/// removal and is refused. Without the `FOR SHARE` reads they would see the
+/// old, active row and go ahead.
+#[tokio::test]
+#[serial]
+async fn minting_waits_for_a_removal_in_progress() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let claude = claude_client(ctx).await;
+    let code = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
+    let first = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
+    let earlier = exchange(&ctx.db, &claude, &first).await.unwrap();
+    let other = second_connection(ctx).await;
+
+    let removal = async {
+        let txn = other.begin().await.unwrap();
+        let row = memberships::Entity::find_by_id(orgs.in_beta.id)
+            .lock_exclusive()
+            .one(&txn)
+            .await
+            .unwrap()
+            .unwrap();
+        tokio::time::sleep(HOLD).await;
+        let mut removed = row.into_active_model();
+        removed.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
+        removed.update(&txn).await.unwrap();
+        txn.commit().await.unwrap();
+    };
+    let personal = async {
+        tokio::time::sleep(HOLD / 5).await;
+        access_tokens::Model::create_personal(
+            &ctx.db,
+            orgs.beta,
+            orgs.alice,
+            &PersonalParams {
+                name: "Laptop".to_string(),
+            },
+            RESOURCE,
+        )
+        .await
+    };
+    let exchanged = async {
+        tokio::time::sleep(HOLD / 5).await;
+        exchange(&ctx.db, &claude, &code).await
+    };
+    let refreshed = async {
+        tokio::time::sleep(HOLD / 5).await;
+        access_tokens::Model::refresh(&ctx.db, &earlier.refresh_token, &claude, RESOURCE)
+            .await
+            .unwrap()
+    };
+    let unlocked = async {
+        tokio::time::sleep(HOLD / 5).await;
+        users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.beta)
+            .await
+            .unwrap()
+    };
+    let ((), personal, exchanged, refreshed, unlocked) =
+        tokio::join!(removal, personal, exchanged, refreshed, unlocked);
+    assert!(personal.is_err(), "no personal token");
+    assert!(exchanged.is_none(), "no tokens for the code");
+    assert!(refreshed.is_none(), "no refreshed tokens");
+    assert!(!unlocked, "no unlock");
+    let live = access_tokens::Entity::find()
+        .filter(access_tokens::Column::OrganisationId.eq(orgs.beta))
+        .filter(access_tokens::Column::RevokedAt.is_null())
+        .count(&ctx.db)
+        .await
+        .unwrap();
+    assert_eq!(live, 0, "no live token for Beta");
+    let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+    assert_eq!(alice.secrets_unlocked_org_id, None);
 }
