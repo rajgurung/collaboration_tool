@@ -20,6 +20,7 @@ use crate::{
         oauth_clients::{self, RegisterError, RegisterParams},
         oauth_codes::{self, Consent},
     },
+    views::headers::guarded,
 };
 
 /// Registration bodies are small; refuse anything bigger before parsing.
@@ -243,18 +244,6 @@ fn back_to_client(
     let mut response = (StatusCode::FOUND, [(header::LOCATION, url.to_string())]).into_response();
     no_store(response.headers_mut());
     Ok(response)
-}
-
-/// Pages here must never be framed (clickjacking the Allow button) or cached.
-fn guarded(mut response: Response) -> Response {
-    let headers = response.headers_mut();
-    no_store(headers);
-    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("frame-ancestors 'none'"),
-    );
-    response
 }
 
 fn refused_page(v: &TeraView, message: &str) -> Result<Response> {
