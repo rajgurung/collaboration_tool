@@ -6,4 +6,4 @@ To open it, sign in and choose {{ org_name }} from the organisation menu at the 
 
 {{ dashboard_url }}
 
-If you're already signed in, it shows the next time a page loads.
+If you're already signed in, {{ org_name }} shows in your organisations next time a page loads.

@@ -139,7 +139,7 @@ fn deliveries(ctx: &AppContext) -> Vec<String> {
 fn approval_emails(ctx: &AppContext) -> Vec<String> {
     deliveries(ctx)
         .into_iter()
-        .filter(|m| m.contains("Subject: Your request to join was approved"))
+        .filter(|m| m.contains("Subject: Your join request was approved"))
         .collect()
 }
 

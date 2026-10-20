@@ -69,7 +69,7 @@ mod tests {
             ..Default::default()
         };
         let email = render(&approved, &args).unwrap();
-        assert_eq!(email.subject, "Your request to join was approved");
+        assert_eq!(email.subject, "Your join request was approved");
         assert!(
             email.html.contains("Bakers &lt;b&gt;&amp;"),
             "{}",
@@ -77,5 +77,11 @@ mod tests {
         );
         assert!(!email.html.contains("<b>"));
         assert!(email.text.contains("https://collab.rajgurung.me/dashboard"));
+        assert!(email
+            .html
+            .contains("Or paste this address into your browser: https:"));
+        assert!(email
+            .text
+            .contains("Bakers <b>&</b> Co shows in your organisations next time a page loads."));
     }
 }

@@ -1,1 +1,1 @@
-Your request to join was approved
+Your join request was approved

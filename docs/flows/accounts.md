@@ -206,7 +206,7 @@ Rules:
   waiting requests on the More page (`src/controllers/more.rs:19`).
 - Only a `pending` request can be approved or declined, each with one
   conditional update. Anything else shows an error toast.
-- Approval sends the person "Your request to join was approved". The
+- Approval sends the person "Your join request was approved". The
   subject has no org name; the body names the org and links to Home. It
   never names the approver.
 - An unknown slug gets a 404 page.
