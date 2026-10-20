@@ -18,7 +18,7 @@ async fn new_meeting_form_defaults_to_today_and_ticks_me() {
             .await
             .unwrap();
         let res = request
-            .get("/meetings/new")
+            .get(&owner.at("/meetings/new"))
             .add_header(owner.0.clone(), owner.1.clone())
             .await;
         assert_eq!(res.status_code(), 200);
@@ -52,7 +52,7 @@ async fn logging_a_meeting_saves_attendees_and_shows_it() {
             alice.id
         );
         let res = request
-            .post("/meetings")
+            .post(&owner.at("/meetings"))
             .as_member(&owner)
             .add_header("HX-Request", "true")
             .bytes(body.into())
@@ -81,7 +81,7 @@ async fn meetings_need_minutes_a_date_and_team_attendees() {
             .unwrap();
 
         let res = request
-            .post("/meetings")
+            .post(&owner.at("/meetings"))
             .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "title": "Weekly", "held_on": "", "summary": "" }))
@@ -91,7 +91,7 @@ async fn meetings_need_minutes_a_date_and_team_attendees() {
         assert!(res.text().contains("Write the minutes"));
 
         let res = request
-            .post("/meetings")
+            .post(&owner.at("/meetings"))
             .as_member(&owner)
             .add_header("HX-Request", "true")
             .bytes(
@@ -117,11 +117,11 @@ async fn meetings_stay_inside_their_organisation() {
         let acme = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let globex = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         request
-            .post("/meetings")
+            .post(&globex.at("/meetings"))
             .as_member(&globex)
             .form(&serde_json::json!({ "title": "Board meeting", "held_on": "2026-10-01", "summary": "Confidential plans" }))
             .await;
-        let page = request.get("/meetings").add_header(acme.0.clone(), acme.1.clone()).await;
+        let page = request.get(&acme.at("/meetings")).add_header(acme.0.clone(), acme.1.clone()).await;
         assert!(!page.text().contains("Confidential plans"));
     })
     .await;

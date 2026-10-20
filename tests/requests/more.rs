@@ -11,7 +11,7 @@ async fn more_lists_the_other_sections_and_pending_count() {
         let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         join(&request, &ctx, "acme", "bob", "bob@example.com").await;
         let res = request
-            .get("/more")
+            .get(&owner.at("/more"))
             .add_header(owner.0.clone(), owner.1.clone())
             .await;
         assert_eq!(res.status_code(), 200);

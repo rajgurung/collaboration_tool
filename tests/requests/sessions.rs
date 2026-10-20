@@ -12,13 +12,10 @@ use collab::{
 use loco_rs::{auth::jwt, testing::prelude::*, TestServer};
 use serial_test::serial;
 
-use super::prepare_data::{cookie_from, login, sign_up_member, Cookie, USER_PASSWORD};
+use super::prepare_data::{cookie_from, login, open_page, sign_up_member, Cookie, USER_PASSWORD};
 
 async fn can_open_more(request: &TestServer, cookie: &Cookie) -> bool {
-    let res = request
-        .get("/more")
-        .add_header(cookie.0.clone(), cookie.1.clone())
-        .await;
+    let (res, _) = open_page(request, cookie, "/more").await;
     match res.status_code().as_u16() {
         200 => true,
         303 => {
@@ -61,10 +58,9 @@ async fn sign_out_everywhere_ends_other_sessions_but_keeps_this_one() {
             can_open_more(&request, &fresh).await,
             "this device stays in"
         );
-        let page = request
-            .get("/more?signed_out=1")
-            .add_header(fresh.0.clone(), fresh.1.clone())
+        let page = open_page(&request, &fresh, "/more?signed_out=1")
             .await
+            .0
             .text();
         assert!(page.contains("Signed out on every other device."));
 

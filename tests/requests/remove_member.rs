@@ -57,7 +57,7 @@ async fn remove(
     target: &memberships::Model,
 ) -> (u16, String) {
     let res = request
-        .post(&format!("/members/{}/remove", target.id))
+        .post(&cookie.at(&format!("/members/{}/remove", target.id)))
         .as_member(cookie)
         .add_header("HX-Request", "true")
         .await;
@@ -103,22 +103,22 @@ async fn removing_someone_locks_them_out_of_everything() {
         .unwrap();
         // A mention carol has not seen yet.
         request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "@carol can you check?" }))
             .await;
         let mut notify = ctx.shared_store.get::<NotifyHub>().unwrap().subscribe();
 
         let res = request
-            .post(&format!("/members/{}/remove", carol_m.id))
+            .post(&alice.at(&format!("/members/{}/remove", carol_m.id)))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .await;
         let back = format!("/members/{}/rotate?removed=1", carol_m.id);
-        assert_eq!(res.headers()["hx-redirect"], back.as_str());
+        assert_eq!(res.headers()["hx-redirect"], alice.at(&back).as_str());
         assert_eq!(status_of(&ctx, carol_m.id).await, "removed");
         let page = request
-            .get(&back)
+            .get(&alice.to(&back))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -130,7 +130,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .unwrap()
             .unwrap();
         let page = request
-            .get(&format!("/members?removed={}", alice_m.id))
+            .get(&alice.at(&format!("/members?removed={}", alice_m.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -147,7 +147,7 @@ async fn removing_someone_locks_them_out_of_everything() {
 
         // She stays signed in, and her next page says why, and nothing else.
         let res = request
-            .get("/dashboard")
+            .get(&carol.at("/dashboard"))
             .add_header(carol.0.clone(), carol.1.clone())
             .await;
         assert_eq!(res.status_code(), 403);
@@ -155,7 +155,7 @@ async fn removing_someone_locks_them_out_of_everything() {
         let before = messages::Entity::find().count(&ctx.db).await.unwrap();
         // Her open tab's calls are sent Home, where the removed page shows.
         let res = request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&carol.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
@@ -172,19 +172,19 @@ async fn removing_someone_locks_them_out_of_everything() {
             .unwrap()
             .unwrap();
         let res = request
-            .post(&format!(
+            .post(&carol.at(&format!(
                 "/chat/{}/messages/{}/reactions",
                 general.id, mention.id
-            ))
+            )))
             .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
         assert_eq!(res.status_code(), 409);
         let res = request
-            .get(&format!(
+            .get(&carol.at(&format!(
                 "/chat/{}/messages/{}/actions",
                 general.id, mention.id
-            ))
+            )))
             .add_header(carol.0.clone(), carol.1.clone())
             .await;
         assert_eq!(res.status_code(), 403);
@@ -215,7 +215,7 @@ async fn removing_someone_locks_them_out_of_everything() {
         .await
         .unwrap();
         let res = request
-            .post(&format!("/tasks/{}/notes/{}/reactions", task.id, note.id))
+            .post(&carol.at(&format!("/tasks/{}/notes/{}/reactions", task.id, note.id)))
             .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
@@ -232,7 +232,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             format!("/chat/{}/ws?thread={}", general.id, mention.id),
         ] {
             let res = request
-                .get(&path)
+                .get(&carol.to(&path))
                 .add_header(carol.0.clone(), carol.1.clone())
                 .await;
             assert_eq!(res.status_code(), 403, "GET {path}");
@@ -287,7 +287,7 @@ async fn removing_someone_locks_them_out_of_everything() {
 
         // Gone from the member list; owners see her under Removed.
         let page = request
-            .get("/members")
+            .get(&alice.at("/members"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -333,7 +333,7 @@ async fn removal_rules() {
             "{toast}"
         );
         let page = request
-            .get("/members")
+            .get(&bob.at("/members"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -342,7 +342,7 @@ async fn removal_rules() {
 
         // A member can't remove anyone.
         let res = request
-            .post(&format!("/members/{}/remove", erin_m.id))
+            .post(&dan.at(&format!("/members/{}/remove", erin_m.id)))
             .as_member(&dan)
             .await;
         assert_eq!(res.status_code(), 403);
@@ -363,7 +363,7 @@ async fn removal_rules() {
         assert_eq!(remove(&request, &alice, &dan_m).await.0, 200);
         assert_eq!(status_of(&ctx, dan_m.id).await, "removed");
         let page = request
-            .get("/members")
+            .get(&bob.at("/members"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -397,13 +397,13 @@ async fn a_super_admin_acting_inside_cannot_remove_anyone() {
         let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
 
         let page = request
-            .get("/members")
+            .get("/o/acme/members")
             .add_header("cookie", acting.clone())
             .await
             .text();
         assert!(!page.contains(&format!("/members/{}/remove", carol_m.id)));
         let res = request
-            .post(&format!("/members/{}/remove", carol_m.id))
+            .post(&format!("/o/acme/members/{}/remove", carol_m.id))
             .add_header("cookie", acting)
             .add_header("x-org-id", acme.id.to_string())
             .await;

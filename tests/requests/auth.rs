@@ -239,7 +239,7 @@ async fn sign_out_everywhere_logs_in_the_created_org_too() {
             super::prepare_data::sign_up_member(&request, "Acme", "alice", "alice@example.com")
                 .await;
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .as_member(&alice)
             .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
             .await;

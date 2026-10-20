@@ -15,25 +15,24 @@ use super::{
     prepare_data::{sign_up_member, AsMember},
 };
 
-use super::prepare_data::Cookie;
+use super::prepare_data::{open_page, Cookie};
 
-/// The hidden `org_id` on the token form, as this browser sees it.
-async fn shown_org_id(request: &TestServer, cookie: &Cookie) -> String {
-    let page = request
-        .get("/settings/claude")
-        .add_header(cookie.0.clone(), cookie.1.clone())
-        .await
-        .text();
+/// The hidden `org_id` on the token form, as this browser sees it, and the
+/// form's own address (a bare load lands in the last org).
+async fn shown_org_id(request: &TestServer, cookie: &Cookie) -> (String, String) {
+    let (page, at) = open_page(request, cookie, "/settings/claude").await;
+    let page = page.text();
     let marker = r#"name="org_id" value=""#;
     let start = page.find(marker).expect("a hidden org_id") + marker.len();
-    page[start..start + page[start..].find('"').unwrap()].to_string()
+    let id = page[start..start + page[start..].find('"').unwrap()].to_string();
+    (id, format!("{at}/tokens"))
 }
 
 /// Creates a token through the page; returns the status and the page.
 async fn create(request: &TestServer, cookie: &Cookie, name: &str) -> (u16, String) {
-    let org_id = shown_org_id(request, cookie).await;
+    let (org_id, action) = shown_org_id(request, cookie).await;
     let res = request
-        .post("/settings/claude/tokens")
+        .post(&action)
         .add_header(cookie.0.clone(), cookie.1.clone())
         .form(&json!({ "name": name, "org_id": org_id }))
         .await;
@@ -54,14 +53,14 @@ async fn the_page_shows_the_connector_url_and_more_links_to_it() {
     request::<App, _, _>(|request, _ctx| async move {
         let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let more = request
-            .get("/more")
+            .get(&alice.at("/more"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(more.contains(r#"href="/settings/claude""#));
+        assert!(more.contains(r#"href="/o/acme/settings/claude""#));
 
         let page = request
-            .get("/settings/claude")
+            .get(&alice.at("/settings/claude"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert_eq!(page.status_code(), 200);
@@ -100,7 +99,7 @@ async fn a_personal_token_is_shown_once_and_stored_hashed() {
             200
         );
         let page = request
-            .get("/settings/claude")
+            .get(&alice.at("/settings/claude"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -144,7 +143,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
             .grant_id;
 
         let res = request
-            .post(&format!("/settings/claude/grants/{grant}/revoke"))
+            .post(&bob.at(&format!("/settings/claude/grants/{grant}/revoke")))
             .as_member(&bob)
             .await;
         assert_eq!(res.status_code(), 404, "someone else's connection");
@@ -156,7 +155,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
         );
 
         let res = request
-            .post(&format!("/settings/claude/grants/{grant}/revoke"))
+            .post(&alice.at(&format!("/settings/claude/grants/{grant}/revoke")))
             .as_member(&alice)
             .await;
         assert_eq!(res.status_code(), 303);
@@ -167,7 +166,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
             401
         );
         let page = request
-            .get("/settings/claude")
+            .get(&alice.at("/settings/claude"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -188,7 +187,7 @@ async fn a_super_admin_acting_elsewhere_cannot_make_tokens() {
         let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
 
         let page = request
-            .get("/settings/claude")
+            .get("/o/acme/settings/claude")
             .add_header("cookie", acting.clone())
             .await
             .text();
@@ -196,7 +195,7 @@ async fn a_super_admin_acting_elsewhere_cannot_make_tokens() {
         assert!(page.contains(r#"action="/admin/leave""#));
 
         let res = request
-            .post("/settings/claude/tokens")
+            .post("/o/acme/settings/claude/tokens")
             .add_header("cookie", acting)
             .form(&json!({ "name": "Sneaky", "org_id": acme.id.to_string() }))
             .await;
@@ -217,12 +216,12 @@ async fn the_token_form_pins_the_org() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         assert_eq!(
-            shown_org_id(&request, &cookie).await,
+            shown_org_id(&request, &cookie).await.0,
             in_acme.organisation_id.to_string()
         );
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         assert_eq!(
-            shown_org_id(&request, &in_beta_cookie).await,
+            shown_org_id(&request, &in_beta_cookie).await.0,
             in_beta.organisation_id.to_string()
         );
     })
@@ -234,10 +233,10 @@ async fn the_token_form_pins_the_org() {
 async fn a_token_for_another_org_is_refused() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         for org_id in [in_acme.organisation_id.to_string(), String::new()] {
             let res = request
-                .post("/settings/claude/tokens")
+                .post(&in_beta_cookie.at("/settings/claude/tokens"))
                 .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
                 .form(&json!({ "name": "Laptop", "org_id": org_id }))
                 .await;
@@ -251,7 +250,7 @@ async fn a_token_for_another_org_is_refused() {
             assert!(!page.contains("collab_pat_"));
         }
         let res = request
-            .post("/settings/claude/tokens")
+            .post(&in_beta_cookie.at("/settings/claude/tokens"))
             .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
             .form(&json!({ "name": "Laptop" }))
             .await;

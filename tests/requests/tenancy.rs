@@ -186,7 +186,7 @@ async fn org_a_cannot_reach_org_b() {
             "/dashboard", "/roadmap", "/tasks", "/tasks/list", "/tasks/board", "/tasks?view=list", "/tasks?group=person", "/more", "/meetings", "/chat", "/members", "/notifications",
             "/tasks/new", "/meetings/new", "/roadmap/projects/new", "/chat/groups/new", "/chat/dms/new", "/documents",
         ] {
-            let res = request.get(page).add_header(a.0.clone(), a.1.clone()).await;
+            let res = request.get(&a.to(&page)).add_header(a.0.clone(), a.1.clone()).await;
             assert_eq!(res.status_code(), 200, "{page}");
             let body = res.text();
             assert!(!body.contains(SECRET), "{page} leaks Globex data");
@@ -196,7 +196,7 @@ async fn org_a_cannot_reach_org_b() {
             }
         }
         let res = request
-            .get(&format!("/chat?c={}", globex.general.id))
+            .get(&a.at(&format!("/chat?c={}", globex.general.id)))
             .add_header(a.0.clone(), a.1.clone())
             .await;
         assert!(!res.text().contains(SECRET), "/chat?c= leaks Globex messages");
@@ -218,7 +218,7 @@ async fn org_a_cannot_reach_org_b() {
             format!("/documents/files/{}?download=1", globex.file.id),
         ];
         for path in &gets {
-            let res = request.get(path).add_header(a.0.clone(), a.1.clone()).await;
+            let res = request.get(&a.to(&path)).add_header(a.0.clone(), a.1.clone()).await;
             assert_eq!(res.status_code(), 404, "GET {path}");
             assert!(!res.text().contains(SECRET), "GET {path} leaks Globex data");
         }
@@ -245,7 +245,7 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/chat/{}/threads/{}/replies", globex.general.id, globex.message.id), serde_json::json!({ "body": "hijacked" })),
         ];
         for (path, form) in &posts {
-            let res = request.post(path).as_member(&a).form(form).await;
+            let res = request.post(&a.to(&path)).as_member(&a).form(form).await;
             assert_eq!(res.status_code(), 404, "POST {path}");
         }
         // Alice's own task with Globex's note.
@@ -264,7 +264,7 @@ async fn org_a_cannot_reach_org_b() {
         .await
         .unwrap();
         let res = request
-            .post(&format!("/tasks/{}/notes/{}/reactions", acme_task.id, globex.note.id))
+            .post(&a.at(&format!("/tasks/{}/notes/{}/reactions", acme_task.id, globex.note.id)))
             .as_member(&a)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
@@ -272,7 +272,7 @@ async fn org_a_cannot_reach_org_b() {
         assert!(!res.text().contains(SECRET), "own task, Globex note");
 
         let res = request
-            .post(&format!("/documents/folders/{}/files", globex.folder.id))
+            .post(&a.at(&format!("/documents/folders/{}/files", globex.folder.id)))
             .as_member(&a)
             .multipart(MultipartForm::new().add_part("file", Part::bytes(super::documents::PDF.to_vec()).file_name("x.pdf")))
             .await;
@@ -288,7 +288,7 @@ async fn org_a_cannot_reach_org_b() {
         ];
         for (path, body) in &refs {
             let res = request
-                .post(path)
+                .post(&a.to(&path))
                 .as_member(&a)
                 .bytes(body.clone().into())
                 .content_type("application/x-www-form-urlencoded")
@@ -296,7 +296,7 @@ async fn org_a_cannot_reach_org_b() {
             assert_eq!(res.status_code(), 422, "POST {path} {body}");
         }
         let dm = request
-            .post("/chat/dms")
+            .post(&a.at("/chat/dms"))
             .as_member(&a)
             .form(&serde_json::json!({ "user_id": globex.owner.id }))
             .await;
@@ -402,13 +402,16 @@ async fn documents_and_removal_need_your_own_active_membership() {
             assert_eq!(res.headers()["location"], "/login");
             for (who, cookie) in [("waiting", &hank), ("removed", &ivy)] {
                 let res = request
-                    .get(path)
+                    .get(&path)
                     .add_header(cookie.0.clone(), cookie.1.clone())
                     .await;
                 assert_eq!(res.status_code(), 403, "{who} GET {path}");
                 assert!(!res.text().contains(SECRET), "{who} GET {path}");
             }
-            let res = request.get(path).add_header("cookie", acting.clone()).await;
+            let res = request
+                .get(&format!("/o/globex{path}"))
+                .add_header("cookie", acting.clone())
+                .await;
             assert_eq!(res.status_code(), 403, "acting GET {path}");
             assert!(!res.text().contains(SECRET), "acting GET {path}");
         }
@@ -437,7 +440,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
                 let res = send(path, Some(cookie.1.to_str().unwrap().to_string())).await;
                 assert_eq!(res.status_code(), 403, "{who} POST {path}");
             }
-            let res = send(path, Some(acting.clone()))
+            let res = send(&format!("/o/globex{path}"), Some(acting.clone()))
                 .add_header("x-org-id", globex.folder.organisation_id.to_string())
                 .await;
             assert_eq!(res.status_code(), 403, "acting POST {path}");

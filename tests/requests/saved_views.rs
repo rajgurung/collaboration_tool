@@ -22,7 +22,7 @@ async fn save(
         .collect::<Vec<_>>()
         .join("&");
     let res = request
-        .post("/tasks/views")
+        .post(&cookie.at("/tasks/views"))
         .as_member(cookie)
         .content_type("application/x-www-form-urlencoded")
         .bytes(body.into())
@@ -56,12 +56,12 @@ async fn a_saved_view_brings_its_setup_back() {
             res,
             (
                 303,
-                "/tasks?view=board&scope=mine&group=person&filter=mine".to_string()
+                "/o/acme/tasks?view=board&scope=mine&group=person&filter=mine".to_string()
             )
         );
 
         let page = request
-            .get("/tasks?view=board&scope=mine&group=person&filter=mine")
+            .get(&alice.at("/tasks?view=board&scope=mine&group=person&filter=mine"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -71,13 +71,13 @@ async fn a_saved_view_brings_its_setup_back() {
         );
         // The Done view is not a saved setup, so nothing is lit there.
         let done = request
-            .get("/tasks?view=board&scope=mine&group=person&filter=done")
+            .get(&alice.at("/tasks?view=board&scope=mine&group=person&filter=done"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(!done.contains("view-chip-on"));
         let other = request
-            .get("/tasks?scope=all")
+            .get(&alice.at("/tasks?scope=all"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -115,7 +115,7 @@ async fn the_default_view_opens_tasks() {
         assert_eq!(defaults, 1, "only one default at a time");
 
         let plain = request
-            .get("/tasks")
+            .get(&alice.at("/tasks"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -123,7 +123,7 @@ async fn the_default_view_opens_tasks() {
         assert!(plain.contains("Group by"));
 
         let chosen = request
-            .get("/tasks?scope=all&group=project")
+            .get(&alice.at("/tasks?scope=all&group=project"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -143,7 +143,7 @@ async fn views_are_named_limited_and_private() {
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
 
         let res = request
-            .post("/tasks/views")
+            .post(&alice.at("/tasks/views"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "name": "  ", "scope": "all" }))
@@ -160,7 +160,7 @@ async fn views_are_named_limited_and_private() {
             .await;
         }
         let res = request
-            .post("/tasks/views")
+            .post(&alice.at("/tasks/views"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "name": "One too many", "scope": "all" }))
@@ -179,7 +179,7 @@ async fn views_are_named_limited_and_private() {
             .unwrap()
             .unwrap();
         let bobs = request
-            .get("/tasks")
+            .get(&bob.at("/tasks"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -189,7 +189,7 @@ async fn views_are_named_limited_and_private() {
             format!("/tasks/views/{}/delete", view.id),
         ] {
             let res = request
-                .post(&path)
+                .post(&bob.to(&path))
                 .as_member(&bob)
                 .form(&serde_json::json!({ "name": "hijacked" }))
                 .await;
@@ -212,19 +212,19 @@ async fn views_can_be_renamed_updated_and_deleted() {
         let view = saved_views::Entity::find().one(&ctx.db).await.unwrap().unwrap();
 
         let edit = request
-            .get(&format!("/tasks/views/{}/edit?scope=all&group=none&view=list", view.id))
+            .get(&alice.at(&format!("/tasks/views/{}/edit?scope=all&group=none&view=list", view.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(edit.contains("Update to what") && edit.contains("Delete view"));
 
         request
-            .post(&format!("/tasks/views/{}", view.id))
+            .post(&alice.at(&format!("/tasks/views/{}", view.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "name": "Everything", "is_default": "on" }))
             .await;
         request
-            .post(&format!("/tasks/views/{}/setup", view.id))
+            .post(&alice.at(&format!("/tasks/views/{}/setup", view.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "scope": "all", "group": "none", "view": "list", "q": "venue" }))
             .await;
@@ -237,7 +237,7 @@ async fn views_can_be_renamed_updated_and_deleted() {
         );
 
         let res = request
-            .post(&format!("/tasks/views/{}/delete", view.id))
+            .post(&alice.at(&format!("/tasks/views/{}/delete", view.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "scope": "all" }))
             .await;
@@ -254,12 +254,12 @@ async fn the_desktop_list_shows_lanes_as_rows() {
         let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let launch = project_in(&ctx, "acme", "Launch").await;
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .form(&task_form("Book the venue", launch.id, ""))
             .await;
         let list = request
-            .get("/tasks/board?view=list&scope=all&group=project")
+            .get(&alice.at("/tasks/board?view=list&scope=all&group=project"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();

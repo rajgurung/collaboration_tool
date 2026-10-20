@@ -1,7 +1,8 @@
 //! Ending someone's sessions also closes their open chat socket and
-//! notification stream; a removal closes only that org's, and a switch only
-//! that browser's. Uses a real server, because the in-memory test client
-//! cannot hold a WebSocket or a stream open.
+//! notification stream; a removal closes only that org's. Each tab's socket
+//! and stream live under its own `/o/{slug}/`, so nothing else closes them.
+//! Uses a real server, because the in-memory test client cannot hold a
+//! WebSocket or a stream open.
 use std::{net::SocketAddr, time::Duration};
 
 use std::sync::Arc;
@@ -79,7 +80,7 @@ pub(super) async fn open_general_socket() -> (
     let general = conversations::Model::find_general(&ctx.db, org.id)
         .await
         .unwrap();
-    let mut request = format!("ws://{addr}/chat/{}/ws", general.id)
+    let mut request = format!("ws://{addr}/o/acme/chat/{}/ws", general.id)
         .into_client_request()
         .unwrap();
     request
@@ -102,7 +103,7 @@ async fn ending_sessions_closes_the_chat_socket_and_the_notification_stream() {
     let (ctx, addr, cookie, alice, mut socket) = open_general_socket().await;
     let http = reqwest::Client::new();
     let mut stream = http
-        .get(format!("http://{addr}/notifications/stream"))
+        .get(format!("http://{addr}/o/acme/notifications/stream"))
         .header("cookie", &cookie)
         .send()
         .await
@@ -180,8 +181,9 @@ async fn alice_also_in_beta(ctx: &loco_rs::app::AppContext, addr: SocketAddr, al
     beta.id
 }
 
-async fn switch(addr: SocketAddr, cookie: &str, org_id: i64) {
-    let res = reqwest::Client::builder()
+/// The old switch, for tabs drawn before the deploy.
+async fn switch(addr: SocketAddr, cookie: &str, org_id: i64) -> reqwest::Response {
+    reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap()
@@ -189,98 +191,7 @@ async fn switch(addr: SocketAddr, cookie: &str, org_id: i64) {
         .header("cookie", cookie)
         .send()
         .await
-        .unwrap();
-    assert_eq!(res.status(), 303);
-}
-
-#[tokio::test]
-#[serial]
-async fn switching_closes_the_chat_socket_and_notification_stream() {
-    let (ctx, addr, cookie, alice, mut socket) = open_general_socket().await;
-    let beta = alice_also_in_beta(&ctx, addr, alice.id).await;
-    let mut stream = reqwest::Client::new()
-        .get(format!("http://{addr}/notifications/stream"))
-        .header("cookie", &cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(stream.status(), 200);
-
-    switch(addr, &cookie, beta).await;
-
-    let closed = tokio::time::timeout(WAIT, socket.next()).await.unwrap();
-    assert!(
-        matches!(closed, None | Some(Ok(Message::Close(_)))),
-        "{closed:?}"
-    );
-    let ended = tokio::time::timeout(WAIT, stream.chunk()).await.unwrap();
-    assert!(matches!(ended, Ok(None)), "{ended:?}");
-}
-
-#[tokio::test]
-#[serial]
-async fn a_chat_socket_for_the_old_org_is_refused_after_a_switch() {
-    let (ctx, addr, cookie, alice, _socket) = open_general_socket().await;
-    let beta = alice_also_in_beta(&ctx, addr, alice.id).await;
-    switch(addr, &cookie, beta).await;
-
-    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
-        .await
-        .unwrap();
-    let general = conversations::Model::find_general(&ctx.db, acme.id)
-        .await
-        .unwrap();
-    let connect = |cookie: String| {
-        let mut request = format!("ws://{addr}/chat/{}/ws", general.id)
-            .into_client_request()
-            .unwrap();
-        request
-            .headers_mut()
-            .insert("cookie", cookie.parse().unwrap());
-        tokio_tungstenite::connect_async(request)
-    };
-    let refused = connect(format!("{cookie}; current_org={beta}")).await;
-    assert!(refused.is_err(), "the upgrade is refused");
-    // The same socket in Acme still connects.
-    let acme_cookie = format!("{cookie}; current_org={}", acme.id);
-    assert!(connect(acme_cookie).await.is_ok());
-}
-
-#[tokio::test]
-#[serial]
-async fn creating_an_org_closes_the_chat_socket_and_notification_stream() {
-    let (ctx, addr, cookie, _alice, mut socket) = open_general_socket().await;
-    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
-        .await
-        .unwrap();
-    let mut stream = reqwest::Client::new()
-        .get(format!("http://{addr}/notifications/stream"))
-        .header("cookie", &cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(stream.status(), 200);
-
-    let res = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
         .unwrap()
-        .post(format!("http://{addr}/orgs"))
-        .header("cookie", &cookie)
-        .header("x-org-id", acme.id.to_string())
-        .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 303);
-
-    let closed = tokio::time::timeout(WAIT, socket.next()).await.unwrap();
-    assert!(
-        matches!(closed, None | Some(Ok(Message::Close(_)))),
-        "{closed:?}"
-    );
-    let ended = tokio::time::timeout(WAIT, stream.chunk()).await.unwrap();
-    assert!(matches!(ended, Ok(None)), "{ended:?}");
 }
 
 type Socket =
@@ -310,9 +221,10 @@ async fn sign_in_again(addr: SocketAddr) -> String {
         .to_string()
 }
 
-/// Opens `conversation_id`'s socket with `cookie` and waits until it listens.
-async fn open_socket(addr: SocketAddr, cookie: &str, conversation_id: i64) -> Socket {
-    let mut request = format!("ws://{addr}/chat/{conversation_id}/ws")
+/// Opens `conversation_id`'s socket in `slug` with `cookie` and waits until it
+/// listens.
+async fn open_socket(addr: SocketAddr, cookie: &str, slug: &str, conversation_id: i64) -> Socket {
+    let mut request = format!("ws://{addr}/o/{slug}/chat/{conversation_id}/ws")
         .into_client_request()
         .unwrap();
     request
@@ -341,9 +253,9 @@ async fn assert_closed(socket: &mut Socket) {
     );
 }
 
-async fn open_stream(addr: SocketAddr, cookie: &str) -> reqwest::Response {
+async fn open_stream(addr: SocketAddr, cookie: &str, slug: &str) -> reqwest::Response {
     let stream = reqwest::Client::new()
-        .get(format!("http://{addr}/notifications/stream"))
+        .get(format!("http://{addr}/o/{slug}/notifications/stream"))
         .header("cookie", cookie)
         .send()
         .await
@@ -418,12 +330,12 @@ async fn removal_from_beta_closes_only_beta_sockets_and_streams() {
         .await
         .unwrap()
         .id;
-    let mut acme_stream = open_stream(addr, &in_acme).await;
+    let mut acme_stream = open_stream(addr, &in_acme, "acme").await;
     // Browser 1 works in Beta.
     let (beta, membership, beta_general) = alice_in_beta_general(&ctx, addr, alice.id).await;
-    let in_beta = format!("{}; current_org={beta}", sign_in_again(addr).await);
-    let mut beta_socket = open_socket(addr, &in_beta, beta_general).await;
-    let mut beta_stream = open_stream(addr, &in_beta).await;
+    let in_beta = sign_in_again(addr).await;
+    let mut beta_socket = open_socket(addr, &in_beta, "beta", beta_general).await;
+    let mut beta_stream = open_stream(addr, &in_beta, "beta").await;
 
     bob_removes(&ctx, beta, &membership).await;
 
@@ -438,8 +350,7 @@ async fn removal_from_beta_closes_only_beta_sockets_and_streams() {
 async fn removal_closes_the_beta_socket_without_a_session_change() {
     let (ctx, addr, cookie, alice, _acme_socket) = open_general_socket().await;
     let (beta, membership, beta_general) = alice_in_beta_general(&ctx, addr, alice.id).await;
-    let in_beta = format!("{cookie}; current_org={beta}");
-    let mut beta_socket = open_socket(addr, &in_beta, beta_general).await;
+    let mut beta_socket = open_socket(addr, &cookie, "beta", beta_general).await;
     let before = users::Model::find_by_id(&ctx.db, alice.id).await.unwrap();
 
     bob_removes(&ctx, beta, &membership).await;
@@ -451,26 +362,204 @@ async fn removal_closes_the_beta_socket_without_a_session_change() {
 
 #[tokio::test]
 #[serial]
-async fn switching_closes_only_this_browsers_sockets() {
-    let (ctx, addr, browser_2, alice, mut socket_2) = open_general_socket().await;
+async fn the_old_switch_post_lands_under_o_and_closes_nothing() {
+    let (ctx, addr, cookie, alice, mut socket) = open_general_socket().await;
     let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
         .await
         .unwrap()
         .id;
-    let general = conversations::Model::find_general(&ctx.db, acme)
+    let mut stream = open_stream(addr, &cookie, "acme").await;
+    let beta = alice_also_in_beta(&ctx, addr, alice.id).await;
+
+    let res = switch(addr, &cookie, beta).await;
+    assert_eq!(res.status(), 303);
+    assert_eq!(res.headers()["location"], "/o/beta/dashboard");
+
+    assert_still_open(&mut socket).await;
+    assert_stream_open(&ctx, &mut stream, acme, alice.id).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn creating_an_org_lands_in_it_and_closes_nothing() {
+    let (ctx, addr, cookie, alice, mut socket) = open_general_socket().await;
+    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
         .await
         .unwrap()
         .id;
-    let mut stream_2 = open_stream(addr, &browser_2).await;
-    let browser_1 = sign_in_again(addr).await;
-    let mut socket_1 = open_socket(addr, &browser_1, general).await;
-    let mut stream_1 = open_stream(addr, &browser_1).await;
+    let mut stream = open_stream(addr, &cookie, "acme").await;
+    let res = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(format!("http://{addr}/o/acme/orgs"))
+        .header("cookie", &cookie)
+        .header("x-org-id", acme.to_string())
+        .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 303);
+    assert_eq!(
+        res.headers()["location"],
+        "/o/lumen-caf/dashboard?created=1"
+    );
+
+    assert_still_open(&mut socket).await;
+    assert_stream_open(&ctx, &mut stream, acme, alice.id).await;
+}
+
+/// One sign-in with Acme and Beta open side by side: each tab's socket gets
+/// its own org's messages, with links under its own address.
+#[tokio::test]
+#[serial]
+async fn two_orgs_chat_live_in_their_own_tabs() {
+    let (ctx, addr, cookie, alice, mut acme_socket) = open_general_socket().await;
+    let (beta, _, beta_general) = alice_in_beta_general(&ctx, addr, alice.id).await;
+    let mut beta_socket = open_socket(addr, &cookie, "beta", beta_general).await;
+    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap();
+    let acme_general = conversations::Model::find_general(&ctx.db, acme.id)
+        .await
+        .unwrap();
+
+    // Bob writes in Beta's General: only the Beta tab hears it.
+    let bob = users::Model::find_by_email(&ctx.db, "bob@example.com")
+        .await
+        .unwrap();
+    let beta_general_model = conversations::Model::find_general(&ctx.db, beta)
+        .await
+        .unwrap();
+    let said = collab::models::messages::Model::create(
+        &ctx.db,
+        &beta_general_model,
+        bob.id,
+        &collab::models::messages::MessageParams {
+            body: "Beta news".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    collab::controllers::chat_ws::publish(&ctx, beta, &said)
+        .await
+        .unwrap();
+    let frame = tokio::time::timeout(WAIT, beta_socket.next())
+        .await
+        .unwrap();
+    let Some(Ok(Message::Text(html))) = frame else {
+        panic!("expected Beta's message, got {frame:?}");
+    };
+    assert!(html.contains("Beta news"), "{html}");
+    assert_links_under(&html, "/o/beta/");
+    assert_still_open(&mut acme_socket).await;
+
+    // And Acme's tab hears Acme's own, with Acme links.
+    let said = collab::models::messages::Model::create(
+        &ctx.db,
+        &acme_general,
+        alice.id,
+        &collab::models::messages::MessageParams {
+            body: "Acme news".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    collab::controllers::chat_ws::publish(&ctx, acme.id, &said)
+        .await
+        .unwrap();
+    let frame = tokio::time::timeout(WAIT, acme_socket.next())
+        .await
+        .unwrap();
+    let Some(Ok(Message::Text(html))) = frame else {
+        panic!("expected Acme's message, got {frame:?}");
+    };
+    assert!(html.contains("Acme news"), "{html}");
+    assert_links_under(&html, "/o/acme/");
+    assert_still_open(&mut beta_socket).await;
+}
+
+/// Every app link in `html` is under `base`.
+fn assert_links_under(html: &str, base: &str) {
+    let attrs = regex_lite_links(html);
+    assert!(!attrs.is_empty(), "no links in {html}");
+    for value in attrs {
+        assert!(value.starts_with(base), "{value} in {html}");
+    }
+}
+
+/// The values of `href`, `hx-post`, `hx-get` and `data-*-url` attributes that
+/// start with `/`.
+fn regex_lite_links(html: &str) -> Vec<String> {
+    let re = regex::Regex::new(r#"(?:href|hx-get|hx-post|data-[a-z-]*url)="(/[^"]*)""#).unwrap();
+    re.captures_iter(html).map(|c| c[1].to_string()).collect()
+}
+
+#[tokio::test]
+#[serial]
+async fn each_tabs_stream_counts_its_own_org() {
+    let (ctx, addr, cookie, alice, _socket) = open_general_socket().await;
+    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap()
+        .id;
     let beta = alice_also_in_beta(&ctx, addr, alice.id).await;
+    let mut acme_stream = open_stream(addr, &cookie, "acme").await;
+    let mut beta_stream = open_stream(addr, &cookie, "beta").await;
 
-    switch(addr, &browser_1, beta).await;
+    // A notice in Beta reaches the Beta tab only.
+    assert_stream_open(&ctx, &mut beta_stream, beta, alice.id).await;
+    let quiet = tokio::time::timeout(Duration::from_millis(300), acme_stream.chunk()).await;
+    assert!(quiet.is_err(), "nothing for the Acme tab: {quiet:?}");
+    assert_stream_open(&ctx, &mut acme_stream, acme, alice.id).await;
+}
 
-    assert_closed(&mut socket_1).await;
-    assert_stream_ended(&mut stream_1).await;
-    assert_still_open(&mut socket_2).await;
-    assert_stream_open(&ctx, &mut stream_2, acme, alice.id).await;
+#[tokio::test]
+#[serial]
+async fn a_bare_socket_upgrade_is_not_upgraded() {
+    let (ctx, addr, cookie, _alice, _socket) = open_general_socket().await;
+    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap();
+    let general = conversations::Model::find_general(&ctx.db, acme.id)
+        .await
+        .unwrap();
+    let mut request = format!("ws://{addr}/chat/{}/ws", general.id)
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", cookie.parse().unwrap());
+    let refused = tokio_tungstenite::connect_async(request).await;
+    match refused {
+        Err(tokio_tungstenite::tungstenite::Error::Http(res)) => {
+            assert_eq!(res.status(), 303);
+            assert_eq!(res.headers()["location"], "/o/acme/dashboard?from=");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn a_bare_stream_is_not_a_stream() {
+    let (_ctx, addr, cookie, _alice, _socket) = open_general_socket().await;
+    let res = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(format!("http://{addr}/notifications/stream"))
+        .header("cookie", &cookie)
+        .header("accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 303);
+    assert_eq!(res.headers()["location"], "/o/acme/dashboard?from=");
+    assert_ne!(
+        res.headers()
+            .get("content-type")
+            .map(|v| v.to_str().unwrap()),
+        Some("text/event-stream")
+    );
 }

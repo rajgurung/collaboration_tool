@@ -79,7 +79,7 @@ async fn dashboard_numbers_follow_the_tasks() {
         add_task(&ctx, org.id, project.id, None, "Pick a date", "blocked").await;
 
         let body = request
-            .get("/dashboard")
+            .get(&cookie.at("/dashboard"))
             .add_header(cookie.0.clone(), cookie.1.clone())
             .await
             .text();

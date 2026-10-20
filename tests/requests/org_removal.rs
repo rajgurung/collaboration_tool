@@ -42,7 +42,7 @@ struct Removal {
 async fn setup(request: &TestServer, ctx: &AppContext) -> Removal {
     let (alice, alice_id, in_acme, in_beta) = alice_in_two_orgs(request, ctx).await;
     Removal {
-        in_beta: with_org(&alice, in_beta.organisation_id),
+        in_beta: with_org(&ctx, &alice, in_beta.organisation_id).await,
         alice,
         alice_id,
         acme: in_acme.organisation_id,
@@ -52,13 +52,17 @@ async fn setup(request: &TestServer, ctx: &AppContext) -> Removal {
 }
 
 async fn bob(request: &TestServer, beta: i64) -> TestMember {
-    TestMember::new(login(request, "bob@example.com", USER_PASSWORD).await, beta)
+    TestMember::new(
+        login(request, "bob@example.com", USER_PASSWORD).await,
+        beta,
+        "beta",
+    )
 }
 
 /// Bob removes `membership` from Beta through the Members page.
 async fn remove(request: &TestServer, bob: &TestMember, membership: &memberships::Model) {
     let res = request
-        .post(&format!("/members/{}/remove", membership.id))
+        .post(&bob.at(&format!("/members/{}/remove", membership.id)))
         .as_member(bob)
         .add_header("HX-Request", "true")
         .await;
@@ -78,7 +82,7 @@ fn header(res: &axum_test::TestResponse, name: &str) -> Option<String> {
 
 async fn get(request: &TestServer, who: &TestMember, path: &str) -> axum_test::TestResponse {
     request
-        .get(path)
+        .get(&who.to(path))
         .add_header(who.0.clone(), who.1.clone())
         .await
 }
@@ -95,7 +99,7 @@ async fn htmx_task(
 ) -> axum_test::TestResponse {
     let project = project_in(ctx, "beta", "Launch").await;
     request
-        .post("/tasks")
+        .post(&who.at("/tasks"))
         .as_member(who)
         .add_header("HX-Request", "true")
         .form(&task_form("Sneaky", project.id, ""))
@@ -113,11 +117,11 @@ async fn removal_from_beta_keeps_alice_signed_in_to_acme() {
         let res = get(&request, &r.alice, "/dashboard").await;
         assert_eq!(res.status_code(), 200);
         assert_eq!(org_heading(&res.text()), "Acme");
-        let in_acme = with_org(&r.alice, r.acme);
+        let in_acme = with_org(&ctx, &r.alice, r.acme).await;
         assert_eq!(get(&request, &in_acme, "/tasks").await.status_code(), 200);
         let project = project_in(&ctx, "acme", "Shop").await;
         let res = request
-            .post("/tasks")
+            .post(&in_acme.at("/tasks"))
             .as_member(&in_acme)
             .form(&task_form("Restock", project.id, ""))
             .await;
@@ -135,10 +139,24 @@ async fn after_removal_a_beta_cookie_falls_back_and_is_cleared() {
         let r = setup(&request, &ctx).await;
         bob_removes_alice(&request, &r).await;
 
-        let res = get(&request, &r.in_beta, "/dashboard").await;
+        // A bare bookmark: the Beta cookie no longer counts, so Acme, and the
+        // cookie is cleared.
+        let res = request
+            .get("/dashboard")
+            .add_header(r.in_beta.0.clone(), r.in_beta.1.clone())
+            .await;
+        assert_eq!(
+            header(&res, "location").as_deref(),
+            Some("/o/acme/dashboard")
+        );
+        assert!(clears(&res, "current_org"));
+        let res = get(&request, &r.in_beta, "/o/acme/dashboard").await;
         assert_eq!(res.status_code(), 200);
         assert_eq!(org_heading(&res.text()), "Acme");
-        assert!(clears(&res, "current_org"));
+        // Beta's own address is its removed page.
+        let res = get(&request, &r.in_beta, "/dashboard").await;
+        assert_eq!(res.status_code(), 403);
+        assert!(res.text().contains("You were removed from Beta"));
     })
     .await;
 }
@@ -154,8 +172,8 @@ async fn a_beta_tab_is_refused_with_the_gone_header() {
         let res = htmx_task(&request, &ctx, &r.in_beta).await;
         assert_eq!(res.status_code(), 409);
         assert_eq!(
-            header(&res, "HX-Redirect"),
-            Some(format!("/dashboard?from={}", r.beta))
+            header(&res, "HX-Redirect").as_deref(),
+            Some("/o/beta/dashboard")
         );
         assert_eq!(header(&res, "X-Org-Gone").as_deref(), Some("1"));
         assert_eq!(header(&res, "cache-control").as_deref(), Some("no-store"));
@@ -176,18 +194,13 @@ async fn a_plain_beta_form_is_refused_after_removal() {
         let mut form = task_form("Sneaky", project.id, "");
         form["_org"] = json!(r.beta.to_string());
         let res = request
-            .post("/tasks")
+            .post(&r.in_beta.at("/tasks"))
             .add_header(r.in_beta.0.clone(), r.in_beta.1.clone())
             .form(&form)
             .await;
-        assert_eq!(res.status_code(), 303);
-        assert_eq!(
-            header(&res, "location"),
-            Some(format!("/dashboard?from={}", r.beta))
-        );
-        // The header comes with every refusal. A plain form's browser follows
-        // the 303 and never reads it; Home names the org from `?from=`.
-        assert_eq!(header(&res, "X-Org-Gone").as_deref(), Some("1"));
+        // A plain form gets Beta's removed page straight away.
+        assert_eq!(res.status_code(), 403);
+        assert!(res.text().contains("You were removed from Beta"));
         assert_eq!(task_count(&ctx).await, before, "nothing saved");
     })
     .await;
@@ -213,17 +226,14 @@ async fn the_home_notice_names_beta_after_removal() {
             !page.contains(&format!("/orgs/{}/switch", r.beta)),
             "no Back"
         );
-        assert!(!page.contains("This tab was showing another organisation"));
+        assert!(!page.contains("Your last change wasn"));
     })
     .await;
 }
 
 /// The notice for a `?from=` that names no org this user was removed from.
 fn assert_nameless(page: &str, what: &str) {
-    assert!(
-        page.contains("This tab was showing another organisation."),
-        "{what}"
-    );
+    assert!(page.contains("Your last change wasn't saved."), "{what}");
     // The layout's banner templates hold their own copy, so only the
     // notice's own second line is checked.
     assert!(!page.contains("An owner or admin removed you"), "{what}");
@@ -282,8 +292,12 @@ async fn the_home_notice_does_not_name_an_org_you_were_never_removed_from() {
 async fn a_stale_tab_for_an_org_you_are_still_in_has_no_gone_header() {
     request::<App, _, _>(|request, ctx| async move {
         let r = setup(&request, &ctx).await;
-        // The browser is in Acme; the tab was drawn for Beta, still active.
-        let stale = TestMember::new(with_org(&r.alice, r.acme).cookie, r.beta);
+        // A page drawn for Beta (still active) posting to Acme's address.
+        let stale = TestMember::new(
+            with_org(&ctx, &r.alice, r.acme).await.cookie,
+            r.beta,
+            "acme",
+        );
         let res = htmx_task(&request, &ctx, &stale).await;
         assert_eq!(res.status_code(), 409);
         assert_eq!(header(&res, "X-Org-Gone"), None);
@@ -314,7 +328,7 @@ async fn someone_elses_removal_is_never_named() {
         let gamma = gail.org_id;
 
         // A forged claim for Gamma is refused, but never as a removal.
-        let forged = TestMember::new(r.alice.cookie.clone(), gamma);
+        let forged = TestMember::new(r.alice.cookie.clone(), gamma, r.alice.slug.clone());
         let res = htmx_task(&request, &ctx, &forged).await;
         assert_eq!(res.status_code(), 409);
         assert_eq!(header(&res, "X-Org-Gone"), None);
@@ -335,13 +349,15 @@ async fn a_switch_in_one_browser_keeps_an_unlock_in_another() {
         let laptop = TestMember::new(
             login(&request, "alice@example.com", USER_PASSWORD).await,
             r.acme,
+            "acme",
         );
         let phone = TestMember::new(
             login(&request, "alice@example.com", USER_PASSWORD).await,
             r.acme,
+            "acme",
         );
         let res = request
-            .post("/documents/logins/unlock")
+            .post(&laptop.at("/documents/logins/unlock"))
             .as_member(&laptop)
             .form(&[("password", USER_PASSWORD)])
             .await;
@@ -356,12 +372,11 @@ async fn a_switch_in_one_browser_keeps_an_unlock_in_another() {
             "the laptop's unlock"
         );
 
+        // Its own old-style switch ends nothing either: an Acme tab may
+        // still be open.
         assert_eq!(switch(&request, &laptop, r.beta).await.status_code(), 303);
         let alice = users::Model::find_by_id(&ctx.db, r.alice_id).await.unwrap();
-        assert!(
-            !alice.secrets_unlocked(Some(&sid), r.acme),
-            "its own switch"
-        );
+        assert!(alice.secrets_unlocked(Some(&sid), r.acme), "its own switch");
     })
     .await;
 }
@@ -439,7 +454,10 @@ async fn beta_logins_cannot_be_revealed_after_removal() {
             .unwrap()
             .folder;
         let res = request
-            .post(&format!("/documents/folders/{}/logins", folder.id))
+            .post(
+                &r.in_beta
+                    .at(&format!("/documents/folders/{}/logins", folder.id)),
+            )
             .as_member(&r.in_beta)
             .form(&[
                 ("title", "Bank"),
@@ -450,7 +468,7 @@ async fn beta_logins_cannot_be_revealed_after_removal() {
         assert_eq!(res.status_code(), 303, "{}", res.text());
         let login = logins::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         let res = request
-            .post("/documents/logins/unlock")
+            .post(&r.in_beta.at("/documents/logins/unlock"))
             .as_member(&r.in_beta)
             .form(&[("password", USER_PASSWORD)])
             .await;
@@ -459,7 +477,7 @@ async fn beta_logins_cannot_be_revealed_after_removal() {
             let request = &request;
             async move {
                 request
-                    .post(&format!("/documents/logins/{}/reveal", login.id))
+                    .post(&who.at(&format!("/documents/logins/{}/reveal", login.id)))
                     .as_member(&who)
                     .form(&[("field", "password")])
                     .await
@@ -527,12 +545,15 @@ async fn htmx_with_no_active_org_is_sent_home() {
     request::<App, _, _>(|request, ctx| async move {
         let (_, carol) = carol_only_in_beta(&request, &ctx).await;
         let res = request
-            .get("/notifications/unread")
+            .get(&carol.at("/notifications/unread"))
             .as_member(&carol)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 409);
-        assert_eq!(header(&res, "HX-Redirect").as_deref(), Some("/dashboard"));
+        assert_eq!(
+            header(&res, "HX-Redirect").as_deref(),
+            Some("/o/beta/dashboard")
+        );
         assert_eq!(header(&res, "X-Org-Gone").as_deref(), Some("1"));
         assert_eq!(header(&res, "cache-control").as_deref(), Some("no-store"));
         // A plain page load gets the page itself.

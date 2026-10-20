@@ -50,7 +50,7 @@ async fn chat_opens_on_general_and_shows_messages() {
         let general = general(&ctx).await;
 
         let res = request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "Hello <team>" }))
@@ -60,7 +60,7 @@ async fn chat_opens_on_general_and_shows_messages() {
         assert!(res.text().contains("msg msg-own"));
 
         let page = request
-            .get("/chat")
+            .get(&bob.at("/chat"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert_eq!(page.status_code(), 200);
@@ -80,7 +80,7 @@ async fn empty_and_overlong_messages_are_rejected() {
         let general = general(&ctx).await;
         for body in ["   ".to_string(), "x".repeat(1001)] {
             let res = request
-                .post(&format!("/chat/{}/messages", general.id))
+                .post(&alice.at(&format!("/chat/{}/messages", general.id)))
                 .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))
@@ -99,7 +99,7 @@ async fn groups_are_private_to_their_members() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let res = request
-            .post("/chat/groups")
+            .post(&alice.at("/chat/groups"))
             .as_member(&alice)
             .form(&serde_json::json!({ "name": "#leadership" }))
             .await;
@@ -113,22 +113,22 @@ async fn groups_are_private_to_their_members() {
         assert_eq!(group.name.as_deref(), Some("leadership"));
         assert_eq!(
             res.headers().get("location").unwrap().to_str().unwrap(),
-            format!("/chat/{}", group.id)
+            alice.at(&format!("/chat/{}", group.id))
         );
 
         // Bob is not in the group: he cannot see it, read it, or post to it.
         let page = request
-            .get(&format!("/chat/{}", group.id))
+            .get(&bob.at(&format!("/chat/{}", group.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert_eq!(page.status_code(), 404);
         let list = request
-            .get("/chat")
+            .get(&bob.at("/chat"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert!(!list.text().contains("leadership"));
         let post = request
-            .post(&format!("/chat/{}/messages", group.id))
+            .post(&bob.at(&format!("/chat/{}/messages", group.id)))
             .as_member(&bob)
             .form(&serde_json::json!({ "body": "let me in" }))
             .await;
@@ -147,7 +147,7 @@ async fn group_members_must_be_on_the_team() {
             .await
             .unwrap();
         let res = request
-            .post("/chat/groups")
+            .post(&alice.at("/chat/groups"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .bytes(format!("name=planning&member_ids={}", gina.id).into())
@@ -178,12 +178,12 @@ async fn starting_a_dm_twice_reuses_it() {
             .unwrap();
 
         let first = request
-            .post("/chat/dms")
+            .post(&alice.at("/chat/dms"))
             .as_member(&alice)
             .form(&serde_json::json!({ "user_id": bob_user.id }))
             .await;
         let second = request
-            .post("/chat/dms")
+            .post(&bob.at("/chat/dms"))
             .as_member(&bob)
             .form(&serde_json::json!({ "user_id": alice_user.id }))
             .await;
@@ -207,13 +207,13 @@ async fn starting_a_dm_twice_reuses_it() {
             .unwrap()
             .to_string();
         let page = request
-            .get(&location)
+            .get(&bob.to(&location))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert!(page.text().contains("Direct message"));
 
         let to_self = request
-            .post("/chat/dms")
+            .post(&alice.at("/chat/dms"))
             .as_member(&alice)
             .form(&serde_json::json!({ "user_id": alice_user.id }))
             .await;
@@ -234,19 +234,19 @@ async fn chat_does_not_cross_organisations() {
             .unwrap();
 
         let post = request
-            .post(&format!("/chat/{}/messages", acme_general.id))
+            .post(&globex.at(&format!("/chat/{}/messages", acme_general.id)))
             .as_member(&globex)
             .form(&serde_json::json!({ "body": "hi from outside" }))
             .await;
         assert_eq!(post.status_code(), 404);
         let dm = request
-            .post("/chat/dms")
+            .post(&globex.at("/chat/dms"))
             .as_member(&globex)
             .form(&serde_json::json!({ "user_id": alice_user.id }))
             .await;
         assert_eq!(dm.status_code(), 400);
         let page = request
-            .get("/chat")
+            .get(&alice.at("/chat"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert!(!page.text().contains("hi from outside"));
@@ -260,7 +260,7 @@ async fn websocket_checks_run_before_the_upgrade() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, _bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
-        let path = format!("/chat/{}/ws", general.id);
+        let path = alice.at(&format!("/chat/{}/ws", general.id));
 
         // Anonymous: sent to login.
         assert_eq!(request.get(&path).await.status_code(), 303);
@@ -269,18 +269,18 @@ async fn websocket_checks_run_before_the_upgrade() {
         let carol = join(&request, &ctx, "acme", "carol", "carol@example.com").await;
         assert_eq!(
             request
-                .get(&path)
+                .get(&carol.to(&path))
                 .add_header(carol.0.clone(), carol.1.clone())
                 .await
                 .status_code(),
             403
         );
 
-        // Another organisation's member: the conversation does not exist for them.
+        // Another organisation's member: Acme's address does not exist for them.
         let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         assert_eq!(
             request
-                .get(&path)
+                .get(&gina.to(&path))
                 .add_header(gina.0.clone(), gina.1.clone())
                 .await
                 .status_code(),
@@ -289,7 +289,7 @@ async fn websocket_checks_run_before_the_upgrade() {
 
         // Cross-site page trying to open a socket with Alice's cookie.
         let evil = request
-            .get(&path)
+            .get(&alice.to(&path))
             .add_header(alice.0.clone(), alice.1.clone())
             .add_header("Origin", "https://evil.example")
             .await;
@@ -314,7 +314,7 @@ async fn websocket_checks_run_before_the_upgrade() {
 
         // Alice passes every check; without upgrade headers the request is just not a WebSocket.
         let plain = request
-            .get(&path)
+            .get(&alice.to(&path))
             .add_header(alice.0.clone(), alice.1.clone())
             .add_header("Origin", "http://localhost:5150")
             .await;
@@ -333,7 +333,7 @@ async fn http_sends_are_published_and_the_feed_reloads() {
         let mut events = hub.subscribe();
 
         request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "Standup in 5" }))
             .await;
@@ -350,7 +350,7 @@ async fn http_sends_are_published_and_the_feed_reloads() {
         assert_eq!(message.author, "alice");
 
         let feed = request
-            .get(&format!("/chat/{}/feed", general.id))
+            .get(&bob.at(&format!("/chat/{}/feed", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert_eq!(feed.status_code(), 200);
@@ -367,20 +367,20 @@ async fn unread_counts_follow_reading() {
         let general = general(&ctx).await;
         // Bob has opened general once, so only newer messages count as unread.
         request
-            .get(&format!("/chat/{}", general.id))
+            .get(&bob.at(&format!("/chat/{}", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
 
         for body in ["First", "Second"] {
             request
-                .post(&format!("/chat/{}/messages", general.id))
+                .post(&alice.at(&format!("/chat/{}/messages", general.id)))
                 .as_member(&alice)
                 .form(&serde_json::json!({ "body": body }))
                 .await;
         }
 
         let badge = request
-            .get("/chat/unread?style=tab")
+            .get(&bob.at("/chat/unread?style=tab"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -389,14 +389,14 @@ async fn unread_counts_follow_reading() {
             "{badge}"
         );
         let mine = request
-            .get("/chat/unread")
+            .get(&alice.at("/chat/unread"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert_eq!(mine, "", "your own messages are never unread");
 
         let list = request
-            .get("/chat")
+            .get(&bob.at("/chat"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -407,11 +407,11 @@ async fn unread_counts_follow_reading() {
 
         // Opening the conversation clears it.
         request
-            .get(&format!("/chat/{}", general.id))
+            .get(&bob.at(&format!("/chat/{}", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         let badge = request
-            .get("/chat/unread")
+            .get(&bob.at("/chat/unread"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -427,13 +427,22 @@ async fn legacy_chat_links_redirect() {
         let (alice, _bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
         let res = request
-            .get(&format!("/chat?c={}", general.id))
+            .get(&alice.at(&format!("/chat?c={}", general.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert_eq!(res.status_code(), 303);
         assert_eq!(
             res.headers().get("location").unwrap().to_str().unwrap(),
-            format!("/chat/{}", general.id)
+            alice.at(&format!("/chat/{}", general.id))
+        );
+        // The bare legacy address finds the conversation's org first.
+        let res = request
+            .get(&format!("/chat?c={}", general.id))
+            .add_header(alice.0.clone(), alice.1.clone())
+            .await;
+        assert_eq!(
+            res.headers()["location"],
+            alice.at(&format!("/chat?c={}", general.id)).as_str()
         );
     })
     .await;
@@ -492,7 +501,7 @@ pub(super) async fn post(
     body: &str,
 ) -> messages::Model {
     request
-        .post(&format!("/chat/{conversation_id}/messages"))
+        .post(&who.at(&format!("/chat/{conversation_id}/messages")))
         .as_member(who)
         .form(&serde_json::json!({ "body": body }))
         .await;
@@ -506,7 +515,7 @@ pub(super) async fn post(
 
 async fn open(request: &TestServer, who: &TestMember, conversation_id: i64) -> String {
     request
-        .get(&format!("/chat/{conversation_id}"))
+        .get(&who.at(&format!("/chat/{conversation_id}")))
         .add_header(who.0.clone(), who.1.clone())
         .await
         .text()
@@ -775,7 +784,7 @@ async fn reading_publishes_receipts() {
 
         // Nothing new since: nothing published.
         request
-            .get(&format!("/chat/{}/feed", group.id))
+            .get(&bob.at(&format!("/chat/{}/feed", group.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert!(events.try_recv().is_err());
@@ -935,7 +944,7 @@ async fn read_receipts_reach_the_right_sockets() {
     let dm = conversations::Model::start_dm(&ctx.db, org_id, alice.id, bob.id)
         .await
         .unwrap();
-    let mut request = format!("ws://{addr}/chat/{}/ws", dm.id)
+    let mut request = format!("ws://{addr}/o/acme/chat/{}/ws", dm.id)
         .into_client_request()
         .unwrap();
     request

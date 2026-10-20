@@ -10,19 +10,26 @@ use serial_test::serial;
 
 use super::{
     multi_org::{alice_in_two_orgs, set_cookie, set_status, switch, with_org},
-    prepare_data::{join, sign_up_cookie, sign_up_member, Cookie},
+    prepare_data::{join, open_page, sign_up_cookie, sign_up_member, slug_of, Cookie},
 };
 
+/// A page load as the browser makes it: a bare app address is followed
+/// into the last org.
 async fn get(request: &TestServer, who: &Cookie, path: &str) -> axum_test::TestResponse {
-    request
-        .get(path)
-        .add_header(who.0.clone(), who.1.clone())
-        .await
+    open_page(request, who, path).await.0
 }
 
+/// An HTMX call from a page of the cookie's last org: at that org's address.
 async fn htmx_get(request: &TestServer, who: &Cookie, path: &str) -> axum_test::TestResponse {
+    let path = if path.starts_with("/o/") {
+        path.to_string()
+    } else {
+        let (_, home) = open_page(request, who, "/dashboard").await;
+        let slug = slug_of(&home).expect("a last org").to_string();
+        collab::views::links::org_path(&slug, path)
+    };
     request
-        .get(path)
+        .get(&path)
         .add_header(who.0.clone(), who.1.clone())
         .add_header("HX-Request", "true")
         .await
@@ -91,7 +98,7 @@ async fn app_pages_carry_their_org_on_body() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, alice, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         let beta = in_beta.organisation_id;
-        let tab = with_org(&cookie, beta);
+        let tab = with_org(&ctx, &cookie, beta).await;
         let general = conversations::Model::find_general(&ctx.db, beta)
             .await
             .unwrap();
@@ -200,7 +207,7 @@ async fn two_orgs_show_the_switcher() {
         assert!(has_switcher(&home));
         assert!(home.contains(r#"aria-haspopup="menu""#));
         assert!(
-            home.contains(r#"<a href="/orgs" class="org-switch""#),
+            home.contains(r#"<a href="/o/acme/orgs?section=dashboard" class="org-switch""#),
             "a link without JavaScript"
         );
         assert!(home.contains("data-org-sheet"), "the phone header");
@@ -322,7 +329,7 @@ async fn the_org_list_is_active_a_to_z_then_pending() {
         // Acme is current: ticked, and not a switch button.
         assert!(list.contains(r#"aria-checked="true" data-org-current"#));
         assert!(!list.contains(&format!(
-            r#"formaction="/orgs/{}/switch""#,
+            r#"formaction="/o/acme/orgs/{}/switch""#,
             in_acme.organisation_id
         )));
         let pending = &list[list.find("Waiting for approval").unwrap() - 600..];
@@ -412,10 +419,10 @@ async fn the_org_list_while_acting_has_acting_in_and_your_organisations() {
             .unwrap()
             .unwrap()
             .organisation_id;
-        let own_name = organisations::Model::find_by_id(&ctx.db, own)
+        let own_org = organisations::Model::find_by_id(&ctx.db, own)
             .await
-            .unwrap()
-            .name;
+            .unwrap();
+        let own_name = own_org.name.clone();
         let acting = acting_in(&admin, in_acme.organisation_id);
         let home = get(&request, &acting, "/dashboard").await.text();
         assert!(has_switcher(&home), "they have an org of their own");
@@ -425,8 +432,13 @@ async fn the_org_list_while_acting_has_acting_in_and_your_organisations() {
         let yours = list.find("Your organisations").expect("Your organisations");
         assert!(acting_at < yours);
         assert_eq!(listed(&list), ["Acme".to_string(), own_name]);
-        assert!(list.contains(&format!(r#"formaction="/orgs/{own}/switch""#)));
-        assert!(list.contains("Switching ends acting in Acme."));
+        // Their own org is a link there; acting carries on in Acme's tabs.
+        assert!(list.contains(&format!(
+            r#"<a href="/o/{}/dashboard" class="org-row""#,
+            own_org.slug
+        )));
+        assert!(!list.contains("Switching ends acting"));
+        assert!(!list.contains("/switch"));
     })
     .await;
 }
@@ -436,9 +448,9 @@ async fn the_org_list_while_acting_has_acting_in_and_your_organisations() {
 async fn the_probe_is_204_and_refused_when_stale() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
-        let tab = with_org(&cookie, in_beta.organisation_id);
+        let tab = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         let res = request
-            .get("/orgs/current")
+            .get(&tab.at("/orgs/current"))
             .add_header(tab.0.clone(), tab.1.clone())
             .add_header("HX-Request", "true")
             .add_header("x-org-id", in_beta.organisation_id.to_string())
@@ -446,7 +458,7 @@ async fn the_probe_is_204_and_refused_when_stale() {
         assert_eq!(res.status_code(), 204);
         assert_eq!(res.headers()["cache-control"], "no-store");
         let res = request
-            .get("/orgs/current")
+            .get(&tab.at("/orgs/current"))
             .add_header(tab.0.clone(), tab.1.clone())
             .add_header("HX-Request", "true")
             .add_header("x-org-id", in_acme.organisation_id.to_string())
@@ -454,7 +466,7 @@ async fn the_probe_is_204_and_refused_when_stale() {
         assert_eq!(res.status_code(), 409);
         assert_eq!(
             res.headers()["HX-Redirect"],
-            format!("/dashboard?from={}", in_acme.organisation_id).as_str()
+            format!("/o/beta/dashboard?from={}", in_acme.organisation_id).as_str()
         );
         assert_eq!(res.headers()["cache-control"], "no-store");
     })
@@ -463,18 +475,17 @@ async fn the_probe_is_204_and_refused_when_stale() {
 
 #[tokio::test]
 #[serial]
-async fn switching_lands_on_home_with_the_new_org_named() {
+async fn the_old_switch_post_lands_under_o() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         let res = switch(&request, &cookie, in_beta.organisation_id).await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(res.headers()["location"], "/dashboard?switched=1");
-        let tab = with_org(&cookie, in_beta.organisation_id);
-        let res = get(&request, &tab, "/dashboard?switched=1").await;
-        assert_eq!(res.headers()["cache-control"], "no-store");
-        assert!(res
-            .text()
-            .contains(r#"data-flash="info">You&#39;re now in Beta</div>"#));
+        assert_eq!(res.headers()["location"], "/o/beta/dashboard");
+        let tab = with_org(&ctx, &cookie, in_beta.organisation_id).await;
+        let res = get(&request, &tab, "/o/beta/dashboard").await;
+        assert_eq!(res.status_code(), 200);
+        // The toast is the switcher's, on the client, from sessionStorage.
+        assert!(!res.text().contains("now in Beta"));
     })
     .await;
 }
@@ -490,7 +501,7 @@ async fn switching_over_htmx_sends_hx_redirect_to_home() {
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
-        assert_eq!(res.headers()["HX-Redirect"], "/dashboard?switched=1");
+        assert_eq!(res.headers()["HX-Redirect"], "/o/beta/dashboard");
     })
     .await;
 }
@@ -515,16 +526,14 @@ async fn switching_to_an_org_you_left_is_a_404() {
 
 #[tokio::test]
 #[serial]
-async fn the_switched_flag_alone_changes_nothing() {
+async fn switched_is_ignored() {
     request::<App, _, _>(|request, ctx| async move {
-        let (cookie, _, _, _) = alice_in_two_orgs(&request, &ctx).await;
-        let res = get(&request, &cookie, "/dashboard?switched=1").await;
+        let (cookie, _, in_acme, _) = alice_in_two_orgs(&request, &ctx).await;
+        let here = with_org(&ctx, &cookie, in_acme.organisation_id).await;
+        let res = get(&request, &here, "/o/acme/dashboard?switched=1").await;
         assert_eq!(res.status_code(), 200);
         assert_eq!(set_cookie(&res, "current_org"), None);
-        assert!(
-            res.text().contains("You&#39;re now in Acme"),
-            "the org it resolved"
-        );
+        assert!(!res.text().contains("now in"), "no toast from the server");
     })
     .await;
 }
@@ -543,7 +552,7 @@ async fn the_switch_ignores_a_next_parameter() {
             .form(&serde_json::json!({ "next": "https://evil.example" }))
             .await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(res.headers()["location"], "/dashboard?switched=1");
+        assert_eq!(res.headers()["location"], "/o/beta/dashboard");
     })
     .await;
 }
@@ -565,13 +574,16 @@ async fn there_is_no_get_that_switches() {
     .await;
 }
 
-/// The "New organisation" row: a link after the switch form, never inside it.
+/// The "New organisation" row: a link after the list, and no switch form.
 fn new_org_row_outside_the_form(html: &str) -> bool {
-    let Some(row) = html.find(r#"<a href="/orgs/new" class="org-row org-new" role="menuitem""#)
-    else {
+    let row = regex::Regex::new(
+        r#"<a href="/o/[a-z0-9-]+/orgs/new" class="org-row org-new" role="menuitem""#,
+    )
+    .unwrap();
+    let Some(row) = row.find(html) else {
         return false;
     };
-    html[..row].contains("</form>") && !html[row..].contains("</form>")
+    html[..row.start()].contains("data-org-list") && !html[..row.start()].contains("/switch")
 }
 
 #[tokio::test]
@@ -592,7 +604,7 @@ async fn the_org_list_ends_with_new_organisation() {
         let list = htmx_get(&request, &solo, "/orgs").await.text();
         assert!(new_org_row_outside_the_form(&list));
         let more = get(&request, &solo, "/more").await.text();
-        assert!(more.contains(r#"<a href="/orgs/new" class="list-row org-new"#));
+        assert!(more.contains(r#"<a href="/o/zen/orgs/new" class="list-row org-new"#));
     })
     .await;
 }

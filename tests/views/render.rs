@@ -27,7 +27,10 @@ fn view_engine() -> TeraView {
 #[test]
 fn renders_home_view_with_i18n() {
     let rendered = view_engine()
-        .render("home/index.html", serde_json::json!({}))
+        .render(
+            "home/index.html",
+            serde_json::json!({ "org_base": "/o/acme",}),
+        )
         .expect("home view should render");
 
     assert!(
@@ -42,7 +45,7 @@ fn renders_app_layout_with_nav() {
     let rendered = view_engine()
         .render(
             "members/index.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "active": "tasks",
                 "org": { "name": "Himalayan Ritual" },
                 "me": { "username": "raj", "color": "#ffb454" },
@@ -56,8 +59,8 @@ fn renders_app_layout_with_nav() {
     assert!(rendered.contains("Himalayan Ritual"));
     assert!(rendered.contains("<h1>Members</h1>"));
     // Desktop sidebar and mobile tab bar both mark Tasks as current.
-    assert!(rendered.contains(r#"href="/tasks" class="side-link" aria-current="page""#));
-    assert!(rendered.contains(r#"href="/tasks" class="tab" aria-current="page""#));
+    assert!(rendered.contains(r#"href="/o/acme/tasks" class="side-link" aria-current="page""#));
+    assert!(rendered.contains(r#"href="/o/acme/tasks" class="tab" aria-current="page""#));
     assert!(rendered.contains("<svg"), "icons should render");
 }
 
@@ -72,7 +75,7 @@ fn renders_read_receipts_as_live_swaps() {
     let read = engine
         .render(
             "chat/_receipt.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "message": { "id": 42, "receipt": {
                     "dm": false,
                     "text": "Read by bob, carol, dev, eve, fay",
@@ -124,7 +127,7 @@ fn renders_read_receipts_as_live_swaps() {
     let theirs = engine
         .render(
             "chat/_receipt.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "message": { "id": 42, "receipt": {
                     "dm": false, "text": "Read by bob", "readers": [person("bob")],
                     "shown": [person("bob")], "more": 0, "all": false,
@@ -139,7 +142,7 @@ fn renders_read_receipts_as_live_swaps() {
     let dm = engine
         .render(
             "chat/_receipt.html",
-            serde_json::json!({ "message": { "id": 43, "receipt": {
+            serde_json::json!({ "org_base": "/o/acme", "message": { "id": 43, "receipt": {
                 "dm": true, "text": "Read", "readers": [person("bob")], "shown": [person("bob")], "more": 0, "all": true,
             }, "own": true }, "oob": true }),
         )
@@ -160,7 +163,7 @@ fn renders_read_receipts_as_live_swaps() {
     let unread = engine
         .render(
             "chat/_receipt.html",
-            serde_json::json!({ "message": { "id": 42, "receipt": null } }),
+            serde_json::json!({ "org_base": "/o/acme", "message": { "id": 42, "receipt": null } }),
         )
         .expect("an empty slot should render");
     assert!(
@@ -175,7 +178,7 @@ fn renders_read_receipts_as_live_swaps() {
     let grey = engine
         .render(
             "chat/_tick.html",
-            serde_json::json!({ "message": { "id": 42, "receipt": null } }),
+            serde_json::json!({ "org_base": "/o/acme", "message": { "id": 42, "receipt": null } }),
         )
         .expect("an unread tick should render");
     assert!(
@@ -193,7 +196,7 @@ fn renders_reactions_as_live_swaps() {
     let html = engine
         .render(
             "chat/_reactions_update.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "message": {
                     "id": 42,
                     "conversation_id": 7,
@@ -222,7 +225,7 @@ fn renders_reactions_as_live_swaps() {
     );
     assert!(!html.contains("Reply in thread"), "{html}");
     assert!(
-        html.contains(r#"data-url="/chat/7/messages/42/reactions""#),
+        html.contains(r#"data-url="/o/acme/chat/7/messages/42/reactions""#),
         "{html}"
     );
     assert!(html.contains(r#"class="react mine""#), "{html}");
@@ -235,7 +238,7 @@ fn renders_reactions_as_live_swaps() {
     let empty = engine
         .render(
             "chat/_reactions.html",
-            serde_json::json!({ "message": { "id": 42, "conversation_id": 7, "reactions": [] } }),
+            serde_json::json!({ "org_base": "/o/acme", "message": { "id": 42, "conversation_id": 7, "reactions": [] } }),
         )
         .expect("an empty slot should render");
     // Nothing inside, not even a space, so `.reacts:empty` hides it.
@@ -251,7 +254,7 @@ fn the_action_sheet_escapes_the_message() {
     let html = view_engine()
         .render(
             "chat/_actions.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "message": {
                     "id": 42, "conversation_id": 7, "author": "<i>bob</i>", "color": "#ffb454",
                     "at": "10:31", "own": false, "body": "<b>x</b> & <script>alert(1)</script>",
@@ -280,7 +283,7 @@ fn renders_the_reply_line_into_the_parents_slot() {
     let html = engine
         .render(
             "chat/_thread_link.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "message": {
                     "id": 481,
                     "thread": {
@@ -297,7 +300,10 @@ fn renders_the_reply_line_into_the_parents_slot() {
         html.contains(r#"id="thread-481" aria-live="off" hx-swap-oob="true""#),
         "{html}"
     );
-    assert!(html.contains(r#"href="/chat/12/threads/481""#), "{html}");
+    assert!(
+        html.contains(r#"href="/o/acme/chat/12/threads/481""#),
+        "{html}"
+    );
     assert!(html.contains("<b>128 replies</b>"), "{html}");
     assert!(html.contains("Yesterday"), "{html}");
     assert!(
@@ -311,7 +317,7 @@ fn renders_the_reply_line_into_the_parents_slot() {
     let empty = engine
         .render(
             "chat/_thread_link.html",
-            serde_json::json!({ "message": { "id": 481, "thread": null } }),
+            serde_json::json!({ "org_base": "/o/acme", "message": { "id": 481, "thread": null } }),
         )
         .expect("an empty slot should render");
     assert!(
@@ -326,7 +332,7 @@ fn renders_the_thread_count_as_a_live_swap() {
     let html = engine
         .render(
             "chat/_thread_count.html",
-            serde_json::json!({ "count": 2, "count_label": "2 replies", "oob": true }),
+            serde_json::json!({ "org_base": "/o/acme", "count": 2, "count_label": "2 replies", "oob": true }),
         )
         .expect("the count should render");
     assert!(
@@ -336,7 +342,7 @@ fn renders_the_thread_count_as_a_live_swap() {
     let none = engine
         .render(
             "chat/_thread_count.html",
-            serde_json::json!({ "count": 0, "count_label": "0 replies" }),
+            serde_json::json!({ "org_base": "/o/acme", "count": 0, "count_label": "0 replies" }),
         )
         .expect("an empty count should render");
     assert!(none.contains(r#"aria-live="off"></div>"#), "{none}");
@@ -355,6 +361,7 @@ fn renders_a_message_as_one_block() {
     let pick = |emoji: &str| serde_json::json!({ "emoji": emoji, "mine": false });
     let message = |own: bool, read_receipts: bool| {
         serde_json::json!({
+            "org_base": "/o/acme",
             "message": {
                 "id": 42, "conversation_id": 7, "author": "alice", "color": "#ffb454",
                 "parts": [{ "text": "Stock count Friday", "mention": false }],
@@ -436,7 +443,7 @@ fn renders_a_note_with_reactions() {
     let html = view_engine()
         .render(
             "tasks/_note.html",
-            serde_json::json!({
+            serde_json::json!({ "org_base": "/o/acme",
                 "note": {
                     "id": 5, "task_id": 3, "author": "bob", "color": "#ffb454",
                     "parts": [{ "text": "<b>Shelves</b> done", "mention": false }],
@@ -455,7 +462,7 @@ fn renders_a_note_with_reactions() {
         "{html}"
     );
     assert_eq!(
-        html.matches(r#"hx-post="/tasks/3/notes/5/reactions""#)
+        html.matches(r#"hx-post="/o/acme/tasks/3/notes/5/reactions""#)
             .count(),
         7,
         "six picks and one chip: {html}"

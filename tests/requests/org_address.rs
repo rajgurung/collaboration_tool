@@ -36,7 +36,7 @@ struct World {
 
 async fn world(request: &TestServer, ctx: &AppContext) -> World {
     let (alice, _, _, in_beta) = alice_in_two_orgs(request, ctx).await;
-    let alice = with_org(&alice, in_beta.organisation_id);
+    let alice = with_org(&ctx, &alice, in_beta.organisation_id).await;
     let kreepa = join(request, ctx, "acme", "kreepa", "kreepa@example.com").await;
     let user = users::Model::find_by_email(&ctx.db, "kreepa@example.com")
         .await
@@ -378,7 +378,7 @@ async fn a_pending_member_sees_that_orgs_waiting_page() {
 
         // Two others: the list, the last used (the cookie's) first.
         let gamma = alice_in_gamma(&ctx).await;
-        let in_gamma = with_org(&w.alice, gamma.id);
+        let in_gamma = with_org(&ctx, &w.alice, gamma.id).await;
         let html = page(&request, "/o/beta/tasks", &in_gamma).await.text();
         assert!(html.contains("Your other organisations"));
         let g = html.find(r#"href="/o/gamma/dashboard""#).unwrap();
