@@ -1,6 +1,6 @@
 # Organisation in the address
 
-Status: Draft · Owner: Raj · 20 October 2026
+Status: Approved by Raj 20 October 2026 (all 9 questions as recommended) · Owner: Raj · 20 October 2026
 
 ## Summary
 
