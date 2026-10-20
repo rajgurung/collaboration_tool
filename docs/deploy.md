@@ -66,7 +66,7 @@ Wrangler cannot manage DNS records; use the Cloudflare API, dashboard or the `cf
 
 ## Notes
 
-- **One instance.** Live chat keeps WebSocket subscribers in memory, so run a single replica.
+- **One instance.** Live chat keeps WebSocket subscribers in memory, so run a single replica. Removal, sign out everywhere, password reset and the account lock also close live chat sockets and notification streams through in-memory events (`src/data/live.rs`). With a second replica, a removed person's open socket on the other instance would stay connected until it reconnects, so scaling out first needs a shared event bus.
 - **Health check.** Railway checks `/_health`.
 - **Email.** Railway blocks outbound SMTP (ports 25/465/587) below the Pro plan; sends fail with `Network is unreachable`. Production therefore uses Resend's HTTPS API (`RESEND_API_KEY`), sending from `no-reply@rajgurung.me` (domain verified in Resend; DKIM/SPF records in Cloudflare). The `MAILER_*` variables must still exist for the app to boot, but are unused while `RESEND_API_KEY` is set.
 - **Cookies.** Production marks the session cookie `Secure`, so the site must be served over HTTPS (Railway domains are).

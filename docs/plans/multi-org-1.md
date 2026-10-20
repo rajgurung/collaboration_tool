@@ -161,7 +161,7 @@ message or token typed for Acme would land in Beta. PR 3 must add:
 - Once re-approved, open sessions regain the org without signing in again,
   since removal no longer ends them (PR 5).
 
-**Org-scoped removal.**
+**Org-scoped removal (done, PR 5).**
 
 - Revoke that org's tokens, and close only that org's sockets and streams.
   That needs events keyed by org and user.
@@ -169,7 +169,10 @@ message or token typed for Acme would land in Beta. PR 3 must add:
   version.
 - Decide who is told when an account lock (account-wide) is caused by one
   org's app passwords.
-- Planned in `docs/plans/multi-org-5.md`.
+- Done in PR 5 (#46, merged 20 October 2026): removal closes only that org's
+  sockets and streams (`CloseScope::Org`), relies on per-request `active_in`,
+  and an account lock emails the person plus the lock org's owners. Plan:
+  `docs/plans/multi-org-5.md`.
 - Follow-up: a super admin "sign out everywhere and lock" for a user, from
   `/admin`, for suspected takeovers. Remove itself never signs people out.
 
