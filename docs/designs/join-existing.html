@@ -431,6 +431,8 @@ body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { disp
   <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
 </header>
 
+<p class="lead" role="note" style="max-width:960px;margin:16px auto;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)"><b>Deferred (Raj, 20 October 2026, option A).</b> PR 6 keeps today's new-account form plus "Already have an account? Sign in to join". Section 2 (the email link), the two-tab signed-out shape in section 1, the email-link edge cases in section 8, and the Home "approved" and "declined" notices in section 6 move to the follow-up "email verification on /signup and /join" (board loop <code>email-verify</code>). Section 5 uses <code>/dashboard?requested=</code>, not <code>?asked=</code>. Everything else here sets the visuals and copy for PR 6.</p>
+
 <section class="section" id="story">
   <h2>The story</h2>
   <p class="lead">Priya owns Acme Studio, and Lumen Café since PR 4. Dev, who owns Northwind Bakery, sends her the join link <code>/join/northwind-bakery</code> so she can help with their Christmas menu. Today that page only makes new accounts, and Priya's email is refused with "An account with this email already exists". After PR 6 she can ask to join with the account she has.</p>
