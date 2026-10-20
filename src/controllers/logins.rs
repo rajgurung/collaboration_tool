@@ -351,7 +351,7 @@ async fn lock(
     client: &Client,
     login: Option<(i64, &str)>,
 ) -> Result<Response> {
-    if users::Model::lock_account(ctx, member.user.id).await? {
+    if let Some(revoked) = users::Model::lock_account(ctx, member.user.id).await? {
         login_events::Model::record(
             &ctx.db,
             client,
@@ -369,7 +369,8 @@ async fn lock(
         {
             tracing::error!(error = %err, "could not email owners about a locked account");
         }
-        if let Err(err) = SecurityMailer::your_account_locked(ctx, &member.org, &member.user).await
+        if let Err(err) =
+            SecurityMailer::your_account_locked(ctx, &member.org, &member.user, revoked > 0).await
         {
             tracing::error!(error = %err, "could not email the person about their locked account");
         }

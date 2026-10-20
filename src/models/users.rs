@@ -547,12 +547,12 @@ impl Model {
     /// unlocks it. Their Claude tokens are revoked too, in every
     /// organisation, not only the one where it happened. Who is told is the
     /// caller's job: the owners of the organisation where it happened, and
-    /// the person. Returns false if it was already locked, so they are told
-    /// once per lock.
+    /// the person. Returns how many Claude connections it ended, or `None`
+    /// if the account was already locked, so they are told once per lock.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn lock_account(ctx: &AppContext, user_id: i64) -> ModelResult<bool> {
+    pub async fn lock_account(ctx: &AppContext, user_id: i64) -> ModelResult<Option<u64>> {
         let txn = ctx.db.begin().await?;
         let locked = users::Entity::update_many()
             .col_expr(
@@ -566,10 +566,10 @@ impl Model {
             .rows_affected
             == 1;
         Self::increment_session_version(&txn, user_id).await?;
-        super::access_tokens::Model::revoke_all_for_user(&txn, user_id).await?;
+        let revoked = super::access_tokens::Model::revoke_all_for_user(&txn, user_id).await?;
         txn.commit().await?;
         Self::close_live_connections(ctx, user_id);
-        Ok(locked)
+        Ok(locked.then_some(revoked))
     }
 
     /// Signs the user out everywhere: every session token stops working, and

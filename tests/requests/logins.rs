@@ -1365,6 +1365,18 @@ async fn locking_emails_the_person_and_the_lock_orgs_owners_only() {
             .await
             .unwrap();
 
+        // A Claude connection, so her email says it was disconnected.
+        collab::models::access_tokens::Model::create_personal(
+            &ctx.db,
+            acme.org.id,
+            carol.id,
+            &collab::models::access_tokens::PersonalParams {
+                name: "Laptop".to_string(),
+            },
+            super::mcp::RESOURCE,
+        )
+        .await
+        .unwrap();
         let before = deliveries(&ctx).len();
         for _ in 0..5 {
             unlock(&request, &acme.carol, "wrong").await;
@@ -1407,6 +1419,10 @@ async fn an_owner_who_locks_themselves_gets_one_email() {
         let to_alice = emails_about(&ctx, before, "To: alice@example.com");
         assert_eq!(to_alice.len(), 1, "{to_alice:?}");
         assert!(to_alice[0].contains("Your Collaboration Tool account was locked"));
+        assert!(
+            !to_alice[0].contains("Claude was disconnected"),
+            "she had no Claude connection"
+        );
         assert!(emails_about(&ctx, before, "alice's account was locked").is_empty());
     })
     .await;

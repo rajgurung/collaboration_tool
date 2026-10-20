@@ -88,7 +88,8 @@ impl SecurityMailer {
 
     /// Tells the person their account was locked, in which organisation,
     /// and how to unlock it. The link is the plain "Forgot password" page,
-    /// never a reset token.
+    /// never a reset token. `claude_disconnected` says so, when the lock
+    /// revoked a token.
     ///
     /// # Errors
     /// When the email cannot be rendered or handed off.
@@ -96,6 +97,7 @@ impl SecurityMailer {
         ctx: &AppContext,
         org: &organisations::Model,
         user: &users::Model,
+        claude_disconnected: bool,
     ) -> Result<()> {
         let settings = Settings::from_context(ctx)?;
         let args = mailer::Args {
@@ -105,6 +107,7 @@ impl SecurityMailer {
                 "name": user.name,
                 "org": org.name,
                 "forgot_url": format!("{}/forgot", settings.app_url),
+                "claude_disconnected": claude_disconnected,
             }),
             ..Default::default()
         };
