@@ -1,0 +1,2 @@
+{# On phones, for people in two or more orgs, the org above the page title (§1). Desktop has the sidebar. #}
+{% if multi_org %}<span class="org-line mobile-only truncate-1">{{ org.name }}</span>{% endif %}

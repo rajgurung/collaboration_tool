@@ -5,23 +5,23 @@
 <div class="shell">
   <aside class="sidebar" aria-label="Main">
     {% if org_menu %}
-    {# A link to /orgs without JavaScript; app.ts turns it into the menu. #}
-    <a href="/orgs" class="org-switch" role="button" aria-haspopup="menu" aria-expanded="false" aria-controls="org-menu" data-org-menu>{{<logo letter={org.name | truncate(length=1, end="")}/>}}<span class="org-btn-text"><strong class="truncate-1">{{ org.name }}</strong>{% if me.acting %}<span class="sub">{{<icon name="shield" class="h-3 w-3"/>}}Platform admin</span>{% endif %}</span>{{<icon name="chevrons-up-down" class="chev h-4 w-4"/>}}</a>
+    {# A link to the org list without JavaScript; app.ts turns it into the menu. `section` says which list the rows open in the other org. #}
+    <a href="{{ org_url(path="/orgs?section=" ~ active) }}" class="org-switch" role="button" aria-haspopup="menu" aria-expanded="false" aria-controls="org-menu" data-org-menu>{{<logo letter={org.name | truncate(length=1, end="")}/>}}<span class="org-btn-text"><strong class="truncate-1">{{ org.name }}</strong>{% if me.acting %}<span class="sub">{{<icon name="shield" class="h-3 w-3"/>}}Platform admin</span>{% endif %}</span>{{<icon name="chevrons-up-down" class="chev h-4 w-4"/>}}</a>
     <div id="org-menu" class="org-menu" role="menu" aria-label="Your organisations" hidden></div>
     {% else %}
-    <a href="/dashboard" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo letter={org.name | default(value="C") | truncate(length=1, end="")}/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
+    <a href="{{ org_url(path="/dashboard") }}" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo letter={org.name | default(value="C") | truncate(length=1, end="")}/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
     {% endif %}
-    <a href="/dashboard" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
-    <a href="/notifications" class="side-link" {% if active == "notifications" %}aria-current="page"{% endif %}>{{<icon name="bell" class="h-5 w-5"/>}}<span class="flex-1">Notifications</span><span hx-get="/notifications/unread" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>
-    <a href="/tasks" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
-    <a href="/chat" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="/chat/unread" hx-trigger="load, every 60s"></span></a>
-    <a href="/roadmap" class="side-link" {% if active == "roadmap" %}aria-current="page"{% endif %}>{{<icon name="map" class="h-5 w-5"/>}}Roadmap</a>
-    <a href="/meetings" class="side-link" {% if active == "meetings" %}aria-current="page"{% endif %}>{{<icon name="message-square-text" class="h-5 w-5"/>}}Meetings</a>
-    {% if not me.acting %}<a href="/documents" class="side-link" {% if active == "documents" %}aria-current="page"{% endif %}>{{<icon name="folder" class="h-5 w-5"/>}}Documents</a>{% endif %}
-    <a href="/members" class="side-link" {% if active == "members" %}aria-current="page"{% endif %}>{{<icon name="users" class="h-5 w-5"/>}}Members</a>
+    <a href="{{ org_url(path="/dashboard") }}" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
+    <a href="{{ org_url(path="/notifications") }}" class="side-link" {% if active == "notifications" %}aria-current="page"{% endif %}>{{<icon name="bell" class="h-5 w-5"/>}}<span class="flex-1">Notifications</span><span hx-get="{{ org_url(path="/notifications/unread") }}" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>
+    <a href="{{ org_url(path="/tasks") }}" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
+    <a href="{{ org_url(path="/chat") }}" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="{{ org_url(path="/chat/unread") }}" hx-trigger="load, every 60s"></span></a>
+    <a href="{{ org_url(path="/roadmap") }}" class="side-link" {% if active == "roadmap" %}aria-current="page"{% endif %}>{{<icon name="map" class="h-5 w-5"/>}}Roadmap</a>
+    <a href="{{ org_url(path="/meetings") }}" class="side-link" {% if active == "meetings" %}aria-current="page"{% endif %}>{{<icon name="message-square-text" class="h-5 w-5"/>}}Meetings</a>
+    {% if not me.acting %}<a href="{{ org_url(path="/documents") }}" class="side-link" {% if active == "documents" %}aria-current="page"{% endif %}>{{<icon name="folder" class="h-5 w-5"/>}}Documents</a>{% endif %}
+    <a href="{{ org_url(path="/members") }}" class="side-link" {% if active == "members" %}aria-current="page"{% endif %}>{{<icon name="users" class="h-5 w-5"/>}}Members</a>
     {% if me.is_super_admin %}<a href="/admin" class="side-link" {% if active == "admin" %}aria-current="page"{% endif %}>{{<icon name="shield" class="h-5 w-5"/>}}Admin</a>{% endif %}
     <div class="mt-auto flex items-center gap-3 border-t border-line px-2 pt-3">
-      {% if me %}<a href="/more" class="flex min-w-0 flex-1 items-center gap-3 rounded-[10px]" title="Your account">{{<avatar name={me.username} color={me.color | default(value="#e8dfce")} size="md"/>}}<span class="truncate-1 flex-1 text-sm font-medium">{{ me.username }}</span></a>{% endif %}
+      {% if me %}<a href="{{ org_url(path="/more") }}" class="flex min-w-0 flex-1 items-center gap-3 rounded-[10px]" title="Your account">{{<avatar name={me.username} color={me.color | default(value="#e8dfce")} size="md"/>}}<span class="truncate-1 flex-1 text-sm font-medium">{{ me.username }}</span></a>{% endif %}
       <button type="button" class="icon-btn" data-theme-toggle aria-label="Switch between light and dark" title="Light or dark">{{<icon name="sun-moon" class="h-5 w-5"/>}}</button>
       <form action="/logout" method="post"><button type="submit" class="icon-btn" aria-label="Sign out" title="Sign out">{{<icon name="log-out" class="h-5 w-5"/>}}</button></form>
     </div>
@@ -36,8 +36,9 @@
     {% endif %}
     {% block main %}
     <header class="topbar">
+      {% if active != "dashboard" %}{% include "layouts/_org_line.html" %}{% endif %}
       {% block topbar %}<h1>{% block heading %}{% endblock heading %}</h1>{% block actions %}{% endblock actions %}{% endblock topbar %}
-      {% if me and active != "notifications" %}<a href="/notifications" class="icon-btn bell-btn mobile-only" aria-label="Notifications">{{<icon name="bell" class="h-[22px] w-[22px]"/>}}<span hx-get="/notifications/unread?style=dot" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>{% endif %}
+      {% if me and active != "notifications" %}<a href="{{ org_url(path="/notifications") }}" class="icon-btn bell-btn mobile-only" aria-label="Notifications">{{<icon name="bell" class="h-[22px] w-[22px]"/>}}<span hx-get="{{ org_url(path="/notifications/unread?style=dot") }}" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>{% endif %}
     </header>
     <main class="page {% block page_class %}{% endblock page_class %}">{% block content %}{% endblock content %}</main>
     {% endblock main %}
@@ -52,14 +53,14 @@
 </dialog>
 {% endif %}
 {% if current_org_id %}
-{# Shown in place when a tab holding typed text or an upload goes stale (app.ts). It only needs this page's own org. #}
+{# Shown in place when a tab holding typed text or an upload is refused (app.ts): a page drawn before an update. #}
 <template id="stale-banner-template">
   <div class="notice stale-banner" role="status" data-stale-banner>
     <span class="notice-icon">{{<icon name="rotate-ccw" class="h-[18px] w-[18px]"/>}}</span>
     <div class="notice-body">
-      <p class="notice-title">This tab was showing {{ org.name }}. Your browser is now in another organisation.</p>
-      <p class="meta m-0 text-[14px]">You switched organisation in another tab. Nothing was saved, and your work is still here.</p>
-      <div class="notice-actions">{% if not me.acting %}<button type="button" class="btn btn-secondary btn-tall" data-stale-back data-org-name="{{ org.name }}">Back to {{ org.name }}</button>{% endif %}<button type="button" class="btn btn-secondary btn-tall" data-stale-home>Go to Home</button></div>
+      <p class="notice-title">This tab is out of date, so nothing was saved.</p>
+      <p class="meta m-0 text-[14px]">The app was updated while it was open. Your text is still here. Copy it, then reload the page.</p>
+      <div class="notice-actions"><button type="button" class="btn btn-secondary btn-tall" data-stale-reload>{{<icon name="rotate-cw" class="h-4 w-4"/>}}Reload page</button></div>
     </div>
   </div>
 </template>
@@ -78,10 +79,10 @@
 
 {% block tabbar %}
 <nav class="tabbar" aria-label="Main">
-  <a href="/dashboard" class="tab" {% if tab == "home" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="house" class="h-[22px] w-[22px]"/>}}</span>Home</a>
-  <a href="/tasks" class="tab" {% if tab == "tasks" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="list-todo" class="h-[22px] w-[22px]"/>}}</span>Tasks</a>
-  <a href="/chat" class="tab" {% if tab == "chat" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="message-circle" class="h-[22px] w-[22px]"/>}}<span hx-get="/chat/unread?style=tab" hx-trigger="load, every 60s"></span></span>Chat</a>
-  <a href="/more" class="tab" {% if tab == "more" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="ellipsis" class="h-[22px] w-[22px]"/>}}</span>More</a>
+  <a href="{{ org_url(path="/dashboard") }}" class="tab" {% if tab == "home" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="house" class="h-[22px] w-[22px]"/>}}</span>Home</a>
+  <a href="{{ org_url(path="/tasks") }}" class="tab" {% if tab == "tasks" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="list-todo" class="h-[22px] w-[22px]"/>}}</span>Tasks</a>
+  <a href="{{ org_url(path="/chat") }}" class="tab" {% if tab == "chat" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="message-circle" class="h-[22px] w-[22px]"/>}}<span hx-get="{{ org_url(path="/chat/unread?style=tab") }}" hx-trigger="load, every 60s"></span></span>Chat</a>
+  <a href="{{ org_url(path="/more") }}" class="tab" {% if tab == "more" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="ellipsis" class="h-[22px] w-[22px]"/>}}</span>More</a>
 </nav>
 {% endblock tabbar %}
 {% endblock body %}

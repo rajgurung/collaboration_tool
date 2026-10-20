@@ -1,11 +1,13 @@
 <div class="flex flex-col gap-5">
   <div class="flex items-start gap-2">
     <div class="min-w-0 flex-1">
+      {# Always drawn; shown only for people in two or more orgs (body[data-multi-org], §7), since HTMX draws the sheet without the count. #}
+      <p class="meta sheet-org"><span class="org-logo org-logo-xs" aria-hidden="true">{{ org.name | truncate(length=1, end="") | upper }}</span><strong class="truncate-1">{{ org.name }}</strong></p>
       <p class="meta m-0 mb-1.5 flex items-center gap-1.5"><span class="dot" style="--dot: {{ task.accent }}"></span>{% if task.project %}{{ task.project }}{% else %}No project{% endif %}</p>
       <h2 class="m-0 text-[22px] font-bold leading-tight tracking-tight">{{ task.title }}</h2>
       <p class="meta mt-1.5 mb-0 text-sm">{{ task.meta }}</p>
     </div>
-    <button type="button" class="btn btn-secondary -mt-0.5" hx-get="/tasks/{{ task.id }}/edit" hx-target="#task-sheet-body">{{<icon name="pencil" class="h-4 w-4"/>}}Edit</button>
+    <button type="button" class="btn btn-secondary -mt-0.5" hx-get="{{ org_url(path="/tasks/" ~ (task.id) ~ "/edit") }}" hx-target="#task-sheet-body">{{<icon name="pencil" class="h-4 w-4"/>}}Edit</button>
     <button type="button" class="icon-btn -mt-1.5 -mr-2.5 text-muted" data-dialog-close aria-label="Close">{{<icon name="x" class="h-[22px] w-[22px]"/>}}</button>
   </div>
 
@@ -14,7 +16,7 @@
     <div class="segmented" role="radiogroup" aria-labelledby="status-label">
       {% for s in statuses %}
       <button type="button" role="radio" aria-checked="{% if s.current %}true{% else %}false{% endif %}"
-              hx-post="/tasks/{{ task.id }}/status" hx-vals='{"status": "{{ s.key }}"}' hx-target="#task-sheet-body"><span class="flex items-center gap-1.5"><span class="dot" style="--dot: {{ s.color }}"></span>{{ s.label }}</span></button>
+              hx-post="{{ org_url(path="/tasks/" ~ (task.id) ~ "/status") }}" hx-vals='{"status": "{{ s.key }}"}' hx-target="#task-sheet-body"><span class="flex items-center gap-1.5"><span class="dot" style="--dot: {{ s.color }}"></span>{{ s.label }}</span></button>
       {% endfor %}
     </div>
   </div>
@@ -26,7 +28,7 @@
       {% for p in task.people %}<span class="person-pill">{{<avatar name={p.name} color={p.color} size="xs"/>}}{{ p.name }}</span>{% endfor %}
     </div>
     {% else %}
-    <p class="meta m-0">Nobody yet. <button type="button" class="text-link" hx-get="/tasks/{{ task.id }}/edit" hx-target="#task-sheet-body">Assign someone</button></p>
+    <p class="meta m-0">Nobody yet. <button type="button" class="text-link" hx-get="{{ org_url(path="/tasks/" ~ (task.id) ~ "/edit") }}" hx-target="#task-sheet-body">Assign someone</button></p>
     {% endif %}
   </div>
 
@@ -38,6 +40,6 @@
   {% include "tasks/_note_form.html" %}
 
   <div class="border-t border-line pt-3">
-    <button type="button" class="btn-text-danger" hx-post="/tasks/{{ task.id }}/delete" hx-confirm="Delete “{{ task.title }}”? Its notes go with it.">Delete task</button>
+    <button type="button" class="btn-text-danger" hx-post="{{ org_url(path="/tasks/" ~ (task.id) ~ "/delete") }}" hx-confirm="Delete “{{ task.title }}”? Its notes go with it.">Delete task</button>
   </div>
 </div>
