@@ -70,6 +70,8 @@ first-version scope. One file per feature in [briefs/](briefs/).
   and shared logins.
 - [briefs/homepage-documents.md](briefs/homepage-documents.md): showing
   Documents on the public homepage.
+- [briefs/org-in-the-address.md](briefs/org-in-the-address.md): every page
+  carries its organisation in the address, so two can be open side by side.
 
 ## Plans
 
