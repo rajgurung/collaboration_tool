@@ -446,11 +446,16 @@ async fn refuse_bare(
     };
     let to = match showing {
         Some(org) => org_path(&org.slug, &home),
-        // With no active org left, the bare address shows the page that
-        // says so.
-        None => last_org(parts, ctx, user, session_id)
-            .await
-            .map_or(home.clone(), |last| last.url(&home)),
+        None => match last_org(parts, ctx, user, session_id).await {
+            Ok(last) => last.url(&home),
+            // No org at all: the answer that says so (`/admin` for a super
+            // admin, else the waiting or no-org page), as before.
+            Err(answer) => {
+                let mut answer = *answer;
+                no_store(&mut answer, gone.is_some());
+                return answer;
+            }
+        },
     };
     tracing::info!(
         user_id,

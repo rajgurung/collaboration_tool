@@ -612,7 +612,6 @@ pub fn routes() -> Routes {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use super::*;
     use crate::data::live::CloseScope;
