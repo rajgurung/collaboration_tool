@@ -483,6 +483,7 @@ async fn asking_while_acting_ends_acting() {
         assert!(html.contains("You're acting in <strong>Acme</strong>."));
         assert!(html.contains("This request comes from your own account"));
         assert!(html.contains("Asking ends acting."));
+        assert!(html.contains("Nothing from your other organisations is shared with Beta."));
 
         let res = ask(&request, &acting, "beta", "raj").await;
         assert_eq!(res.status_code(), 303, "{}", res.text());

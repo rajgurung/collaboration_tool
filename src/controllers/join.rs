@@ -227,13 +227,15 @@ impl Page<'_> {
             },
             str::to_string,
         );
-        let from = match &here {
-            Some(m) => self.org_name(m.organisation_id).await,
-            None => None,
-        };
         let acting_id = cookie(self.headers, ACTING_ORG_COOKIE).and_then(|v| v.parse().ok());
         let acting = match acting_id {
             Some(id) if user.is_super_admin => self.org_name(id).await,
+            _ => None,
+        };
+        // While acting, this browser is in someone else's org, so the page
+        // speaks of "your other organisations" instead of naming one.
+        let from = match &here {
+            Some(m) if acting.is_none() => self.org_name(m.organisation_id).await,
             _ => None,
         };
         let status = if errors.is_empty() { 200 } else { 422 };
