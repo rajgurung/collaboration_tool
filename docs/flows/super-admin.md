@@ -60,8 +60,15 @@ Rules:
 - Switching organisation (`POST /orgs/{id}/switch`) clears `acting_org`. A
   super admin can only switch to orgs they belong to. Entering any other org
   stays on `/admin/orgs/{id}/enter`.
-- A super admin with no membership and no acting cookie is sent to `/admin`.
-  A stray `current_org` is cleared on the way.
+- A super admin with no active membership and no acting cookie is sent to
+  `/admin`, even if they have a waiting request somewhere. A stray
+  `current_org` is cleared on the way.
+- A super admin can ask to join an organisation from their own account (see
+  [accounts.md](accounts.md), "Join by link"). The join page says "This
+  request comes from your own account" and "Asking ends acting", and asking
+  clears `acting_org`. An acting super admin approves other people's
+  requests as an owner would, but never their own: the approval's update
+  refuses a row whose user is the approver.
 - The stale-tab check compares against the acting org (see
   [accounts.md](accounts.md), "Stale tabs"). A tab drawn for the admin's own
   org is stale while they are inside another, and goes to Home. Home offers

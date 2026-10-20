@@ -185,4 +185,11 @@ Owners read it at `GET /documents/activity`, newest first, grouped by day.
 After a member is removed, the remover and owners see "Change these at the
 source": logins the person saw, copied, added, changed or could see. It is
 built from this log and from `login_accesses` rows, which are kept after
-removal (`src/controllers/members.rs:299`).
+removal (`src/controllers/members.rs`, `rotate`). The page stays while the
+person asks to join again or is declined, and ends once they are approved.
+
+Approving someone (a rejoin or a first join) clears every login in that
+organisation that names them, so old shares don't come back
+(`login_accesses::Model::remove_for_member`). Rights that come from
+authorship do come back: an uploader can again delete files they uploaded
+before the removal ("Delete a file: the uploader, owners and admins").

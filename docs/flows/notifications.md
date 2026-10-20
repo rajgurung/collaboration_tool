@@ -76,7 +76,10 @@ person's notification id is "not found".
 
 Who does not get a notification:
 
-- Joining requests, approvals, removals and role changes send none.
+- Join requests, declines, removals and role changes send none.
+- Approvals send no notification. They email the person instead ("Your
+  request to join was approved", `src/mailers/membership.rs`), at most 20
+  per organisation in any 24 hours.
 - Reactions on messages and notes send none.
 - `@everyone` from Claude, or from a super admin acting in another
   organisation, is ignored in task notes (`notifications.rs:192`).
