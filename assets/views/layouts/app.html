@@ -12,9 +12,9 @@
     <a href="{{ org_url(path="/dashboard") }}" class="mb-4 flex min-h-11 items-center gap-3 px-2">{{<logo letter={org.name | default(value="C") | truncate(length=1, end="")}/>}}<strong class="truncate-1 text-[15px]">{{ org.name | default(value="Collaboration Tool") }}</strong></a>
     {% endif %}
     <a href="{{ org_url(path="/dashboard") }}" class="side-link" {% if active == "dashboard" %}aria-current="page"{% endif %}>{{<icon name="house" class="h-5 w-5"/>}}Home</a>
-    <a href="{{ org_url(path="/notifications") }}" class="side-link" {% if active == "notifications" %}aria-current="page"{% endif %}>{{<icon name="bell" class="h-5 w-5"/>}}<span class="flex-1">Notifications</span><span hx-get="{{ org_url(path="/notifications/unread") }}" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>
+    <a href="{{ org_url(path="/notifications") }}" class="side-link" {% if active == "notifications" %}aria-current="page"{% endif %}>{{<icon name="bell" class="h-5 w-5"/>}}<span class="flex-1">Notifications</span>{% if current_org_id %}<span hx-get="{{ org_url(path="/notifications/unread") }}" hx-trigger="load, every 60s, notifications-changed from:body"></span>{% endif %}</a>
     <a href="{{ org_url(path="/tasks") }}" class="side-link" {% if active == "tasks" %}aria-current="page"{% endif %}>{{<icon name="list-todo" class="h-5 w-5"/>}}Tasks</a>
-    <a href="{{ org_url(path="/chat") }}" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span><span hx-get="{{ org_url(path="/chat/unread") }}" hx-trigger="load, every 60s"></span></a>
+    <a href="{{ org_url(path="/chat") }}" class="side-link" {% if active == "chat" %}aria-current="page"{% endif %}>{{<icon name="message-circle" class="h-5 w-5"/>}}<span class="flex-1">Chat</span>{% if current_org_id %}<span hx-get="{{ org_url(path="/chat/unread") }}" hx-trigger="load, every 60s"></span>{% endif %}</a>
     <a href="{{ org_url(path="/roadmap") }}" class="side-link" {% if active == "roadmap" %}aria-current="page"{% endif %}>{{<icon name="map" class="h-5 w-5"/>}}Roadmap</a>
     <a href="{{ org_url(path="/meetings") }}" class="side-link" {% if active == "meetings" %}aria-current="page"{% endif %}>{{<icon name="message-square-text" class="h-5 w-5"/>}}Meetings</a>
     {% if not me.acting %}<a href="{{ org_url(path="/documents") }}" class="side-link" {% if active == "documents" %}aria-current="page"{% endif %}>{{<icon name="folder" class="h-5 w-5"/>}}Documents</a>{% endif %}
@@ -38,7 +38,7 @@
     <header class="topbar">
       {% if active != "dashboard" %}{% include "layouts/_org_line.html" %}{% endif %}
       {% block topbar %}<h1>{% block heading %}{% endblock heading %}</h1>{% block actions %}{% endblock actions %}{% endblock topbar %}
-      {% if me and active != "notifications" %}<a href="{{ org_url(path="/notifications") }}" class="icon-btn bell-btn mobile-only" aria-label="Notifications">{{<icon name="bell" class="h-[22px] w-[22px]"/>}}<span hx-get="{{ org_url(path="/notifications/unread?style=dot") }}" hx-trigger="load, every 60s, notifications-changed from:body"></span></a>{% endif %}
+      {% if me and active != "notifications" %}<a href="{{ org_url(path="/notifications") }}" class="icon-btn bell-btn mobile-only" aria-label="Notifications">{{<icon name="bell" class="h-[22px] w-[22px]"/>}}{% if current_org_id %}<span hx-get="{{ org_url(path="/notifications/unread?style=dot") }}" hx-trigger="load, every 60s, notifications-changed from:body"></span>{% endif %}</a>{% endif %}
     </header>
     <main class="page {% block page_class %}{% endblock page_class %}">{% block content %}{% endblock content %}</main>
     {% endblock main %}
@@ -81,7 +81,7 @@
 <nav class="tabbar" aria-label="Main">
   <a href="{{ org_url(path="/dashboard") }}" class="tab" {% if tab == "home" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="house" class="h-[22px] w-[22px]"/>}}</span>Home</a>
   <a href="{{ org_url(path="/tasks") }}" class="tab" {% if tab == "tasks" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="list-todo" class="h-[22px] w-[22px]"/>}}</span>Tasks</a>
-  <a href="{{ org_url(path="/chat") }}" class="tab" {% if tab == "chat" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="message-circle" class="h-[22px] w-[22px]"/>}}<span hx-get="{{ org_url(path="/chat/unread?style=tab") }}" hx-trigger="load, every 60s"></span></span>Chat</a>
+  <a href="{{ org_url(path="/chat") }}" class="tab" {% if tab == "chat" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="message-circle" class="h-[22px] w-[22px]"/>}}{% if current_org_id %}<span hx-get="{{ org_url(path="/chat/unread?style=tab") }}" hx-trigger="load, every 60s"></span>{% endif %}</span>Chat</a>
   <a href="{{ org_url(path="/more") }}" class="tab" {% if tab == "more" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="ellipsis" class="h-[22px] w-[22px]"/>}}</span>More</a>
 </nav>
 {% endblock tabbar %}

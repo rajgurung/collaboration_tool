@@ -645,7 +645,7 @@ document.body.addEventListener("htmx:afterSwap", (event) => {
 // one, and everything listening for "notifications-changed" reloads. The
 // browser reconnects on its own; badges also poll every 60s as a fallback.
 // Each tab's stream is for its own org, so its bell counts that org only.
-if (document.querySelector('[hx-get*="/notifications/unread"]')) {
+if (pageOrgId() && document.querySelector('[hx-get*="/notifications/unread"]')) {
   const events = new EventSource(orgUrl("/notifications/stream"));
   events.addEventListener("notify", () => htmx.trigger(document.body, "notifications-changed"));
   // A removal closes the stream; when it comes back, check this tab can

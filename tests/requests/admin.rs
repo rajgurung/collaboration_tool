@@ -314,3 +314,24 @@ async fn a_super_admin_without_a_membership_gets_the_clearing_cookie_on_the_htmx
     })
     .await;
 }
+
+/// The admin page belongs to no org: no badge polls a bare address, and no
+/// notification stream opens, so nothing bounces the admin to Home.
+#[tokio::test]
+#[serial]
+async fn the_admin_page_polls_no_bare_badges() {
+    request::<App, _, _>(|request, ctx| async move {
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let page = request
+            .get("/admin")
+            .add_header(admin.0.clone(), admin.1.clone())
+            .await;
+        assert_eq!(page.status_code(), 200);
+        let html = page.text();
+        assert!(!html.contains("/notifications/unread"), "{html}");
+        assert!(!html.contains("/chat/unread"), "{html}");
+        // app.ts opens the stream only on a page with an org and a badge.
+        assert!(!html.contains("data-org-id="), "{html}");
+    })
+    .await;
+}
