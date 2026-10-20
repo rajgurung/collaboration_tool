@@ -343,7 +343,7 @@ async fn the_password_changed_email_says_to_reconnect_claude() {
         assert!(email.contains(
             "Claude was disconnected too. If you use it, connect it again from More, then Connect Claude."
         ));
-        assert!(email.contains("Then tell an owner of your organisations."));
+        assert!(email.contains("Then tell an owner of each organisation you belong to."));
     })
     .await;
 }

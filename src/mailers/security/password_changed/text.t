@@ -10,4 +10,4 @@ If you did not, someone else can read your email. Secure your email account firs
 
 {{ forgot_url }}
 
-Then tell an owner of your organisations.
+Then tell an owner of each organisation you belong to.
