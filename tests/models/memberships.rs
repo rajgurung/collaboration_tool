@@ -459,78 +459,113 @@ async fn a_personal_token_is_refused_for_a_removed_membership() {
     assert_eq!(beta_tokens, 0);
 }
 
-/// A removal holds the membership `FOR UPDATE` on another connection while a
-/// token is minted and logins are unlocked. Each waits, then sees the
-/// removal and is refused. Without the `FOR SHARE` reads they would see the
-/// old, active row and go ahead.
+/// A removal of `membership_id` on another connection: it holds the row
+/// `FOR UPDATE` for [`HOLD`], then commits it as removed.
+async fn held_removal(other: &sea_orm::DatabaseConnection, membership_id: i64) {
+    let txn = other.begin().await.unwrap();
+    let row = memberships::Entity::find_by_id(membership_id)
+        .lock_exclusive()
+        .one(&txn)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::sleep(HOLD).await;
+    let mut removed = row.into_active_model();
+    removed.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
+    removed.update(&txn).await.unwrap();
+    txn.commit().await.unwrap();
+}
+
+/// Starts after the held removal has its lock.
+async fn after_the_lock<T>(work: impl std::future::Future<Output = T>) -> T {
+    tokio::time::sleep(HOLD / 5).await;
+    work.await
+}
+
+async fn live_beta_tokens(ctx: &AppContext, orgs: &TwoOrgs) -> u64 {
+    access_tokens::Entity::find()
+        .filter(access_tokens::Column::OrganisationId.eq(orgs.beta))
+        .filter(access_tokens::Column::RevokedAt.is_null())
+        .count(&ctx.db)
+        .await
+        .unwrap()
+}
+
+// Each of the next four races one way of minting against a removal that
+// holds the membership `FOR UPDATE`. Each waits, then sees the removal and is
+// refused. Without its `FOR SHARE` read it would see the old, active row and
+// go ahead.
+
 #[tokio::test]
 #[serial]
-async fn minting_waits_for_a_removal_in_progress() {
+async fn a_personal_token_waits_for_a_removal_in_progress() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let other = second_connection(ctx).await;
+
+    let params = PersonalParams {
+        name: "Laptop".to_string(),
+    };
+    let mint =
+        access_tokens::Model::create_personal(&ctx.db, orgs.beta, orgs.alice, &params, RESOURCE);
+    let ((), minted) = tokio::join!(held_removal(&other, orgs.in_beta.id), after_the_lock(mint));
+    assert!(minted.is_err(), "no personal token");
+    assert_eq!(live_beta_tokens(ctx, &orgs).await, 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_code_exchange_waits_for_a_removal_in_progress() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let orgs = alice_in_two_orgs(ctx).await;
     let claude = claude_client(ctx).await;
     let code = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
-    let first = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
-    let earlier = exchange(&ctx.db, &claude, &first).await.unwrap();
     let other = second_connection(ctx).await;
 
-    let removal = async {
-        let txn = other.begin().await.unwrap();
-        let row = memberships::Entity::find_by_id(orgs.in_beta.id)
-            .lock_exclusive()
-            .one(&txn)
-            .await
-            .unwrap()
-            .unwrap();
-        tokio::time::sleep(HOLD).await;
-        let mut removed = row.into_active_model();
-        removed.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
-        removed.update(&txn).await.unwrap();
-        txn.commit().await.unwrap();
-    };
-    let personal = async {
-        tokio::time::sleep(HOLD / 5).await;
-        access_tokens::Model::create_personal(
-            &ctx.db,
-            orgs.beta,
-            orgs.alice,
-            &PersonalParams {
-                name: "Laptop".to_string(),
-            },
-            RESOURCE,
-        )
-        .await
-    };
-    let exchanged = async {
-        tokio::time::sleep(HOLD / 5).await;
-        exchange(&ctx.db, &claude, &code).await
-    };
-    let refreshed = async {
-        tokio::time::sleep(HOLD / 5).await;
-        access_tokens::Model::refresh(&ctx.db, &earlier.refresh_token, &claude, RESOURCE)
-            .await
-            .unwrap()
-    };
-    let unlocked = async {
-        tokio::time::sleep(HOLD / 5).await;
-        users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.beta)
-            .await
-            .unwrap()
-    };
-    let ((), personal, exchanged, refreshed, unlocked) =
-        tokio::join!(removal, personal, exchanged, refreshed, unlocked);
-    assert!(personal.is_err(), "no personal token");
+    let ((), exchanged) = tokio::join!(
+        held_removal(&other, orgs.in_beta.id),
+        after_the_lock(exchange(&ctx.db, &claude, &code))
+    );
     assert!(exchanged.is_none(), "no tokens for the code");
-    assert!(refreshed.is_none(), "no refreshed tokens");
-    assert!(!unlocked, "no unlock");
-    let live = access_tokens::Entity::find()
-        .filter(access_tokens::Column::OrganisationId.eq(orgs.beta))
-        .filter(access_tokens::Column::RevokedAt.is_null())
-        .count(&ctx.db)
-        .await
-        .unwrap();
-    assert_eq!(live, 0, "no live token for Beta");
+    assert_eq!(live_beta_tokens(ctx, &orgs).await, 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_refresh_waits_for_a_removal_in_progress() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let claude = claude_client(ctx).await;
+    let code = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
+    let earlier = exchange(&ctx.db, &claude, &code).await.unwrap();
+    let other = second_connection(ctx).await;
+
+    let refresh = access_tokens::Model::refresh(&ctx.db, &earlier.refresh_token, &claude, RESOURCE);
+    let ((), refreshed) = tokio::join!(
+        held_removal(&other, orgs.in_beta.id),
+        after_the_lock(refresh)
+    );
+    assert!(refreshed.unwrap().is_none(), "no refreshed tokens");
+    assert_eq!(live_beta_tokens(ctx, &orgs).await, 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn an_unlock_waits_for_a_removal_in_progress() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let other = second_connection(ctx).await;
+
+    let unlock = users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.beta);
+    let ((), unlocked) = tokio::join!(
+        held_removal(&other, orgs.in_beta.id),
+        after_the_lock(unlock)
+    );
+    assert!(!unlocked.unwrap(), "no unlock");
     let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
     assert_eq!(alice.secrets_unlocked_org_id, None);
 }
