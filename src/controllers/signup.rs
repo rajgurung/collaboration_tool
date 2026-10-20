@@ -39,9 +39,9 @@ async fn create(
         email: &params.email,
     };
     match organisations::Model::sign_up(&ctx.db, &params).await {
-        Ok((user, _org)) => format::render()
+        Ok((user, org)) => format::render()
             .cookies(&signed_in_cookies(&ctx, &user)?)?
-            .redirect("/dashboard"),
+            .redirect(&crate::views::links::org_path(&org.slug, "/dashboard")),
         Err(ModelError::EntityAlreadyExists) => {
             let errors = FieldErrors::from([(
                 "email".to_string(),

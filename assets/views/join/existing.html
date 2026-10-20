@@ -8,7 +8,7 @@
 <h2 class="mt-2 mb-0 text-2xl font-semibold">You're already in {{ org.name }}</h2>
 <p class="mt-2 text-sm leading-6 text-muted">You're a member there as {{ mine.username }}.</p>
 <div class="join-buttons">
-  <form method="post" action="/orgs/{{ org.id }}/switch"><button type="submit" class="btn btn-primary btn-lg w-full">Open {{ org.name }}</button></form>
+  <a href="{{ open_url }}" class="btn btn-primary btn-lg">Open {{ org.name }}</a>
   <a href="/dashboard" class="btn btn-secondary btn-lg">Back to Home</a>
 </div>
 {% elif state == "waiting" %}

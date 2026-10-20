@@ -77,7 +77,8 @@ async fn enter(
         org = org.slug,
         "super admin entered organisation"
     );
-    let mut response = redirect_response(&headers, "/dashboard");
+    let home = crate::views::links::org_path(&org.slug, "/dashboard");
+    let mut response = redirect_response(&headers, &home);
     append_cookie(&mut response, &acting_org_cookie(&ctx, org.id)?)?;
     Ok(response)
 }
