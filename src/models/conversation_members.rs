@@ -51,6 +51,28 @@ impl Model {
         .insert(db)
         .await?)
     }
+
+    /// Adds a user to a conversation unless they are in it already.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn add_if_missing<C: ConnectionTrait>(
+        db: &C,
+        conversation: &conversations::Model,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        let row = ActiveModel {
+            conversation_id: ActiveValue::Set(conversation.id),
+            user_id: ActiveValue::Set(user_id),
+            ..Default::default()
+        }
+        .set_tenant(conversation.organisation_id)?;
+        Entity::insert(row)
+            .on_conflict_do_nothing_on([Column::ConversationId, Column::UserId])
+            .exec(db)
+            .await?;
+        Ok(())
+    }
 }
 
 /// The new `last_read_at`: now by the database clock, but never earlier than

@@ -1083,3 +1083,47 @@ fn history_lines() {
     };
     assert_eq!(line(&older).as_deref(), Some("Declined on 2 May 2020"));
 }
+
+async fn conversation(ctx: &AppContext, org_id: i64, kind: &str, key: &str) {
+    collab::models::conversations::ActiveModel {
+        kind: ActiveValue::Set(kind.to_string()),
+        dm_key: ActiveValue::Set(Some(key.to_string())),
+        name: ActiveValue::Set((kind == "group").then(|| "Group".to_string())),
+        ..Default::default()
+    }
+    .set_tenant(org_id)
+    .unwrap()
+    .insert(&ctx.db)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn dms_of_never_over_matches() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (_, acme) = sign_up(ctx, "Acme", "alice").await;
+    let (_, beta) = sign_up(ctx, "Beta", "bob").await;
+    for key in ["dm:1:11", "dm:11:21", "dm:5:21", "dm:1:21"] {
+        conversation(ctx, acme, "dm", key).await;
+    }
+    conversation(ctx, beta, "dm", "dm:1:5").await;
+    conversation(ctx, acme, "group", "dm:1:5").await;
+
+    let keys = |user_id: i64| async move {
+        let mut keys: Vec<String> =
+            collab::models::conversations::Model::dms_of(&ctx.db, acme, user_id)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter_map(|c| c.dm_key)
+                .collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(1).await, ["dm:1:11", "dm:1:21"]);
+    assert_eq!(keys(11).await, ["dm:11:21", "dm:1:11"]);
+    assert_eq!(keys(21).await, ["dm:11:21", "dm:1:21", "dm:5:21"]);
+    assert!(keys(2).await.is_empty());
+}
