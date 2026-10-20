@@ -52,9 +52,15 @@ document.querySelectorAll<HTMLElement>("[data-flash]").forEach((el) => {
 // Stale tabs. Every app page says which organisation it was drawn for
 // (`<body data-org-id>`), and every request carries it: HTMX through the body's
 // hx-headers, plain forms through a hidden `_org`, raw fetch calls through
-// orgHeaders(). After a switch in another tab the server refuses this tab's
-// requests with 409 and `HX-Redirect` (or 303 for a plain form) to Home.
+// orgHeaders(). Each page posts to its own org's address, so a refusal (409
+// and `HX-Redirect`, or 303 for a plain form, to Home) now means a page drawn
+// before an update, or one that no longer has its org.
 const pageOrgId = () => document.body.dataset.orgId ?? "";
+
+// An address inside this page's organisation: "/tasks" gives
+// "/o/acme-studio/tasks" (`<body data-org-base>`). Pages with no org (sign-in,
+// join) have no base, so the path stays bare.
+const orgUrl = (path: string) => `${document.body.dataset.orgBase ?? ""}${path}`;
 
 // Never HX-Request: the server answers that with HX-Redirect instead of a
 // redirect, which changes what these calls see (secretRefused relies on it).
@@ -109,7 +115,7 @@ let staleHome = "";
 function goHomeOrHold(home: string, gone: boolean): boolean {
   staleHome = home;
   let shown = visibleBanner();
-  // The switch banner's "Back" would only fail now.
+  // The out-of-date banner's "Reload" would only land on the removed page.
   if (shown && gone && !shown.hasAttribute("data-gone")) {
     shown.remove();
     shown = null;
@@ -175,36 +181,17 @@ document.body.addEventListener("htmx:beforeOnLoad", (event) => {
   if (home && goHomeOrHold(home, xhr.getResponseHeader("X-Org-Gone") !== null)) event.preventDefault();
 });
 
-// "Back to Acme": switch this browser back to the page's own org. A manual
-// redirect, so the tab stays put; the browser still stores the cookie.
+// The gone banner's "Go to Home", and the out-of-date banner's "Reload page".
 document.addEventListener("click", (event) => {
   const target = event.target as Element | null;
-  if (target?.closest("[data-stale-home]")) {
-    window.location.href = staleHome || "/dashboard";
-    return;
-  }
-  const back = target?.closest<HTMLButtonElement>("[data-stale-back]");
-  if (!back) return;
-  const name = back.dataset.orgName ?? "";
-  back.disabled = true;
-  fetch(`/orgs/${pageOrgId()}/switch`, { method: "POST", redirect: "manual", credentials: "same-origin" })
-    .then((res) => {
-      if (res.type === "opaqueredirect") {
-        back.closest("[data-stale-banner]")?.remove();
-        showToast({ message: `You're back in ${name}` });
-        void startNextUpload();
-        return;
-      }
-      showToast({ kind: "error", message: res.status === 404 ? `You can't open ${name} any more.` : `Couldn't switch to ${name}. Try again.` });
-    })
-    .catch(() => showToast({ kind: "error", message: `Couldn't switch to ${name}. Check your connection and try again.` }))
-    .finally(() => (back.disabled = false));
+  if (target?.closest("[data-stale-home]")) window.location.href = staleHome || orgUrl("/dashboard");
+  else if (target?.closest("[data-stale-reload]")) window.location.reload();
 });
 
-// Asks the server whether this tab is still in the browser's org. A stale tab
-// gets the refusal and moves (or holds).
+// Asks the server whether this tab can still use its org. A refused tab moves
+// (or holds).
 function probeOrg() {
-  if (pageOrgId()) void htmx.ajax("GET", "/orgs/current", { swap: "none" });
+  if (pageOrgId()) void htmx.ajax("GET", orgUrl("/orgs/current"), { swap: "none" });
 }
 // Back or forward: a page from the back-forward cache, or one the browser
 // drew again from its own cache, may be for the old org.
@@ -213,12 +200,12 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted || nav?.type === "back_forward") probeOrg();
 });
 
-// After a switch, a create, a stale-tab move or asking to join, drop
-// ?switched=, ?created=, ?from= and ?requested= from Home's address, so a
-// reload doesn't repeat the toast or the notice.
+// After a create, a refused save or asking to join, drop ?created=, ?from=
+// and ?requested= from Home's address, so a reload doesn't repeat the toast
+// or the notice.
 {
   const here = new URL(window.location.href);
-  const flags = ["switched", "created", "from", "requested"];
+  const flags = ["created", "from", "requested"];
   if (flags.some((flag) => here.searchParams.has(flag))) {
     flags.forEach((flag) => here.searchParams.delete(flag));
     history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
@@ -617,7 +604,7 @@ document.addEventListener("drop", (event) => {
   // Move the card straight away; the board refreshes from the server after the save.
   cell.insertBefore(card, cell.querySelector(".cell-add"));
   card.dataset.status = status;
-  void htmx.ajax("POST", `/tasks/${card.dataset.taskId}/status`, { values: { status }, swap: "none" });
+  void htmx.ajax("POST", orgUrl(`/tasks/${card.dataset.taskId}/status`), { values: { status }, swap: "none" });
 });
 
 // Collapsed swimlanes stay collapsed, across board refreshes and visits.
@@ -657,11 +644,12 @@ document.body.addEventListener("htmx:afterSwap", (event) => {
 // Notifications: the server pushes a `notify` event when this person gets a new
 // one, and everything listening for "notifications-changed" reloads. The
 // browser reconnects on its own; badges also poll every 60s as a fallback.
-if (document.querySelector('[hx-get^="/notifications/unread"]')) {
-  const events = new EventSource("/notifications/stream");
+// Each tab's stream is for its own org, so its bell counts that org only.
+if (document.querySelector('[hx-get*="/notifications/unread"]')) {
+  const events = new EventSource(orgUrl("/notifications/stream"));
   events.addEventListener("notify", () => htmx.trigger(document.body, "notifications-changed"));
-  // A switch in another tab closes the stream; when it comes back, check
-  // this tab is still in the browser's org.
+  // A removal closes the stream; when it comes back, check this tab can
+  // still use its org.
   let streamOpened = false;
   events.addEventListener("open", () => {
     if (streamOpened) probeOrg();
@@ -1228,7 +1216,7 @@ if (welcome) {
     else if (button === back) show(at - 1);
     else if (button === next || button.hasAttribute("data-welcome-done")) welcome.close();
   });
-  welcome.addEventListener("close", () => htmx.ajax("POST", "/guide/welcomed", { swap: "none" }), { once: true });
+  welcome.addEventListener("close", () => htmx.ajax("POST", orgUrl("/guide/welcomed"), { swap: "none" }), { once: true });
   show(0);
   welcome.showModal();
 }
@@ -1398,7 +1386,7 @@ async function startNextUpload() {
   // Ask first, so a stale tab is caught before it sends a large body. The
   // file then waits at the front of the queue, behind the banner. HX-Request,
   // because the server only checks the claim on HTMX GETs.
-  const stale = await fetch("/orgs/current", { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).then(staleRefusal, () => false);
+  const stale = await fetch(orgUrl("/orgs/current"), { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).then(staleRefusal, () => false);
   if (stale) {
     currentUpload = null;
     uploadQueue.unshift(next);
@@ -1557,7 +1545,7 @@ function uploadFinished({ file, row }: Upload, successful: boolean, status: numb
 // stale before calling it a failed upload. The upload stays current
 // meanwhile, so nothing else starts and leaving still warns.
 async function recheckUpload(upload: Upload, status: number) {
-  const probe = await fetch("/orgs/current", { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).catch(() => null);
+  const probe = await fetch(orgUrl("/orgs/current"), { headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" }).catch(() => null);
   currentUpload = null;
   if (probe?.status === 409 && probe.headers.get("HX-Redirect")) {
     requeueUpload(upload);
@@ -1691,7 +1679,7 @@ function askForPassword(ask: SecretAsk) {
 }
 
 async function showSecret(ask: SecretAsk) {
-  const res = await postForm(`/documents/logins/${ask.loginId}/reveal`, { field: ask.field });
+  const res = await postForm(orgUrl(`/documents/logins/${ask.loginId}/reveal`), { field: ask.field });
   if (staleRefusal(res)) return;
   if (res.status === 423) return askForPassword(ask);
   if (!res.ok || res.redirected) return secretRefused(res);
@@ -1727,7 +1715,7 @@ function copySecret(ask: SecretAsk, unlocking?: Promise<Response>) {
     // A stale refusal is dealt with by the unlock's own handler below.
     if (unlocked && unlocked.status === 409) throw new Error("refused");
     if (unlocked && !unlocked.ok) throw new NeedsPassword();
-    const res = await postForm(`/documents/logins/${ask.loginId}/copy`, { field: ask.field });
+    const res = await postForm(orgUrl(`/documents/logins/${ask.loginId}/copy`), { field: ask.field });
     if (staleRefusal(res)) throw new Error("refused");
     if (res.status === 423) throw new NeedsPassword();
     if (!res.ok || res.redirected) {
@@ -1789,7 +1777,7 @@ document.addEventListener("submit", (event) => {
   const error = form.querySelector<HTMLElement>("[data-unlock-error]");
   const ask = pendingSecret;
   if (!dialog || !input || !ask) return;
-  const unlocking = postForm("/documents/logins/unlock", { password: input.value, login_id: ask.loginId });
+  const unlocking = postForm(orgUrl("/documents/logins/unlock"), { password: input.value, login_id: ask.loginId });
   input.value = "";
   input.removeAttribute("aria-invalid");
   if (error) error.hidden = true;
@@ -1849,8 +1837,10 @@ window.addEventListener("pagehide", () => hideAllSecrets());
 
 // The organisation switcher (docs/designs/org-switcher.html): a menu under the
 // sidebar's org name, and on phones a sheet from Home's header or More. Both
-// load their rows from /orgs the first time they open. Without JavaScript the
-// triggers are links to the /orgs page.
+// load their rows from the trigger's own link (the org list, with this page's
+// section) the first time they open. Without JavaScript the triggers are
+// links to that page. Each row is a link to the same section in that org
+// (docs/designs/org-in-the-address.html, §2).
 const orgMenuButton = document.querySelector<HTMLElement>("[data-org-menu]");
 const orgMenu = document.getElementById("org-menu");
 const orgSheet = document.querySelector<HTMLDialogElement>("#org-sheet");
@@ -1859,8 +1849,9 @@ const orgSheetBody = document.getElementById("org-sheet-body");
 const orgItems = (list: Element) => Array.from(list.querySelectorAll<HTMLElement>("[role^=menuitem]"));
 
 // Rows are reached with the arrow keys, not Tab, inside the menu and the sheet.
+let orgListUrl = orgUrl("/orgs");
 async function loadOrgs(list: HTMLElement, force = false) {
-  if (force || !list.querySelector("[data-org-list]")) await htmx.ajax("GET", "/orgs", { target: `#${list.id}`, swap: "innerHTML" });
+  if (force || !list.querySelector("[data-org-list]")) await htmx.ajax("GET", orgListUrl, { target: `#${list.id}`, swap: "innerHTML" });
   orgItems(list).forEach((item) => (item.tabIndex = -1));
 }
 
@@ -1874,6 +1865,7 @@ const orgMenuOpen = () => orgMenuButton?.getAttribute("aria-expanded") === "true
 
 async function openOrgMenu(which: "current" | "last" = "current") {
   if (!orgMenuButton || !orgMenu) return;
+  orgListUrl = orgMenuButton.getAttribute("href") ?? orgListUrl;
   orgMenuButton.setAttribute("aria-expanded", "true");
   orgMenu.hidden = false;
   await loadOrgs(orgMenu);
@@ -1887,8 +1879,9 @@ function closeOrgMenu(refocus = true) {
   if (refocus) orgMenuButton.focus();
 }
 
-async function openOrgSheet() {
+async function openOrgSheet(opener: Element) {
   if (!orgSheet || !orgSheetBody) return;
+  orgListUrl = opener.getAttribute("href") ?? orgListUrl;
   orgSheet.showModal();
   await loadOrgs(orgSheetBody);
   focusOrg(orgSheetBody, "current");
@@ -1907,10 +1900,10 @@ function orgListKeys(list: HTMLElement, event: KeyboardEvent) {
   else if (event.key === "Home") go(0);
   else if (event.key === "End") go(items.length - 1);
   else if (event.key === "Enter" || event.key === " ") {
-    // Rows are buttons, and the browser clicks them itself: a switch, or the
-    // current org closing the list. "New organisation" is a link, which the
-    // browser follows on Enter only, so Space clicks it here. A pending row
-    // does nothing.
+    // The current row is a button, which the browser clicks itself to close
+    // the list. Other orgs and "New organisation" are links, which the
+    // browser follows on Enter only, so Space clicks them here. A pending
+    // row does nothing.
     const item = items[i];
     if (item instanceof HTMLButtonElement) return;
     if (!(item instanceof HTMLAnchorElement)) event.preventDefault();
@@ -1961,7 +1954,7 @@ document.addEventListener("click", (event) => {
   const opener = (event.target as Element | null)?.closest("[data-org-sheet]");
   if (!opener || !orgSheet) return;
   event.preventDefault();
-  void openOrgSheet();
+  void openOrgSheet(opener);
 });
 document.addEventListener("click", (event) => {
   const current = (event.target as Element | null)?.closest("[data-org-current]");
@@ -1970,33 +1963,44 @@ document.addEventListener("click", (event) => {
   orgSheet?.close();
 });
 
-// While a switch runs: a spinner and "Switching…" on its row, the others dimmed.
-function switchingState(row: HTMLElement, on: boolean) {
-  const list = row.closest<HTMLElement>("[data-org-list]");
-  list?.querySelectorAll<HTMLElement>(".org-row").forEach((other) => other !== row && other.classList.toggle("dim", on));
-  row.classList.toggle("loading", on);
+// A plain click on another org's row: a spinner and "Opening…" on it, the
+// others dimmed, while the link loads. The next page says "You're now in
+// {org}" from its own name; the flag in sessionStorage only says to. A
+// modified or middle click opens a new tab, so it gets neither, and a
+// long-press is left to the browser.
+const SWITCHED_KEY = "collab:switched";
+document.addEventListener("click", (event) => {
+  const row = (event.target as Element | null)?.closest<HTMLAnchorElement>("a.org-row[data-org-name]");
+  if (!row || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  row.closest("[data-org-list]")?.querySelectorAll<HTMLElement>(".org-row").forEach((other) => other !== row && other.classList.add("dim"));
+  row.classList.add("loading");
   const meta = row.querySelector<HTMLElement>("[data-org-role]");
   if (meta) {
     meta.dataset.role ??= meta.textContent ?? "";
-    meta.textContent = on ? "Switching…" : meta.dataset.role;
+    meta.textContent = "Opening…";
   }
-}
-document.body.addEventListener("htmx:beforeRequest", (event) => {
-  const elt = (event as CustomEvent<{ elt: Element }>).detail.elt;
-  if (elt instanceof HTMLElement && elt.matches(".org-row[data-org-name]")) switchingState(elt, true);
+  try {
+    sessionStorage.setItem(SWITCHED_KEY, "1");
+  } catch {
+    // Storage can be blocked; then there is no toast.
+  }
 });
-document.body.addEventListener("htmx:afterRequest", (event) => {
-  const { elt, successful, xhr } = (event as CustomEvent<{ elt: Element; successful: boolean; xhr: XMLHttpRequest }>).detail;
-  if (!(elt instanceof HTMLElement) || !elt.matches(".org-row[data-org-name]") || successful) return;
-  const name = elt.dataset.orgName ?? "";
-  switchingState(elt, false);
-  if (xhr.status === 404) {
-    showToast({ kind: "error", message: `You can't open ${name} any more.` });
-    const list = elt.closest<HTMLElement>("#org-menu, #org-sheet-body");
-    if (list) void loadOrgs(list, true).then(() => focusOrg(list, "current"));
-  } else {
-    showToast({ kind: "error", message: `Couldn't switch to ${name}. Check your connection and try again.` });
+{
+  let switched = false;
+  try {
+    switched = sessionStorage.getItem(SWITCHED_KEY) === "1";
+    sessionStorage.removeItem(SWITCHED_KEY);
+  } catch {
+    // As above.
   }
+  const name = document.body.dataset.orgName;
+  if (switched && name) showToast({ message: `You're now in ${name}` });
+}
+// Back from the next page: the row is drawn again as it was.
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  document.querySelectorAll<HTMLElement>(".org-row.loading, .org-row.dim").forEach((row) => row.classList.remove("loading", "dim"));
+  document.querySelectorAll<HTMLElement>(".org-row [data-org-role][data-role]").forEach((meta) => (meta.textContent = meta.dataset.role ?? ""));
 });
 
 // "New organisation" (docs/designs/create-org.html) opens its form in the org
@@ -2028,16 +2032,16 @@ let newOrgFailed = false;
 for (const name of ["htmx:responseError", "htmx:sendError"]) {
   document.body.addEventListener(name, (event) => {
     const detail = (event as CustomEvent<{ pathInfo?: { requestPath?: string }; xhr?: XMLHttpRequest }>).detail;
-    if (detail.pathInfo?.requestPath === "/orgs/new" && detail.xhr?.status !== 409) newOrgFailed = true;
+    if (detail.pathInfo?.requestPath === orgUrl("/orgs/new") && detail.xhr?.status !== 409) newOrgFailed = true;
   });
 }
 
 async function openNewOrg(fromList: boolean) {
-  if (!orgSheet || !orgSheetBody) return void (window.location.href = "/orgs/new");
+  if (!orgSheet || !orgSheetBody) return void (window.location.href = orgUrl("/orgs/new"));
   newOrgReturn = orgMenuOpen() ? orgMenuButton : null;
   closeOrgMenu(false);
   newOrgFailed = false;
-  await htmx.ajax("GET", "/orgs/new", { target: "#org-sheet-body", swap: "innerHTML" }).catch(() => (newOrgFailed = true));
+  await htmx.ajax("GET", orgUrl("/orgs/new"), { target: "#org-sheet-body", swap: "innerHTML" }).catch(() => (newOrgFailed = true));
   if (newOrgFailed) {
     // Outside any dialog, where a toast can be seen.
     orgSheet.close();
