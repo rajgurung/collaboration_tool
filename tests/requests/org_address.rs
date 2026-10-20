@@ -36,7 +36,7 @@ struct World {
 
 async fn world(request: &TestServer, ctx: &AppContext) -> World {
     let (alice, _, _, in_beta) = alice_in_two_orgs(request, ctx).await;
-    let alice = with_org(&ctx, &alice, in_beta.organisation_id).await;
+    let alice = with_org(ctx, &alice, in_beta.organisation_id).await;
     let kreepa = join(request, ctx, "acme", "kreepa", "kreepa@example.com").await;
     let user = users::Model::find_by_email(&ctx.db, "kreepa@example.com")
         .await

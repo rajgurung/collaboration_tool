@@ -77,7 +77,7 @@ async fn joining_leaves_the_user_pending_on_every_page() {
 
         for page in TENANT_PAGES {
             let res = request
-                .get(&cookie.to(&page))
+                .get(&cookie.to(page))
                 .add_header(cookie.0.clone(), cookie.1.clone())
                 .await;
             assert_eq!(res.status_code(), 403, "{page}");
@@ -168,7 +168,7 @@ async fn signed_in_users_skip_signup_but_see_join() {
         assert!(join.text().contains("Ask to join Beta"));
         for page in ["/signup", "/"] {
             let res = request
-                .get(&cookie.to(&page))
+                .get(&cookie.to(page))
                 .add_header(cookie.0.clone(), cookie.1.clone())
                 .await;
             assert_eq!(res.status_code(), 303, "{page}");

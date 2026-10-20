@@ -78,7 +78,7 @@ struct Tabs {
 async fn tabs(request: &TestServer, ctx: &AppContext) -> Tabs {
     let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(request, ctx).await;
     Tabs {
-        beta: with_org(&ctx, &cookie, in_beta.organisation_id).await,
+        beta: with_org(ctx, &cookie, in_beta.organisation_id).await,
         acme_id: in_acme.organisation_id,
         beta_id: in_beta.organisation_id,
     }
@@ -535,7 +535,7 @@ async fn polling_badges_move_a_stale_tab() {
         let t = tabs(&request, &ctx).await;
         for path in ["/notifications/unread", "/chat/unread"] {
             let res = request
-                .get(&t.beta.to(&path))
+                .get(&t.beta.to(path))
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
                 .add_header("HX-Request", "true")
                 .add_header("x-org-id", t.acme_id.to_string())

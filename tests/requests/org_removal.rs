@@ -42,7 +42,7 @@ struct Removal {
 async fn setup(request: &TestServer, ctx: &AppContext) -> Removal {
     let (alice, alice_id, in_acme, in_beta) = alice_in_two_orgs(request, ctx).await;
     Removal {
-        in_beta: with_org(&ctx, &alice, in_beta.organisation_id).await,
+        in_beta: with_org(ctx, &alice, in_beta.organisation_id).await,
         alice,
         alice_id,
         acme: in_acme.organisation_id,

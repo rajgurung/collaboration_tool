@@ -56,7 +56,7 @@ async fn get(request: &TestServer, who: Option<&Cookie>, path: &str) -> axum_tes
         Some(cookie) if !path.starts_with("/join/") => open_page(request, cookie, path).await.0,
         Some(cookie) => {
             request
-                .get(&path)
+                .get(path)
                 .add_header(cookie.0.clone(), cookie.1.clone())
                 .await
         }

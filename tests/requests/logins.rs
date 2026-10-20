@@ -127,7 +127,7 @@ async fn post(
     form: &[(&str, &str)],
 ) -> axum_test::TestResponse {
     request
-        .post(&cookie.to(&path))
+        .post(&cookie.to(path))
         .as_member(cookie)
         .form(&form)
         .await
@@ -904,7 +904,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
         ];
         for path in &posts {
             let res = request
-                .post(&gina.to(&path))
+                .post(&gina.to(path))
                 .as_member(&gina)
                 .form(&form)
                 .await;
