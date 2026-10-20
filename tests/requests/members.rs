@@ -30,6 +30,9 @@ async fn owner_sees_join_link_and_pending_requests() {
         assert_eq!(res.status_code(), 200);
         let body = res.text();
         assert!(body.contains("/join/acme"), "{body}");
+        assert!(body.contains(
+            "People who use it join with a new or existing account, then wait for you or another admin to let them in."
+        ));
         assert!(body.contains("bob@example.com"));
         assert!(body.contains("Approve"));
     })

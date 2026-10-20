@@ -29,6 +29,9 @@ struct MemberRow {
     color: &'static str,
     is_me: bool,
     can_remove: bool,
+    /// For a waiting row, the last decision here, e.g. "Removed on 3
+    /// October". Dates only, no names.
+    history: Option<String>,
 }
 
 impl MemberRow {
@@ -47,6 +50,10 @@ impl MemberRow {
             color: avatar_color(&membership.username),
             is_me: user.id == me.user.id,
             can_remove: !me.acting && membership.can_remove(me.user.id, &me.role, owners),
+            history: membership
+                .is_pending()
+                .then(|| membership.history().map(|h| h.line(me.tz())))
+                .flatten(),
         }
     }
 }
@@ -312,7 +319,8 @@ fn change_row(item: ToChange, tz: chrono_tz::Tz) -> ChangeRow {
 
 /// "Change these at the source": after someone is removed, the logins they
 /// saw, copied, added, changed or were allowed to see. For the person who
-/// removed them and for owners.
+/// removed them and for owners. It stays while the person is waiting to
+/// rejoin, or was declined, and ends when they are approved.
 #[debug_handler]
 async fn rotate(
     member: CurrentMember,
@@ -323,7 +331,9 @@ async fn rotate(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let former = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    if !former.is_removed() {
+    // Removed, including one who asked again and is waiting or was declined.
+    // Approval clears `removed_at`, and the page ends.
+    if former.is_active() || former.removed_at.is_none() {
         return Err(Error::NotFound);
     }
     if !member.is_owner() && former.removed_by_id != Some(member.user.id) {

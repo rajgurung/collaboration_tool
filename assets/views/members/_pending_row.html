@@ -3,6 +3,7 @@
   <div class="min-w-0 flex-1">
     <p class="truncate-1 m-0 font-medium">{{ row.username }}</p>
     <p class="meta truncate-1 m-0">{{ row.email }}</p>
+    {% if row.history %}<p class="row-history">{{<icon name="rotate-ccw" class="h-[13px] w-[13px]"/>}}{{ row.history }}</p>{% endif %}
   </div>
   {% if row.status == "pending" %}
   <div class="flex gap-2">
