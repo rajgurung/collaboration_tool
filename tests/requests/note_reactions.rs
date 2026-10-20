@@ -213,8 +213,8 @@ async fn only_members_of_the_notes_organisation_can_react() {
         assert_eq!(react(&request, &gina, &note, "👍", "1").await.0, 404);
         assert_eq!(
             react(&request, &dave, &note, "👍", "1").await.0,
-            403,
-            "pending"
+            409,
+            "pending: sent Home, where the waiting page shows"
         );
 
         // A note id from another Acme task, sent with this task's id.

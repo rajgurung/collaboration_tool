@@ -155,12 +155,13 @@ async fn removing_someone_locks_them_out_of_everything() {
         assert_eq!(res.status_code(), 403);
         assert!(res.text().contains("You were removed from Acme"));
         let before = messages::Entity::find().count(&ctx.db).await.unwrap();
+        // Her open tab's calls are sent Home, where the removed page shows.
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         assert_eq!(
             messages::Entity::find().count(&ctx.db).await.unwrap(),
             before
@@ -180,7 +181,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         let res = request
             .get(&format!(
                 "/chat/{}/messages/{}/actions",
@@ -220,7 +221,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         assert_eq!(
             note_reactions::Entity::find().count(&ctx.db).await.unwrap(),
             0
@@ -243,7 +244,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         assert_eq!(
             messages::Entity::find().count(&ctx.db).await.unwrap(),
             before

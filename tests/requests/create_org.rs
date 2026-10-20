@@ -579,9 +579,12 @@ async fn a_pending_only_user_cannot_create() {
         let before = org_count(&ctx).await;
         let res = get(&request, &bob, "/orgs/new").await;
         assert_eq!(res.status_code(), 403);
-        let res = create(&request, &bob, "Bob's Bikes", "bob").await;
-        assert_eq!(res.status_code(), 403);
         assert!(res.text().contains("Acme Studio"), "the waiting page");
+        // The form posts with the page's org claim, so it is sent Home,
+        // where the waiting page shows.
+        let res = create(&request, &bob, "Bob's Bikes", "bob").await;
+        assert_eq!(res.status_code(), 409);
+        assert_eq!(res.headers()["hx-redirect"], "/dashboard");
         assert_eq!(org_count(&ctx).await, before);
     })
     .await;

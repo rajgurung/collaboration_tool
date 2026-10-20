@@ -347,7 +347,9 @@ async fn threads_need_a_member_and_a_top_level_message_in_the_conversation() {
                 }
             }
             let res = reply(&request, who, conversation_id, parent_id, "let me in").await;
-            assert_eq!(res.status_code(), status, "POST reply: {case}");
+            // A call from a tab with no active org left is sent Home instead.
+            let posted = if case == "pending" { 409 } else { status };
+            assert_eq!(res.status_code(), posted, "POST reply: {case}");
             let res = request
                 .get(&format!("/chat/{conversation_id}/ws?thread={parent_id}"))
                 .add_header(who.0.clone(), who.1.clone())

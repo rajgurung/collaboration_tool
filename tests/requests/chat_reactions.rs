@@ -235,7 +235,9 @@ async fn reactions_need_a_member_of_the_conversation() {
                 .as_member(who)
                 .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
                 .await;
-            assert_eq!(res.status_code(), status, "POST reactions: {case}");
+            // A call from a tab with no active org left is sent Home instead.
+            let posted = if case == "pending" { 409 } else { status };
+            assert_eq!(res.status_code(), posted, "POST reactions: {case}");
             assert!(!res.text().contains("Salaries"), "POST reactions: {case}");
             let res = request
                 .get(&actions_path(conversation_id, message_id))
