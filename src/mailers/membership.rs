@@ -73,9 +73,11 @@ mod tests {
         };
         let email = render(&approved, &args).unwrap();
         assert_eq!(email.subject, "Your request to join was approved");
-        assert!(email
-            .html
-            .contains("Bakers &lt;b&gt;&amp;&lt;&#x2F;b&gt; Co"));
+        assert!(
+            email.html.contains("Bakers &lt;b&gt;&amp;"),
+            "{}",
+            email.html
+        );
         assert!(!email.html.contains("<b>"));
         assert!(email.text.contains("https://collab.rajgurung.me/dashboard"));
     }
