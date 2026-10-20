@@ -52,6 +52,7 @@ pub mod logins;
 pub mod note_reactions;
 
 pub mod create_org;
+pub mod join_existing;
 pub mod multi_org;
 pub mod org_removal;
 pub mod orgs;
