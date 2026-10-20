@@ -213,19 +213,19 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted || nav?.type === "back_forward") probeOrg();
 });
 
-// After a switch, a create or a stale-tab move, drop ?switched=, ?created=
-// and ?from= from Home's address, so a reload doesn't repeat the toast or
-// the notice.
+// After a switch, a create, a stale-tab move or asking to join, drop
+// ?switched=, ?created=, ?from= and ?requested= from Home's address, so a
+// reload doesn't repeat the toast or the notice.
 {
   const here = new URL(window.location.href);
-  const flags = ["switched", "created", "from"];
+  const flags = ["switched", "created", "from", "requested"];
   if (flags.some((flag) => here.searchParams.has(flag))) {
     flags.forEach((flag) => here.searchParams.delete(flag));
     history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
   }
 }
 document.addEventListener("click", (event) => {
-  (event.target as Element | null)?.closest("[data-dismiss-notice]")?.closest("[data-stale-notice]")?.remove();
+  (event.target as Element | null)?.closest("[data-dismiss-notice]")?.closest("[data-stale-notice], [data-requested-notice]")?.remove();
 });
 
 // Chat: Enter sends, Shift+Enter adds a new line.

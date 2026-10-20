@@ -27,7 +27,7 @@ use super::{
 };
 
 /// Routes that never run the check: no `CurrentMember`, or `PinnedMember`.
-const EXEMPT: [(&str, &str); 15] = [
+const EXEMPT: [(&str, &str); 16] = [
     ("POST", "/login"),
     ("POST", "/signup"),
     ("POST", "/join/{slug}"),
@@ -41,6 +41,8 @@ const EXEMPT: [(&str, &str); 15] = [
     ("POST", "/oauth/register"),
     ("POST", "/oauth/token"),
     ("POST", "/mcp"),
+    // Acts on the account, not the org: see `join::request`.
+    ("POST", "/join/{slug}/request"),
     // PinnedMember: these forms check their own hidden org_id.
     ("POST", "/oauth/authorize"),
     ("POST", "/settings/claude/tokens"),

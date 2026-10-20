@@ -9,6 +9,24 @@ use super::prepare_data::{join, sign_up_member, TENANT_PAGES, USER_PASSWORD};
 
 #[tokio::test]
 #[serial]
+async fn an_existing_email_is_sent_to_sign_in() {
+    request::<App, _, _>(|request, _ctx| async move {
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Beta", "bob", "bob@example.com").await;
+        let res = request
+            .post("/join/beta")
+            .form(&serde_json::json!({ "name": "ally", "email": "alice@example.com", "password": USER_PASSWORD }))
+            .await;
+        assert_eq!(res.status_code(), 422);
+        let html = res.text();
+        assert!(html.contains("An account with this email already exists. Sign in to join Beta."));
+        assert!(html.contains(r#"href="/login?next=/join/beta""#));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn join_page_shows_the_organisation() {
     request::<App, _, _>(|request, _ctx| async move {
         sign_up_member(&request, "Himalayan Ritual", "raj", "raj@example.com").await;
@@ -138,10 +156,17 @@ async fn everyone_is_not_a_username() {
 
 #[tokio::test]
 #[serial]
-async fn signed_in_users_skip_the_join_and_signup_forms() {
+async fn signed_in_users_skip_signup_but_see_join() {
     request::<App, _, _>(|request, _ctx| async move {
         let cookie = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
-        for page in ["/join/acme", "/signup", "/"] {
+        sign_up_member(&request, "Beta", "bob", "bob@example.com").await;
+        let join = request
+            .get("/join/beta")
+            .add_header(cookie.0.clone(), cookie.1.clone())
+            .await;
+        assert_eq!(join.status_code(), 200);
+        assert!(join.text().contains("Ask to join Beta"));
+        for page in ["/signup", "/"] {
             let res = request
                 .get(page)
                 .add_header(cookie.0.clone(), cookie.1.clone())
