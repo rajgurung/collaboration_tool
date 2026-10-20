@@ -199,6 +199,31 @@ impl Model {
         Ok(group)
     }
 
+    /// Every direct conversation in the organisation that `user_id` is one
+    /// of the two people in, whether or not they are a member of it now.
+    /// `dm_key` is always `dm:{low}:{high}`, so the id must be a whole part:
+    /// `dm:1:%` can't match user 11, and `dm:%:1` can't match `dm:5:11`.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn dms_of<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<Vec<Self>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Kind.eq(kind::DM))
+            .filter(
+                Condition::any()
+                    .add(Column::DmKey.like(format!("dm:{user_id}:%")))
+                    .add(Column::DmKey.like(format!("dm:%:{user_id}"))),
+            )
+            .order_by_asc(Column::Id)
+            .all(db)
+            .await?)
+    }
+
     /// The direct conversation between two teammates, created the first time.
     ///
     /// # Errors

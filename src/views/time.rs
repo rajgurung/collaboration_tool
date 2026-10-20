@@ -1,6 +1,6 @@
 //! Showing times in an organisation's time zone. Everything is stored in UTC;
 //! these turn it into what people read, with BST and GMT handled by the zone.
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, Utc};
 use chrono_tz::Tz;
 
 /// The zone for an IANA name, or London when the name isn't known.
@@ -13,6 +13,18 @@ pub fn zone(name: &str) -> Tz {
 #[must_use]
 pub fn local(at: DateTime<FixedOffset>, tz: Tz) -> DateTime<Tz> {
     at.with_timezone(&tz)
+}
+
+/// A date with no time, e.g. "3 October", with the year when it isn't this
+/// year.
+#[must_use]
+pub fn day(at: DateTime<FixedOffset>, tz: Tz) -> String {
+    let at = local(at, tz);
+    if at.year() == today(tz).year() {
+        at.format("%-d %B").to_string()
+    } else {
+        at.format("%-d %B %Y").to_string()
+    }
 }
 
 /// Today's date where the organisation is.

@@ -34,8 +34,9 @@ pub const ORG_HEADER: &str = "x-org-id";
 /// The hidden field `app.ts` adds to plain forms, for the same claim.
 pub const ORG_FIELD: &str = "_org";
 
-/// Set on a refusal when the tab's org is one this user was removed from,
-/// so `app.ts` shows the removal banner instead of the switch one.
+/// Set on a refusal when the tab's org is one this user no longer has (see
+/// [`removed_from`]), so `app.ts` shows the removal banner instead of the
+/// switch one.
 pub const ORG_GONE_HEADER: &str = "x-org-gone";
 
 /// Shown when the Claude Allow page is posted in another organisation.
@@ -93,6 +94,16 @@ impl CurrentMember {
     #[must_use]
     pub fn shown_for_this_org(&self, org_id: Option<&str>) -> bool {
         org_id.and_then(|id| id.parse::<i64>().ok()) == Some(self.org.id)
+    }
+
+    /// The person approving or declining a request, for
+    /// `memberships::Model::approve` and `reject`.
+    #[must_use]
+    pub fn approver(&self) -> memberships::Approver {
+        memberships::Approver {
+            user_id: self.user.id,
+            acting: self.acting,
+        }
     }
 
     /// Owners and admins approve members and manage settings.
@@ -191,17 +202,18 @@ impl FromRequestParts<AppContext> for CurrentMember {
     }
 }
 
-/// Whether the claimed org is one this user was removed from. The user id is
-/// always the resolved member's, never one from the request, so a forged
-/// claim can only name an org the person was removed from themselves. An
-/// error counts as no.
+/// Whether the claimed org is one this user no longer has: their membership
+/// there is removed, declined, or pending again after asking to rejoin. The
+/// user id is always the resolved member's, never one from the request, so
+/// a forged claim can only name an org the person has a row in themselves.
+/// An error counts as no.
 async fn removed_from(ctx: &AppContext, claim: OrgClaim, user_id: i64) -> bool {
     let OrgClaim::Org(org_id) = claim else {
         return false;
     };
     memberships::Model::in_org_for_user(&ctx.db, org_id, user_id)
         .await
-        .is_ok_and(|m| m.is_some_and(|m| m.is_removed()))
+        .is_ok_and(|m| m.is_some_and(|m| !m.is_active()))
 }
 
 /// [`CurrentMember`] without the claim check. Only for forms that pin their
@@ -280,10 +292,16 @@ async fn resolve_org(
     let membership = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .map_err(|e| Error::from(e).into_response())?;
+    // A super admin with no active membership has /admin, never the
+    // waiting, removed or declined page, even when they asked to join.
+    if user.is_super_admin
+        && !membership
+            .as_ref()
+            .is_some_and(memberships::Model::is_active)
+    {
+        return Err(Box::new(redirect_response(&parts.headers, "/admin")));
+    }
     let Some(membership) = membership else {
-        if user.is_super_admin {
-            return Err(Box::new(redirect_response(&parts.headers, "/admin")));
-        }
         if let Some(home) = no_active_org(parts, ctx, user.id).await {
             return Err(Box::new(home));
         }

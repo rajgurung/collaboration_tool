@@ -236,7 +236,8 @@
   /* Forms */
   .field { display: grid; gap: 6px; }
   .field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
-  .field-error { font-size: 13px; color: var(--danger); }
+  .field-error { display: flex; align-items: flex-start; gap: 5px; font-size: 13px; color: var(--danger); }
+  .field-error svg { flex-shrink: 0; margin-top: 1px; }
   .field-hint { font-size: 13px; color: var(--muted); }
   .input { width: 100%; min-height: 44px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 12px; font: inherit; font-size: 16px; outline: none; }
   .input::placeholder { color: var(--muted); }
@@ -834,12 +835,27 @@
   .org-sheet-form .org-sheet-head:has(.org-sheet-back:not([hidden])) { padding-left: 8px; }
   .org-sheet.org-sheet-form .sheet-body { padding: 0 20px 20px; }
   .org-form-lead { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
-  .org-new-form .field-error { display: flex; align-items: flex-start; gap: 5px; }
-  .org-new-form .field-error svg { flex-shrink: 0; margin-top: 1px; }
   .org-new-form .input[disabled] { opacity: 0.6; }
   .org-new-alert { margin: 0 0 16px; }
   .org-acting-note { display: flex; gap: 10px; margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: var(--active-bg); font-size: 14px; }
   .org-acting-note svg { flex-shrink: 0; margin-top: 2px; color: var(--link); }
+  /* The signed-in join page (join/existing.html). */
+  .signed-as { display: flex; flex-direction: column; align-items: flex-start; margin-top: 20px; padding: 10px 12px 0; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; }
+  .signed-as > span { overflow-wrap: anywhere; }
+  .signed-as .link-btn { padding: 0; }
+  .link-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; border: 0; background: none; color: var(--link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .join-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; }
+  .join-note svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }
+  .join-note-acting { border-color: transparent; background: var(--active-bg); }
+  .join-note-acting svg { color: var(--link); }
+  .state-tile { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 12px; border-radius: 14px; background: var(--chip); color: var(--muted); }
+  .state-ok { background: color-mix(in srgb, var(--done) 14%, transparent); color: var(--done); }
+  .state-wait { background: var(--active-bg); color: var(--link); }
+  .join-buttons { display: grid; gap: 12px; margin-top: 28px; }
+  .join-sign-in { color: var(--link); font-weight: 600; }
+  /* Members: a waiting row's last decision. */
+  .row-history { display: flex; align-items: flex-start; gap: 5px; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+  .row-history svg { flex-shrink: 0; margin-top: 3px; }
   .org-facts { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; list-style: none; }
   .org-facts li { display: flex; align-items: flex-start; gap: 10px; }
   .org-facts svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }

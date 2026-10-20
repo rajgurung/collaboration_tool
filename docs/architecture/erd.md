@@ -156,6 +156,11 @@ Rules:
   Only `active` members get past `CurrentMember`.
 - Removing a member never deletes the row. It sets `status = removed`,
   `removed_at` and `removed_by_id`.
+- Asking to join again sends a `removed` or `rejected` row back to `pending`,
+  the same row, with its role, `approved_*` and `removed_*` kept as history.
+- `approved_at` is the time of the last decision, approve or decline, and
+  `approved_by_id` who made it. Approval also clears `removed_at` and
+  `removed_by_id` and sets `role = member`.
 - `users.name` is the name chosen at sign-up. `memberships.username` is the
   name shown inside the organisation. At signup it is a copy; "New
   organisation" lets the person choose it.
@@ -181,8 +186,11 @@ stopped the code assuming one membership per user: `memberships::for_user`
 returns them all and `default_for_user` picks the oldest active one. PR 2
 allows one membership per user per organisation, and adds the `current_org`
 cookie that picks between them. PR 4 lets a signed-in person create another
-organisation, which gives them a second membership, as its owner. The plans
-are `docs/plans/multi-org-1.md` to `docs/plans/multi-org-4.md`.
+organisation, which gives them a second membership, as its owner. PR 5 made
+removal end access to one organisation only. PR 6 lets someone with an
+account ask to join another organisation, and a removed or declined person
+ask again. The plans are `docs/plans/multi-org-1.md` to
+`docs/plans/multi-org-6.md`.
 
 ## Work: projects, tasks and meetings
 

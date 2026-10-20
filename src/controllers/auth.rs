@@ -36,12 +36,23 @@ pub struct LoginForm {
 #[derive(Debug, Deserialize)]
 pub struct ForgotForm {
     pub email: String,
+    /// Carried into the reset link; see [`safe_next`].
+    #[serde(default)]
+    pub next: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ResetForm {
     pub password: String,
     pub password_confirmation: String,
+    /// Carried to the sign-in page after the reset; see [`safe_next`].
+    #[serde(default)]
+    pub next: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NextQuery {
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,20 +61,55 @@ pub struct LoginQuery {
     pub next: Option<String>,
 }
 
-/// Only the Claude "Allow access" page sends people to log in and back, so
-/// `next` must be that page. Anything else (other paths, `//host`, absolute
-/// URLs, backslashes or line breaks, raw or percent-encoded) is dropped.
+/// Where sign-in may send people back to: the Claude "Allow access" page,
+/// or a join page (see [`join_page`]). Anything else (other paths, `//host`,
+/// absolute URLs, backslashes or line breaks, raw or percent-encoded) is
+/// dropped.
 #[must_use]
 pub fn safe_next(next: &str) -> Option<&str> {
+    if join_page(next).is_some() {
+        return Some(next);
+    }
     let lower = next.to_ascii_lowercase();
     let sneaky = next.contains(['\\', '\r', '\n'])
         || ["%5c", "%0d", "%0a"].iter().any(|s| lower.contains(s));
     (next.starts_with("/oauth/authorize?") && !sneaky).then_some(next)
 }
 
+/// The slug when `next` is exactly `/join/` and 1 to 60 of `a`-`z`, `0`-`9`
+/// or `-`, and nothing else. Checked byte by byte on the raw value: no
+/// decoding and no lowercasing, so nothing can follow the slug and anything
+/// outside ASCII fails.
+#[must_use]
+pub fn join_page(next: &str) -> Option<&str> {
+    let slug = next.strip_prefix("/join/")?;
+    let ok = (1..=60).contains(&slug.len())
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    ok.then_some(slug)
+}
+
+/// `next` percent-encoded for a query string, for links that carry it on.
+fn encoded(next: &str) -> String {
+    url::form_urlencoded::byte_serialize(next.as_bytes()).collect()
+}
+
+/// The name of the organisation a join page `next` points at, for the
+/// sign-in page's line. Looked up from the slug, never taken from the query
+/// text; an unknown slug gives `None`.
+async fn joining(ctx: &AppContext, next: Option<&str>) -> Option<String> {
+    let slug = join_page(next?)?;
+    organisations::Model::find_by_slug(&ctx.db, slug)
+        .await
+        .ok()
+        .map(|org| org.name)
+}
+
 #[debug_handler]
 async fn login_page(
     ViewEngine(v): ViewEngine<TeraView>,
+    State(ctx): State<AppContext>,
     Query(query): Query<LoginQuery>,
 ) -> Result<Response> {
     let notice = query
@@ -73,7 +119,13 @@ async fn login_page(
     format::render().view(
         &v,
         "auth/login.html",
-        data!({ "email": "", "notice": notice, "next": next }),
+        data!({
+            "email": "",
+            "notice": notice,
+            "next": next,
+            "next_query": next.map(encoded),
+            "joining": joining(&ctx, next).await,
+        }),
     )
 }
 
@@ -90,20 +142,20 @@ async fn login(
     if !auth_attempts::Model::begin_login(&ctx.db, &form.email, user_id, &ip).await? {
         // Same work as a real check, so the refusal does not reveal anything.
         let _ = hash::verify_password(&form.password, DUMMY_HASH);
-        return login_error(&v, &form, 429, TOO_MANY);
+        return login_error(&v, &ctx, &form, 429, TOO_MANY).await;
     }
     let user = match user {
         Some(user) if user.verify_password(&form.password) => user,
-        Some(_) => return login_error(&v, &form, 422, INCORRECT),
+        Some(_) => return login_error(&v, &ctx, &form, 422, INCORRECT).await,
         None => {
             let _ = hash::verify_password(&form.password, DUMMY_HASH);
-            return login_error(&v, &form, 422, INCORRECT);
+            return login_error(&v, &ctx, &form, 422, INCORRECT).await;
         }
     };
     // The attempt recorded above stays as a failure unless this clears it.
     auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
     if user.is_locked() {
-        return login_error(&v, &form, 403, LOCKED);
+        return login_error(&v, &ctx, &form, 403, LOCKED).await;
     }
     format::render()
         .cookies(&signed_in_cookies(&ctx, &user)?)?
@@ -114,13 +166,22 @@ const INCORRECT: &str = "Email or password is incorrect.";
 const TOO_MANY: &str = "Too many failed sign-ins. Try again in 15 minutes, or reset your password.";
 const LOCKED: &str = "Your account is locked after too many wrong passwords. Reset your password with \"Forgot password\" to unlock it.";
 
-fn login_error(v: &TeraView, form: &LoginForm, status: u16, message: &str) -> Result<Response> {
+async fn login_error(
+    v: &TeraView,
+    ctx: &AppContext,
+    form: &LoginForm,
+    status: u16,
+    message: &str,
+) -> Result<Response> {
+    let next = safe_next(&form.next);
     format::render().status(status).view(
         v,
         "auth/login.html",
         data!({
             "email": form.email,
-            "next": safe_next(&form.next),
+            "next": next,
+            "next_query": next.map(encoded),
+            "joining": joining(ctx, next).await,
             "error": message,
         }),
     )
@@ -171,12 +232,21 @@ async fn sign_out_everywhere(
 }
 
 #[debug_handler]
-async fn forgot_page(ViewEngine(v): ViewEngine<TeraView>) -> Result<Response> {
-    format::render().view(&v, "auth/forgot.html", data!({ "email": "" }))
+async fn forgot_page(
+    ViewEngine(v): ViewEngine<TeraView>,
+    Query(query): Query<NextQuery>,
+) -> Result<Response> {
+    let next = query.next.as_deref().and_then(safe_next);
+    format::render().view(
+        &v,
+        "auth/forgot.html",
+        data!({ "email": "", "next": next, "next_query": next.map(encoded) }),
+    )
 }
 
 /// Always shows the same confirmation, so the form cannot be used to find out
-/// which emails have accounts, or that a limit was reached.
+/// which emails have accounts, or that a limit was reached. A safe `next`
+/// rides along in the reset link.
 #[debug_handler]
 async fn forgot(
     ViewEngine(v): ViewEngine<TeraView>,
@@ -193,7 +263,7 @@ async fn forgot(
                 .into_active_model()
                 .set_forgot_password_sent(&ctx.db)
                 .await?;
-            AuthMailer::forgot_password(&ctx, &user).await?;
+            AuthMailer::forgot_password(&ctx, &user, safe_next(&form.next)).await?;
         } else {
             tracing::debug!("password reset requested for unknown email");
         }
@@ -208,6 +278,7 @@ async fn reset_page(
     ViewEngine(v): ViewEngine<TeraView>,
     State(ctx): State<AppContext>,
     Path(token): Path<String>,
+    Query(query): Query<NextQuery>,
 ) -> Result<Response> {
     if users::Model::find_by_reset_token(&ctx.db, &token)
         .await
@@ -215,7 +286,12 @@ async fn reset_page(
     {
         return reset_invalid(&v);
     }
-    format::render().view(&v, "auth/reset.html", data!({ "token": token }))
+    let next = query.next.as_deref().and_then(safe_next);
+    format::render().view(
+        &v,
+        "auth/reset.html",
+        data!({ "token": token, "next": next }),
+    )
 }
 
 #[debug_handler]
@@ -228,21 +304,25 @@ async fn reset(
     let Ok(user) = users::Model::find_by_reset_token(&ctx.db, &token).await else {
         return reset_invalid(&v);
     };
+    let next = safe_next(&form.next);
     if form.password != form.password_confirmation {
-        return reset_form_error(&v, &token, "The two passwords do not match.");
+        return reset_form_error(&v, &token, next, "The two passwords do not match.");
     }
     match user.reset_password_everywhere(&ctx, &form.password).await {
         Ok((user, revoked)) => {
             auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
             auth_attempts::Model::clear_reauth(&ctx.db, &user.email).await?;
             tell_about_reset(&ctx, &user, revoked > 0).await;
-            format::redirect("/login?reset=1")
+            match next {
+                Some(next) => format::redirect(&format!("/login?reset=1&next={}", encoded(next))),
+                None => format::redirect("/login?reset=1"),
+            }
         }
         Err(err) => {
             let message = field_errors(&err)
                 .and_then(|errors| errors.into_values().next())
                 .ok_or(err)?;
-            reset_form_error(&v, &token, &message)
+            reset_form_error(&v, &token, next, &message)
         }
     }
 }
@@ -288,11 +368,16 @@ async fn tell_org_owners_about_reset(
     Ok(())
 }
 
-fn reset_form_error(v: &TeraView, token: &str, message: &str) -> Result<Response> {
+fn reset_form_error(
+    v: &TeraView,
+    token: &str,
+    next: Option<&str>,
+    message: &str,
+) -> Result<Response> {
     format::render().status(422).view(
         v,
         "auth/reset.html",
-        data!({ "token": token, "error": message }),
+        data!({ "token": token, "next": next, "error": message }),
     )
 }
 
@@ -319,11 +404,16 @@ mod tests {
     use super::safe_next;
 
     #[test]
-    fn next_only_returns_to_the_allow_access_page() {
+    fn next_only_returns_to_allow_access_or_a_join_page() {
         assert_eq!(
             safe_next("/oauth/authorize?client_id=a&state=b"),
             Some("/oauth/authorize?client_id=a&state=b")
         );
+        let sixty = format!("/join/{}", "a".repeat(60));
+        for good in ["/join/acme-studio", "/join/a", sixty.as_str()] {
+            assert_eq!(safe_next(good), Some(good), "{good}");
+        }
+        let sixty_one = format!("/join/{}", "a".repeat(61));
         for bad in [
             "",
             "/",
@@ -336,6 +426,22 @@ mod tests {
             "/oauth/authorizeX?x=1",
             "/oauth/authorize?x=%0d%0aSet-Cookie:a=b",
             "/oauth/authorize?x=\\y",
+            "/join/",
+            "/join/Acme",
+            "/join/acme/",
+            "/join/acme#x",
+            "/join/acme?",
+            "/join/acme?x=1",
+            "/join/ acme",
+            "/join/acme%20",
+            "/join/%61cme",
+            "/join/\u{ff41}cme",
+            "/\\join/acme",
+            "/join/acme\r\n",
+            "/join/acme/request",
+            "/join/../admin",
+            "//join/acme",
+            sixty_one.as_str(),
         ] {
             assert_eq!(safe_next(bad), None, "{bad}");
         }

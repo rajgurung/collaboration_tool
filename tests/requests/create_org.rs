@@ -12,7 +12,9 @@ use serial_test::serial;
 
 use super::{
     multi_org::{clears, set_cookie, with_org},
-    prepare_data::{join, page_org_id, sign_up_member, AsMember, TestMember, USER_PASSWORD},
+    prepare_data::{
+        approve_as_owner, join, page_org_id, sign_up_member, AsMember, TestMember, USER_PASSWORD,
+    },
 };
 
 async fn get(request: &TestServer, who: &TestMember, path: &str) -> axum_test::TestResponse {
@@ -695,10 +697,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
                 .await
                 .unwrap()
                 .unwrap();
-        pending
-            .approve(&ctx.db, user(&ctx, "alice@example.com").await.id)
-            .await
-            .unwrap();
+        approve_as_owner(&ctx, &pending).await;
         assert_eq!(get(&request, &bob, "/dashboard").await.status_code(), 200);
         let project = super::tasks::project_in(&ctx, "acme-studio", "Studio website").await;
         let res = request

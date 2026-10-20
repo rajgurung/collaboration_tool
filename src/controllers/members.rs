@@ -10,6 +10,7 @@ use crate::{
         current_member::{forbidden, CurrentMember},
         session::redirect_response,
     },
+    mailers::membership::MembershipMailer,
     models::{login_events::Client, logins::ToChange, memberships, organisations, users},
     views::{
         forms::{field_errors, toast},
@@ -28,6 +29,12 @@ struct MemberRow {
     color: &'static str,
     is_me: bool,
     can_remove: bool,
+    /// For a waiting row, the last decision here, e.g. "Removed on 3
+    /// October". Dates only, no names.
+    history: Option<String>,
+    /// "Change these at the source" for a waiting row that was removed,
+    /// when this person may open it (see [`rotate`]).
+    rotate: bool,
 }
 
 impl MemberRow {
@@ -37,6 +44,13 @@ impl MemberRow {
         me: &CurrentMember,
         owners: usize,
     ) -> Self {
+        let history = membership
+            .is_pending()
+            .then(|| membership.history())
+            .flatten();
+        let may_rotate = !me.acting
+            && me.can_manage()
+            && (me.is_owner() || membership.removed_by_id == Some(me.user.id));
         Self {
             id: membership.id,
             username: membership.username.clone(),
@@ -46,6 +60,8 @@ impl MemberRow {
             color: avatar_color(&membership.username),
             is_me: user.id == me.user.id,
             can_remove: !me.acting && membership.can_remove(me.user.id, &me.role, owners),
+            history: history.map(|h| h.line(me.tz())),
+            rotate: may_rotate && matches!(history, Some(memberships::History::Removed(_))),
         }
     }
 }
@@ -155,8 +171,10 @@ async fn approve(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_manager()?;
-    let target = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    let result = target.approve(&ctx.db, member.user.id).await;
+    let result = memberships::Model::approve(&ctx.db, member.org.id, member.approver(), id).await;
+    if let Ok(approved) = &result {
+        tell_approved(&ctx, &member.org, approved).await;
+    }
     respond(&ctx, &v, &member, &headers, id, result, "approved").await
 }
 
@@ -169,9 +187,24 @@ async fn reject(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_manager()?;
-    let target = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    let result = target.reject(&ctx.db, member.user.id).await;
+    let result = memberships::Model::reject(&ctx.db, member.org.id, member.approver(), id).await;
     respond(&ctx, &v, &member, &headers, id, result, "declined").await
+}
+
+/// Emails the person who was let in. The approval has committed, so a
+/// failure is only logged.
+async fn tell_approved(
+    ctx: &AppContext,
+    org: &organisations::Model,
+    membership: &memberships::Model,
+) {
+    let sent = match users::Model::find_by_id(&ctx.db, membership.user_id).await {
+        Ok(user) => MembershipMailer::approved(ctx, &user, org, &membership.username).await,
+        Err(err) => Err(err.into()),
+    };
+    if let Err(err) = sent {
+        tracing::error!(error = %err, org_id = org.id, "could not send the approval email");
+    }
 }
 
 #[debug_handler]
@@ -294,7 +327,8 @@ fn change_row(item: ToChange, tz: chrono_tz::Tz) -> ChangeRow {
 
 /// "Change these at the source": after someone is removed, the logins they
 /// saw, copied, added, changed or were allowed to see. For the person who
-/// removed them and for owners.
+/// removed them and for owners. It stays while the person is waiting to
+/// rejoin, or was declined, and ends when they are approved.
 #[debug_handler]
 async fn rotate(
     member: CurrentMember,
@@ -305,7 +339,9 @@ async fn rotate(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let former = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    if !former.is_removed() {
+    // Removed, including one who asked again and is waiting or was declined.
+    // Approval clears `removed_at`, and the page ends.
+    if former.is_active() || former.removed_at.is_none() {
         return Err(Error::NotFound);
     }
     if !member.is_owner() && former.removed_by_id != Some(member.user.id) {

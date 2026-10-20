@@ -1,5 +1,5 @@
-//! Failed sign-ins, password reset requests and wrong app passwords typed to
-//! unlock logins, counted for rate limits.
+//! Failed sign-ins, password reset requests, wrong app passwords typed to
+//! unlock logins and approval emails sent, counted for rate limits.
 //! Emails are kept only as a hash of the normalised address, so unknown
 //! emails are counted the same as real ones.
 use chrono::{DateTime, Duration, Utc};
@@ -14,6 +14,9 @@ pub mod kind {
     pub const LOGIN: &str = "login";
     pub const FORGOT: &str = "forgot";
     pub const REAUTH: &str = "reauth";
+    /// An approval email sent. Its `ip` holds the organisation instead, as
+    /// `org:{id}`: what that limit counts by.
+    pub const APPROVAL_EMAIL: &str = "approval_email";
 }
 
 /// Failed sign-ins for one email that lock it.
@@ -27,6 +30,9 @@ pub const FORGOT_EMAIL_LIMIT: u64 = 3;
 pub const FORGOT_IP_LIMIT: u64 = 10;
 /// Wrong app passwords inside a session that lock the account until reset.
 pub const REAUTH_LIMIT: u64 = 5;
+/// Approval emails per organisation, and per recipient, in 24 hours.
+pub const APPROVAL_EMAILS_PER_ORG: u64 = 20;
+pub const APPROVAL_EMAILS_PER_RECIPIENT: u64 = 3;
 /// Rows older than this are deleted when new ones are written.
 const KEEP_HOURS: i64 = 24;
 
@@ -201,6 +207,39 @@ impl Model {
         };
         let allowed = count(Column::EmailHash, row.email_hash.clone()).await? <= FORGOT_EMAIL_LIMIT
             && count(Column::Ip, ip.to_string()).await? <= FORGOT_IP_LIMIT;
+        if !allowed {
+            Entity::delete_by_id(row.id).exec(db).await?;
+        }
+        Ok(allowed)
+    }
+
+    /// Records an approval email about to be sent to `email` for `org_id`,
+    /// then counts it with the others in the last 24 hours. Returns whether
+    /// it may go out; a refused one is deleted. Each email counts, not each
+    /// membership, so approving, removing and approving again can't get
+    /// past it, and nothing a decline does changes the count.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn begin_approval_email<C: ConnectionTrait>(
+        db: &C,
+        email: &str,
+        user_id: i64,
+        org_id: i64,
+    ) -> ModelResult<bool> {
+        let org = format!("org:{org_id}");
+        let row = Self::record(db, kind::APPROVAL_EMAIL, email, Some(user_id), &org).await?;
+        let since = Utc::now() - Duration::hours(KEEP_HOURS);
+        let count = |column: Column, value: String| {
+            Entity::find()
+                .filter(column.eq(value))
+                .filter(Column::Kind.eq(kind::APPROVAL_EMAIL))
+                .filter(Column::CreatedAt.gt(since))
+                .count(db)
+        };
+        let allowed = count(Column::Ip, org).await? <= APPROVAL_EMAILS_PER_ORG
+            && count(Column::EmailHash, row.email_hash.clone()).await?
+                <= APPROVAL_EMAILS_PER_RECIPIENT;
         if !allowed {
             Entity::delete_by_id(row.id).exec(db).await?;
         }

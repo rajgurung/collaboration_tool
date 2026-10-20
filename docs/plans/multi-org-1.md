@@ -143,11 +143,14 @@ message or token typed for Acme would land in Beta. PR 3 must add:
 - Once every form carries it, a missing value fails closed for non-GET
   requests.
 
-**Join with an existing account.**
+**Join with an existing account.** Planned in `docs/plans/multi-org-6.md`.
 
 - The person proves the email is theirs, by password or an email link,
   before a membership attaches.
 - The response is the same whether the email has an account or not.
+  **Deferred, not met by PR 6.** Raj waived it on 20 October until the
+  follow-up "email verification on /signup and /join" (board loop
+  `email-verify`). See "Out of scope" in `docs/plans/multi-org-6.md`.
 - A removed or declined member can't re-join as active.
 - The joiner sets their username for the new org.
 - A rejoin updates the existing removed or declined row. It never inserts a

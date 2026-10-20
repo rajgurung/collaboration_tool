@@ -126,46 +126,94 @@ Files: `src/controllers/orgs.rs` (`new`, `create`, `enter_org`),
 
 ## Join by link, then owner approval
 
-The join link is `/join/<slug>`. Joining makes a new account with a pending
-membership. An owner or admin then approves or declines it.
+The join link is `/join/<slug>`. There are three ways in, and each ends with
+a pending membership that an owner or admin approves or declines.
+
+- **New to the app.** The signed-out form makes a new account with a
+  pending membership. An email that already has an account is refused with
+  "An account with this email already exists. Sign in to join {org}." and
+  the link below. It never touches the existing account.
+- **Has an account, signed out.** "Already have an account? Sign in to join
+  {org}" goes to `/login?next=/join/<slug>`, the normal sign-in with its
+  limits. Sign-in sends them back to the join page, now signed in. A
+  forgotten password keeps `next` through `/forgot`, the reset link and the
+  reset (see "Sign in").
+- **Signed in.** `GET /join/<slug>` shows "Ask to join {org}" with one
+  field, the username to use there. It starts as their username in the org
+  this browser is in, else in their default membership, else their old one
+  there. Posting it (`POST /join/<slug>/request`) asks with the signed-in
+  account. Being signed in is the proof the email is theirs.
 
 ```mermaid
 sequenceDiagram
-    actor N as Newcomer
-    actor A as Owner or admin
+    actor P as Signed-in person (in Acme)
     participant J as join controller
     participant M as memberships model
     participant DB as Postgres
-    N->>J: POST /join/acme-ltd (username, email, password)
-    J->>M: join
-    M->>DB: check username is free in this org (case-insensitive)
-    M->>DB: insert user and membership (role member, status pending)
-    J-->>N: session cookie, redirect to /dashboard
-    N->>J: any app page
-    J-->>N: 403 "waiting" page
-    A->>M: POST /members/ID/approve
-    M->>DB: status active, approved_by, approved_at
-    M->>DB: add to #general
-    N->>J: any app page
-    J-->>N: the app
+    P->>J: GET /join/beta
+    J->>M: in_org_for_user(beta, me)
+    J-->>P: ask form, or already a member / waiting, or the form with a removed or declined note
+    P->>J: POST /join/beta/request (username)
+    J->>M: request_to_join
+    M->>DB: lock the (Beta, me) row, then my user row
+    M->>DB: refuse a locked account, a 6th waiting request, a username taken in Beta
+    M->>DB: insert pending member (welcomed), or set a removed or declined row back to pending
+    J-->>P: 303 /dashboard?requested={Beta id} (clears acting_org)
+    P->>J: GET /dashboard?requested={Beta id}
+    J-->>P: Home in Acme, "You've asked to join Beta."
+```
+
+Approval, for every way in:
+
+```mermaid
+sequenceDiagram
+    actor A as Owner or admin of Beta
+    participant C as members controller
+    participant M as memberships model
+    participant DB as Postgres
+    A->>C: POST /members/ID/approve
+    C->>M: approve(org, approver, id)
+    M->>DB: approver still an active owner or admin? (FOR SHARE)
+    M->>DB: UPDATE ... SET active, member, approved_by, approved_at, removal cleared WHERE pending AND not the approver
+    M->>DB: lock the user row
+    M->>DB: end a Beta logins unlock, revoke Beta tokens and codes, clear Beta logins shared by name
+    M->>DB: add to #general and back to their Beta DMs
+    C-->>A: toast "alice approved."
+    C->>C: email the person (at most 20 a day per org and 3 per person, failures only logged)
 ```
 
 Rules:
 
-- Joining always creates a new account. An existing email is refused with the
-  same "Sign in instead" message. So someone who already has an account
-  cannot join a second organisation today.
-- A signed-in visitor to `/join/<slug>` is sent to `/dashboard`.
+- `GET /join/<slug>` never writes, so a link or prefetch can't file a
+  request. Every join page is sent with `X-Frame-Options: DENY`,
+  `frame-ancestors 'none'` and `no-store`.
+- The signed-in page passes its own `org`, never `current_org_id`, so it
+  carries no org claim. `POST /join/<slug>/request` takes `CurrentUser`, so
+  the stale-tab check never runs. It never switches org: the person stays in
+  the org this browser was in, and the new org shows in the switcher as
+  waiting.
+- Already a member: "You're already in {org}" with "Open {org}" (the switch
+  post), or Home if it is already this browser's org. Already waiting: the
+  date asked and the username, no form. Asking again changes nothing.
+- An account can have at most 5 waiting requests
+  (`memberships::MAX_PENDING_REQUESTS`). A decline frees a slot. The org
+  cap doesn't apply: joining creates no organisation.
+- A rejoin keeps the same row and its role, approval and removal dates.
+  Approval sets `role = member` whatever it was.
+- Asking ends acting for a super admin. They can't approve their own
+  request.
+- Requests email and notify nobody. Owners and admins see the number of
+  waiting requests on the More page (`src/controllers/more.rs:19`).
+- Only a `pending` request can be approved or declined, each with one
+  conditional update. Anything else shows an error toast.
+- Approval sends the person "Your join request was approved". The
+  subject has no org name; the body names the org and links to Home. It
+  never names the approver.
 - An unknown slug gets a 404 page.
-- Approval adds the person to `#general` only. Groups and DMs are separate.
-- Owners and admins see the number of waiting requests on the More page
-  (`src/controllers/more.rs:19`). No notification or email is sent to them
-  about a new request.
-- Only a `pending` request can be approved or declined. Anything else shows an
-  error toast (`src/models/memberships.rs:230` and `:248`).
 
-Files: `src/controllers/join.rs:33`, `src/models/memberships.rs:98` (`join`),
-`src/controllers/members.rs:150` (approve) and `:164` (reject).
+Files: `src/controllers/join.rs`, `src/models/memberships.rs`
+(`join_new_account`, `request_to_join`, `approve`, `reject`),
+`src/controllers/members.rs` (approve, reject), `src/mailers/membership.rs`.
 
 ## Membership states
 
@@ -176,8 +224,8 @@ stateDiagram-v2
     pending --> active: owner or admin approves
     pending --> rejected: owner or admin declines
     active --> removed: owner or admin removes
-    rejected --> [*]
-    removed --> [*]
+    rejected --> pending: asks again
+    removed --> pending: asks again
 ```
 
 What each state sees on any app page (`src/extractors/current_member.rs:277`):
@@ -188,16 +236,28 @@ What each state sees on any app page (`src/extractors/current_member.rs:277`):
 | `pending` | `tenancy/waiting.html` | 403 |
 | `rejected` | `tenancy/declined.html` | 403 |
 | `removed` | `tenancy/removed.html` | 403 |
-| no membership | `tenancy/no_org.html` (super admins go to `/admin`) | 403 |
+| no membership | `tenancy/no_org.html` | 403 |
+
+A super admin with no active membership goes to `/admin` instead of any of
+these pages, even with a waiting request.
 
 That is for page loads and plain forms. An HTMX or `fetch` call from a tab
 (it sends `HX-Request` or `X-Org-Id`) gets a 409 with `HX-Redirect:
-/dashboard` instead, plus `X-Org-Gone: 1` when the org it claims is one this
-user was removed from. HTMX would not show a 403, so without this a tab whose
+/dashboard` instead, plus `X-Org-Gone: 1` when the org it claims is one where
+this user's membership is there and not active (removed, declined, or
+waiting again after asking to rejoin). HTMX would not show a 403, so without this a tab whose
 last org was removed would just stop responding.
 
-There is no route that moves `rejected` or `removed` back to `pending` or
-`active`.
+Asking to join again (see "Join by link") moves `rejected` or `removed` back
+to `pending` on the same row. Nothing moves them straight to `active`: only
+approval does, and only from `pending`.
+
+Each waiting row on the owners' Members page shows one line from the row's
+own dates, never `updated_at`: "Removed on {date}" when `removed_at` is the
+later date, else "Declined on {date}" (a decline records its date in
+`approved_at`), "Declined before" for a decline from before declines had
+dates, and nothing for a first request. The join page shows the person the
+same, in their own words.
 
 A person with an active membership anywhere never sees these pages. They go
 to their active organisation instead (see "Choosing an organisation").
@@ -214,7 +274,8 @@ request checks it again.
 1. A super admin with a valid `acting_org`: that org (see
    [super-admin.md](super-admin.md)).
 2. A `current_org` where the user has an `active` membership: that org.
-3. Otherwise the default: the oldest active membership, else the oldest one.
+3. Otherwise the default: the oldest active membership, else the oldest
+   pending one, else the oldest in any status.
    If a `current_org` cookie was sent (not a number, no access, a deleted
    org, any status but active), the response clears it
    (`src/initializers/current_org.rs`).
@@ -419,8 +480,15 @@ Rules:
   time (`src/controllers/auth.rs:23`).
 - A lock lasts 15 minutes from the failure that started it. Refused attempts
   are deleted, so they do not stretch it.
-- `next` is only honoured for `/oauth/authorize?...`, the Claude Allow page.
-  Anything else is dropped (`src/controllers/auth.rs:57`).
+- `next` is only honoured for `/oauth/authorize?...`, the Claude Allow page,
+  and for a join page: exactly `/join/` and 1 to 60 of `a`-`z`, `0`-`9` or
+  `-`, checked byte by byte with nothing after it. Anything else is dropped
+  (`safe_next`, `src/controllers/auth.rs`). With a join page, the sign-in
+  page names the org, looked up from the slug.
+- `next` survives a forgotten password: the "Forgot password" link carries
+  it to `/forgot`, the reset email's link carries it
+  (`/reset/{token}?next=...`), and the reset lands on
+  `/login?reset=1&next=...`. Each hop checks it again.
 - A locked account (`users.locked_at` set) cannot sign in until it resets its
   password. Accounts lock after 5 wrong app passwords when unlocking logins;
   see [documents.md](documents.md).

@@ -14,7 +14,7 @@ use sea_orm::{
 };
 use serial_test::serial;
 
-use super::prepare_data::{join, login, sign_up_member, AsMember, USER_PASSWORD};
+use super::prepare_data::{approve_as_owner, join, login, sign_up_member, AsMember, USER_PASSWORD};
 
 use super::prepare_data::TestMember;
 
@@ -50,11 +50,7 @@ async fn acme(request: &TestServer, ctx: &AppContext) -> Acme {
             .await
             .unwrap()
             .unwrap();
-        let mut active = pending
-            .approve(&ctx.db, id)
-            .await
-            .unwrap()
-            .into_active_model();
+        let mut active = approve_as_owner(ctx, &pending).await.into_active_model();
         active.role = ActiveValue::Set(role.to_string());
         active.update(&ctx.db).await.unwrap();
         people.push(cookie);

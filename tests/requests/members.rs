@@ -6,7 +6,7 @@ use loco_rs::{app::AppContext, testing::prelude::*};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up_member, AsMember};
+use super::prepare_data::{approve_as_owner, join, sign_up_member, AsMember};
 
 async fn membership_of(ctx: &AppContext, email: &str) -> memberships::Model {
     let user = users::Model::find_by_email(&ctx.db, email).await.unwrap();
@@ -30,6 +30,9 @@ async fn owner_sees_join_link_and_pending_requests() {
         assert_eq!(res.status_code(), 200);
         let body = res.text();
         assert!(body.contains("/join/acme"), "{body}");
+        assert!(body.contains(
+            "People who use it join with a new or existing account, then wait for you or another admin to let them in."
+        ));
         assert!(body.contains("bob@example.com"));
         assert!(body.contains("Approve"));
     })
@@ -261,8 +264,7 @@ async fn owners_cannot_touch_another_organisations_members() {
 async fn approved_bob(request: &loco_rs::TestServer, ctx: &AppContext) -> memberships::Model {
     join(request, ctx, "acme", "bob", "bob@example.com").await;
     let bob = membership_of(ctx, "bob@example.com").await;
-    let user_id = bob.user_id;
-    bob.approve(&ctx.db, user_id).await.unwrap()
+    approve_as_owner(ctx, &bob).await
 }
 
 #[tokio::test]

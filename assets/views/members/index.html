@@ -6,7 +6,7 @@
   {% if me.can_manage %}
   <section class="card flex flex-col gap-2 p-4">
     <h2 class="m-0 text-[17px] font-semibold">Invite people</h2>
-    <p class="meta m-0 text-sm">Share this link. People who use it sign up, then wait for you or another admin to approve them.</p>
+    <p class="meta m-0 text-sm">Share this link. People who use it join with a new or existing account, then wait for you or another admin to let them in.</p>
     <div class="flex gap-2">
       <input class="input font-mono text-sm" readonly value="{{ join_url }}" aria-label="Join link" id="join-url" onclick="this.select()">
       <button type="button" class="btn btn-secondary shrink-0" data-copy="#join-url">Copy</button>

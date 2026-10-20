@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use loco_rs::prelude::*;
 
 pub use super::_entities::login_accesses::{ActiveModel, Column, Entity, Model};
-use super::memberships;
+use super::{logins, memberships};
 
 pub type LoginAccesses = Entity;
 
@@ -66,8 +66,9 @@ impl Model {
     ///
     /// Rows for people who were removed stay: the "change these at the
     /// source" list uses them to show what that person could see. They grant
-    /// nothing, because only active members get past `CurrentMember`, and a
-    /// removed person cannot rejoin (one organisation per user).
+    /// nothing, because only active members get past `CurrentMember`. If the
+    /// person asks to join again, approval clears them
+    /// ([`Self::remove_for_member`]).
     ///
     /// # Errors
     /// On database errors.
@@ -97,6 +98,30 @@ impl Model {
         }))
         .exec(db)
         .await?;
+        Ok(())
+    }
+
+    /// Takes `user_id` off every login of this organisation that names
+    /// them, and only this organisation's. Approving someone who was
+    /// removed calls it, so old shares don't come back with them.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn remove_for_member<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<()> {
+        let this_org = sea_orm::sea_query::Query::select()
+            .column(logins::Column::Id)
+            .from(logins::Entity)
+            .and_where(logins::Column::OrganisationId.eq(org_id))
+            .to_owned();
+        Entity::delete_many()
+            .filter(Column::UserId.eq(user_id))
+            .filter(Column::LoginId.in_subquery(this_org))
+            .exec(db)
+            .await?;
         Ok(())
     }
 }

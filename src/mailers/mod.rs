@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod membership;
 pub mod mentions;
 pub mod security;
 

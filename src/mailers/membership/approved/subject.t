@@ -1,0 +1,1 @@
+Your join request was approved

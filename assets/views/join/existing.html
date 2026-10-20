@@ -1,0 +1,53 @@
+{% extends "layouts/auth.html" %}
+{% block title %}Join {{ org.name }} · Collaboration Tool{% endblock title %}
+{% block panel %}
+{# Signed in. Passes its own `org`, never `current_org_id`: the page carries no org claim, as asking acts on the account. #}
+{% if state == "active" %}
+<span class="state-tile state-ok">{{<icon name="check" class="h-6 w-6"/>}}</span>
+<span class="meta font-semibold">{{ org.name }}</span>
+<h2 class="mt-2 mb-0 text-2xl font-semibold">You're already in {{ org.name }}</h2>
+<p class="mt-2 text-sm leading-6 text-muted">You're a member there as {{ mine.username }}.</p>
+<div class="join-buttons">
+  <form method="post" action="/orgs/{{ org.id }}/switch"><button type="submit" class="btn btn-primary btn-lg w-full">Open {{ org.name }}</button></form>
+  <a href="/dashboard" class="btn btn-secondary btn-lg">Back to Home</a>
+</div>
+{% elif state == "waiting" %}
+<span class="state-tile state-wait">{{<icon name="clock-3" class="h-6 w-6"/>}}</span>
+<span class="meta font-semibold">{{ org.name }}</span>
+<h2 class="mt-2 mb-0 text-2xl font-semibold">You've already asked to join</h2>
+<p class="mt-2 text-sm leading-6 text-muted">You asked on {{ mine.asked_on }}, as {{ mine.username }}. An owner or admin of {{ org.name }} will let you in. Until then it shows in your organisations as waiting.</p>
+<div class="join-buttons">
+  <a href="/dashboard" class="btn btn-primary btn-lg">Back to Home</a>
+</div>
+{% else %}
+<span class="meta font-semibold">{{ org.name }}</span>
+<h2 class="mt-2 mb-0 text-2xl font-semibold">Ask to join {{ org.name }}</h2>
+<p class="mt-2 text-sm leading-6 text-muted">Use the account you have. You keep your other organisations.</p>
+<div class="signed-as">
+  <span>Signed in as <strong>{{ account.email }}</strong></span>
+  <form method="post" action="/logout"><button type="submit" class="link-btn">Not you? Sign out</button></form>
+</div>
+{% if acting %}
+<div class="join-note join-note-acting" role="note">{{<icon name="shield" class="h-4 w-4"/>}}<span>You're acting in <strong>{{ acting }}</strong>. This request comes from your own account, {{ account.name }}. Asking ends acting.</span></div>
+{% endif %}
+{% if note %}
+<div class="join-note" role="note">{{<icon name="rotate-ccw" class="h-4 w-4"/>}}<span>{{ note }}</span></div>
+{% endif %}
+{% if errors.pending_cap %}<p role="alert" class="alert alert-error m-0 mt-6">{{ errors.pending_cap }}</p>{% endif %}
+<form method="post" action="/join/{{ org.slug }}/request" class="mt-6 grid gap-5">
+  <label class="field">
+    <span class="field-label">Your username in {{ org.name }}</span>
+    <input class="input" name="name" value="{{ form.name }}" autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="30" required {% if errors.name %}aria-invalid="true" autofocus{% endif %}>
+    {% if errors.name %}<span class="field-error">{{<icon name="circle-alert" class="h-3.5 w-3.5"/>}}{{ errors.name }}</span>{% else %}<span class="field-hint">How people in {{ org.name }} see you. Start with a letter, then 3 to 30 letters or numbers.</span>{% endif %}
+  </label>
+  <ul class="org-facts mt-0">
+    <li>{{<icon name="users" class="h-4 w-4"/>}}<span>An owner or admin of {{ org.name }} decides. They'll see this username and your email.</span></li>
+    <li>{{<icon name="lock" class="h-4 w-4"/>}}<span>Nothing from {% if from %}{{ from }}{% else %}your other organisations{% endif %} is shared with {{ org.name }}.</span></li>
+  </ul>
+  <div class="grid gap-3">
+    <button type="submit" class="btn btn-primary btn-lg" data-busy-label="Asking…">Ask to join</button>
+    <a href="/dashboard" class="btn btn-secondary btn-lg">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endblock panel %}

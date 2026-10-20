@@ -24,8 +24,9 @@ use super::{
 
 /// Alice owns Acme, then becomes an active member of Beta (owned by Bob).
 /// Returns Alice's id and her two memberships, Acme's first. Beta's row is
-/// inserted by SQL: "New organisation" only makes orgs you own, and joining
-/// someone else's org with an existing account is PR 6.
+/// inserted by SQL, so these tests don't depend on asking to join
+/// (`memberships::Model::request_to_join`, tested in `join_existing.rs`)
+/// and approval.
 pub(super) async fn alice_in_two_orgs(
     request: &loco_rs::TestServer,
     ctx: &AppContext,

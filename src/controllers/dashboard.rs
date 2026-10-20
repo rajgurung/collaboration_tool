@@ -26,11 +26,13 @@ struct HomeQuery {
     /// Set by "New organisation". Like `switched`, only says "show the
     /// toast"; the name comes from the org this request resolved.
     created: Option<String>,
+    /// Set by "Ask to join": the org asked. See [`requested_notice`].
+    requested: Option<String>,
 }
 
 /// The card shown after a stale tab was sent here. It names the old org only
 /// when you are an active member of it, or were removed from it (then it says
-/// so, with no way back), so a hand-made `?from=` reveals nothing new.
+/// so, with no Back button), so a hand-made `?from=` reveals nothing new.
 async fn stale_notice(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -60,6 +62,23 @@ async fn stale_notice(
     } else {
         serde_json::json!({ "id": org.id, "name": org.name })
     })
+}
+
+/// The card shown after asking to join an org. Only for an org where your
+/// own membership is waiting, so a hand-made `?requested=` naming any other
+/// org, or one that doesn't exist, shows nothing.
+async fn requested_notice(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    requested: Option<&str>,
+) -> Option<serde_json::Value> {
+    let id = requested?.parse::<i64>().ok()?;
+    memberships::Model::in_org_for_user(&ctx.db, id, member.user.id)
+        .await
+        .ok()?
+        .filter(memberships::Model::is_pending)?;
+    let org = organisations::Model::find_by_id(&ctx.db, id).await.ok()?;
+    Some(serde_json::json!({ "name": org.name }))
 }
 
 #[debug_handler]
@@ -196,6 +215,7 @@ async fn index(
     let welcome = membership.as_ref().is_some_and(|m| m.welcomed_at.is_none());
 
     let stale = stale_notice(&ctx, &member, query.from.as_deref()).await;
+    let requested = requested_notice(&ctx, &member, query.requested.as_deref()).await;
     let flash = if query.created.is_some() {
         Some(data!({
             "kind": "info",
@@ -226,11 +246,16 @@ async fn index(
                 "today": chrono::Utc::now().with_timezone(&tz).format("%A %-d %B").to_string(),
                 "greeting": greeting(chrono::Utc::now().with_timezone(&tz).hour()),
                 "stale": stale,
+                "requested": requested,
                 "flash": flash,
             }),
         ),
     )?;
-    if query.switched.is_some() || query.from.is_some() || query.created.is_some() {
+    if query.switched.is_some()
+        || query.from.is_some()
+        || query.created.is_some()
+        || query.requested.is_some()
+    {
         response.headers_mut().insert(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-store"),

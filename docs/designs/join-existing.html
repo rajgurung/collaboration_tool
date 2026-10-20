@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join with an existing account mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+/* ---------- Tokens: copied from frontend/styles/app.css (via docs/designs/create-org.html) ----------
+   Scoped to [data-theme] on any element (not just <html>) so the mockup can
+   show a light and a dark copy of each screen side by side. */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f3ef; --side: #eceae4; --surface: #ffffff; --lane: #f8f7f4; --line: #e2dfd7; --line-soft: #eceae4;
+  --chip: #e9e7e0; --text: #1a1814; --muted: #625e57; --link: #8a5300; --accent: #f2a93b; --accent-hover: #f6b858;
+  --on-accent: #1a1814; --active-bg: #fbebd0; --scrim: rgba(20, 18, 15, 0.45);
+  --todo: #8a867d; --progress: #3b6fe0; --blocked: #d4552f; --blocked-bg: #fce9e2; --done: #2f9e6b; --danger: #c2410c; --on-danger: #ffffff;
+  --shadow: 0 1px 2px rgba(23, 20, 15, 0.08);
+  --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
+  --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
+  --canvas: #e4e1d9;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121214; --side: #17171a; --surface: #1f1f23; --lane: #18181c; --line: #2c2c32; --line-soft: #29292f;
+  --chip: #26262b; --text: #edece8; --muted: #a6a29b; --link: #ffc77a; --accent: #ffb454; --accent-hover: #ffc475;
+  --on-accent: #1b1300; --active-bg: #4a3618; --scrim: rgba(0, 0, 0, 0.6);
+  --todo: #a6a29b; --progress: #7c9dff; --blocked: #ff8466; --blocked-bg: #3a2019; --done: #4cc38a; --danger: #ff8466; --on-danger: #1b1300;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45); --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
+  --canvas: #0b0b0c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--canvas); color: var(--text); font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; cursor: pointer; color: inherit; }
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ic { flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.meta { font-size: 13px; color: var(--muted); }
+.truncate-1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ---------- Mockup chrome (not part of the app) ---------- */
+.mock-bar { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 32px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.mock-bar h1 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; min-width: 260px; }
+.mock-bar nav { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; font-weight: 600; color: var(--link); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
+.seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.section { padding: 36px 32px 48px; border-bottom: 1px solid var(--line); }
+.section > h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+.section > p.lead { margin: 0 0 24px; max-width: 860px; color: var(--muted); }
+.shots { display: flex; flex-wrap: wrap; gap: 36px 32px; align-items: flex-start; }
+.shot { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.shot-wide { flex-basis: 100%; }
+.shot-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.ann { width: 360px; padding: 16px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; }
+.ann-wide { width: auto; max-width: 860px; }
+.ann h3 { margin: 0 0 8px; font-size: 15px; }
+.ann h3 + * { margin-top: 0; }
+.ann ol, .ann ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ann p + p, .ann p + ul, .ann ul + p, .ann ol + h3, .ann ul + h3, .ann p + h3 { margin-top: 10px; }
+.ann code, .lead code { font-size: 12.5px; padding: 1px 4px; border-radius: 4px; background: var(--chip); }
+.ann table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ann th, .ann td { padding: 6px 8px 6px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line-soft); }
+.ann th { font-weight: 700; color: var(--muted); }
+kbd { display: inline-block; min-width: 20px; padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--lane); font: 600 12px/18px "Plus Jakarta Sans", sans-serif; text-align: center; }
+.q { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--active-bg); color: var(--text); font-size: 13.5px; }
+.q b { display: block; margin-bottom: 2px; }
+.later { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); font-size: 13px; }
+
+/* Light, dark, or both side by side */
+.pair { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.pair.stack { flex-direction: column; flex-wrap: nowrap; width: 100%; }
+.th { color: var(--text); }
+body[data-mode="light"] .th-dark, body[data-mode="dark"] .th-light { display: none; }
+body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { display: none; }
+.desk-holder { position: relative; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow-lift); }
+
+/* ---------- Device frames ---------- */
+.frame-phone { box-sizing: content-box; position: relative; display: flex; flex-direction: column; width: 390px; height: 844px; overflow: hidden; border: 10px solid #0e0e10; border-radius: 48px; background: var(--bg); box-shadow: var(--shadow-lift); }
+.statusbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 6px 30px 0; font-size: 15px; font-weight: 700; background: var(--bg); }
+.statusbar.surface { background: var(--surface); }
+.home-ind { position: absolute; left: 50%; bottom: 8px; z-index: 60; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: var(--text); opacity: 0.85; }
+.phone-body { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.frame-desk { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); width: 1440px; height: 900px; overflow: hidden; background: var(--bg); transform-origin: top left; }
+
+/* ---------- App components, copied or adapted from app.css ---------- */
+.avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
+.avatar-xs { width: 22px; height: 22px; font-size: 10px; font-weight: 700; }
+.avatar-sm { width: 28px; height: 28px; font-size: 12px; }
+.avatar-md { width: 36px; height: 36px; font-size: 14px; }
+.avatar-lg { width: 44px; height: 44px; font-size: 16px; }
+.avatar-stack { display: inline-flex; }
+.avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
+.avatar-stack > .avatar + .avatar { margin-left: -6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn-tall { min-height: 44px; }
+.icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--text); flex-shrink: 0; }
+.icon-btn:hover { background: var(--chip); }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; box-shadow: var(--shadow-1); }
+.list { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-1); }
+.list-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; }
+.list > * + * { border-top: 1px solid var(--line-soft); }
+.section-label { margin: 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.section-head a { color: var(--link); font-size: 15px; padding: 10px 0; }
+.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
+.pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 10px; background: var(--chip); font-size: 12px; font-weight: 600; }
+.dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: var(--dot, var(--muted)); }
+.dot-ring { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+.bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 3px; background: var(--bar, var(--accent)); }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 12px; font-size: 16px; }
+.input.focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.toast-error { background: var(--danger); color: var(--on-danger); }
+.toast-region { position: absolute; z-index: 80; display: grid; gap: 8px; pointer-events: none; }
+.phone-body .toast-region { left: 16px; right: 16px; bottom: 96px; justify-items: center; }
+.frame-desk .toast-region { right: 24px; bottom: 24px; justify-items: end; }
+
+/* Shell */
+.sidebar { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); }
+.side-link { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-weight: 500; }
+.side-link[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.side-link[aria-current="page"] .ic { color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 0 8px 0 16px; background: var(--bg); }
+.topbar h1 { flex: 1; min-width: 0; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.tabbar { position: absolute; inset: auto 0 0 0; z-index: 40; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 8px 8px 26px; background: var(--surface); border-top: 1px solid var(--line); }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.tab-icon { display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.tab[aria-current="page"] { color: var(--text); font-weight: 600; }
+.tab[aria-current="page"] .tab-icon { background: var(--active-bg); }
+.page { padding: 4px 16px 110px; display: flex; flex-direction: column; gap: 20px; }
+.d-main { min-width: 0; display: flex; flex-direction: column; }
+.d-page { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; max-width: 1192px; }
+
+/* Home */
+.greet-date { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.greet { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.frame-desk .greet { font-size: 32px; }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.frame-desk .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.phone-body .stat { gap: 10px; padding: 14px; }
+.stat > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
+.phone-body .stat-icon { width: 36px; height: 36px; }
+.stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.project-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.home-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 28px; align-items: start; }
+.cards-3 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.task-line { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px; font-size: 15px; font-weight: 500; }
+
+/* ===== NEW: the switcher button at the top of the sidebar ===== */
+.org-static, .org-switch { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; margin-bottom: 16px; padding: 0 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; }
+.org-switch:hover, .org-switch.hover { background: var(--chip); }
+.org-switch[aria-expanded="true"] { background: var(--surface); box-shadow: var(--shadow); }
+.org-switch.kbd-focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.org-btn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.org-btn-text strong { font-size: 15px; }
+.org-btn-text .sub { display: inline-flex; align-items: center; gap: 4px; margin-top: 1px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.org-switch .chev { color: var(--muted); }
+.logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.logo-lg { width: 36px; height: 36px; border-radius: 11px; font-size: 15px; }
+.logo-wait { background: var(--chip); color: var(--muted); box-shadow: none; }
+
+/* ===== NEW: the menu (desktop popover) and the rows (shared with the phone sheet) ===== */
+.org-menu { position: absolute; top: 64px; left: 12px; z-index: 50; width: 300px; padding: 6px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-lift); }
+.org-menu-label { padding: 8px 10px 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.org-scroll { max-height: 404px; overflow-y: auto; }
+.org-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 10px; border: 0; border-radius: 10px; background: none; color: var(--text); text-align: left; }
+.org-row:hover:not([aria-disabled="true"]), .org-row.hover { background: var(--chip); }
+.org-row.focus, .org-row:focus-visible { outline: none; background: var(--chip); box-shadow: inset 0 0 0 2px var(--accent); }
+.org-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.org-name { font-size: 15px; font-weight: 600; }
+.org-row[aria-checked="true"] .org-name { font-weight: 700; }
+.org-row .meta { display: inline-flex; align-items: center; gap: 4px; }
+.org-row .tick { color: var(--link); }
+.org-row[aria-disabled="true"] { cursor: default; }
+.org-row[aria-disabled="true"] .org-name { color: var(--muted); font-weight: 500; }
+.org-row.loading .meta { color: var(--text); }
+.org-row.dim { opacity: 0.55; }
+.org-sep { height: 1px; margin: 6px 4px; background: var(--line-soft); }
+.org-note { margin: 4px 10px 6px; font-size: 12.5px; color: var(--muted); }
+
+/* Phone: header button on Home, and the sheet */
+.org-head { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 10px; background: none; color: var(--text); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; text-align: left; }
+.org-head span { min-width: 0; }
+.org-head .ic { color: var(--muted); }
+.org-head-static { flex: 1; min-width: 0; margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.m-scrim { position: absolute; inset: 0; z-index: 45; background: var(--scrim); }
+.m-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; flex-direction: column; max-height: calc(100% - 48px); border-radius: 20px 20px 0 0; background: var(--surface); }
+.sheet-handle { display: grid; place-items: center; padding-top: 8px; flex-shrink: 0; }
+.sheet-handle::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+.sheet-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 20px; }
+.sheet-head h2 { flex: 1; margin: 0; font-size: 17px; font-weight: 700; }
+.sheet-body { min-height: 0; overflow-y: auto; padding: 0 12px 34px; }
+.m-sheet .org-row { min-height: 60px; padding: 8px 10px; gap: 14px; }
+.m-sheet .org-name { font-size: 16px; }
+
+/* Acting banner (exists today, unchanged) */
+.acting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--active-bg); font-size: 14px; }
+.frame-desk .acting .btn { min-height: 36px; }
+.phone-body .acting .btn { min-height: 44px; }
+
+/* ===== NEW: the notice after a stale tab moves ===== */
+.notice { display: flex; align-items: flex-start; gap: 12px; padding: 14px 4px 14px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.frame-desk .notice { max-width: 760px; }
+.notice-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 999px; background: var(--active-bg); color: var(--link); }
+.notice-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 1px; }
+.notice-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.notice > .icon-btn { margin-top: -10px; color: var(--muted); }
+.draft { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); }
+.draft-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.draft-field { display: flex; flex-direction: column; gap: 1px; }
+.draft-field .field-label { font-size: 12px; }
+.draft-field p { font-size: 15px; overflow-wrap: anywhere; }
+.file-line { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
+
+/* Stale-tab story strip */
+.story { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; max-width: 1180px; }
+.story-step { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; }
+.story-step b { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.tabchip { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 30px; padding: 0 10px 0 4px; border-radius: 8px; background: var(--chip); font-size: 13px; font-weight: 600; }
+.tabchip .logo { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+
+/* Specimens at real size */
+.specimen { position: relative; width: 248px; padding: 16px 12px; border-radius: 16px; background: var(--side); border: 1px solid var(--line); }
+.specimen .org-static, .specimen .org-switch { margin-bottom: 0; }
+.spec-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+.live { position: relative; width: 248px; height: 600px; padding: 16px 12px; border-radius: 16px; background: var(--side); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.live .org-menu { top: 64px; }
+.live .toast-region { left: 12px; right: -120px; bottom: 16px; justify-items: start; }
+
+/* ===== NEW in PR 4: the "New organisation" row ===== */
+.org-new .logo-new { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border: 1.5px dashed color-mix(in srgb, var(--muted) 65%, transparent); border-radius: 10px; color: var(--muted); box-sizing: border-box; }
+.m-sheet .org-new .logo-new, .list .logo-new.lg { width: 36px; height: 36px; border-radius: 11px; }
+.org-new .org-name { font-weight: 600; }
+.org-new:hover .logo-new, .org-new.hover .logo-new { border-color: var(--muted); color: var(--text); }
+.org-limit { margin: 0 10px 6px; font-size: 12.5px; color: var(--muted); }
+
+/* ===== NEW: the create form (desktop dialog = the app's .sheet at 768px and up; phone = bottom sheet) ===== */
+.d-scrim { position: absolute; inset: 0; z-index: 60; background: var(--scrim); }
+.dlg { position: absolute; z-index: 70; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; max-height: calc(100% - 64px); display: flex; flex-direction: column; border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lift); overflow: hidden; }
+.dlg-head { display: flex; align-items: flex-start; gap: 8px; padding: 18px 12px 0 24px; }
+.dlg-head h2, .form-head h2 { flex: 1; margin: 8px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; }
+.dlg-body { padding: 8px 24px 24px; overflow-y: auto; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.m-sheet .form-body { flex: 1 1 auto; min-height: 0; padding: 0 20px 0; overflow-y: auto; }
+.form-lead { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+.m-sheet .form-lead { margin-bottom: 16px; }
+.fields { display: grid; gap: 18px; }
+.field { display: grid; gap: 6px; }
+.field-hint { font-size: 13px; color: var(--muted); }
+.field-error { display: flex; align-items: flex-start; gap: 5px; font-size: 13px; color: var(--danger); }
+.field-error .ic { margin-top: 1px; }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+.input[disabled] { opacity: 0.6; }
+.prefix-wrap { position: relative; }
+.prefix-wrap .at { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; }
+.prefix-wrap .input { padding-left: 30px; }
+.facts { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--lane); border: 1px solid var(--line-soft); font-size: 14px; }
+.facts li { display: flex; gap: 10px; align-items: flex-start; list-style: none; }
+.facts .ic { color: var(--muted); margin-top: 2px; }
+.facts { padding-left: 14px; }
+.alert { margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; font-size: 14px; }
+.alert-error { background: var(--blocked-bg); color: var(--blocked); }
+.acting-note { display: flex; gap: 10px; margin: 0 0 16px; padding: 12px 14px; border-radius: 12px; background: var(--active-bg); font-size: 14px; }
+.acting-note .ic { margin-top: 2px; color: var(--link); }
+.sheet-foot { flex-shrink: 0; padding: 12px 20px 34px; border-top: 1px solid var(--line-soft); background: var(--surface); }
+.btn-lg { min-height: 48px; padding: 0 20px; font-size: 16px; }
+.btn-full { width: 100%; }
+.btn[disabled] { opacity: 0.75; cursor: default; }
+.btn .spin { margin-left: -2px; }
+.limit-box { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 8px 4px; text-align: center; }
+.limit-box .tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 14px; background: var(--chip); color: var(--muted); }
+.limit-box h3 { margin: 0; font-size: 17px; }
+.limit-box p { max-width: 360px; color: var(--muted); font-size: 14.5px; }
+.m-sheet .m-kbd { flex-shrink: 0; height: 290px; background: #d1d3d9; display: grid; place-items: center; color: #555; font-size: 13px; font-weight: 600; }
+[data-theme="dark"] .m-sheet .m-kbd { background: #2b2b2e; color: #999; }
+
+/* ===== Getting started, copied from app.css ===== */
+.guide { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 6px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-1); }
+.guide-close { position: absolute; top: 8px; right: 8px; color: var(--muted); }
+.guide-top { display: flex; align-items: center; gap: 14px; padding-right: 36px; }
+.guide-ring { flex-shrink: 0; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--chip) 0); }
+.guide-ring > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--surface); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.guide-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.guide-step { display: flex; align-items: center; gap: 12px; padding: 11px 2px; border-top: 1px solid var(--line-soft); }
+.guide-tick { flex-shrink: 0; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid var(--line); border-radius: 50%; color: #fff; box-sizing: border-box; }
+.guide-go { flex-shrink: 0; min-height: 34px; padding: 0 14px; font-size: 14px; }
+.phone-body .guide { padding: 14px 12px 4px; }
+.phone-body .guide-how { display: none; }
+.empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 15px; }
+.empty a { color: var(--link); }
+
+/* ===== NEW in PR 6: the join pages (layouts/auth.html: .auth and .auth-card, unchanged) ===== */
+.frame-auth { position: relative; width: 1440px; height: 900px; overflow: hidden; display: grid; place-items: center; background: var(--bg); transform-origin: top left; }
+.frame-auth .auth-card { width: 400px; }
+.phone-auth { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 16px 40px; background: var(--bg); }
+.auth-card { width: 100%; max-width: 400px; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; font-size: 15px; font-weight: 700; }
+.auth-org { font-size: 13px; font-weight: 600; color: var(--muted); }
+.auth-h { margin: 8px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; }
+.auth-sub { margin-top: 8px; font-size: 14px; line-height: 1.55; color: var(--muted); }
+.auth-form { display: grid; gap: 20px; margin-top: 24px; }
+.auth-foot { margin-top: 22px; font-size: 14px; color: var(--muted); }
+.auth-foot a, .text-link { color: var(--link); font-weight: 600; }
+.auth-foot-row { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.link-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; background: none; color: var(--link); font-size: 14px; font-weight: 600; }
+/* app.css .segmented, with 44px rows on this page */
+.segmented { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 4px; padding: 4px; border-radius: 12px; background: var(--chip); margin-top: 24px; }
+.segmented > * { min-height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; display: grid; place-items: center; }
+.segmented > [aria-current="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.signed-as { display: flex; align-items: center; gap: 10px; margin-top: 20px; padding: 10px 12px; border-radius: 12px; background: var(--lane); border: 1px solid var(--line-soft); font-size: 14px; }
+.signed-as > span { flex: 1; min-width: 0; }
+.signed-as .link-btn { min-height: 36px; }
+.alert-success { background: color-mix(in srgb, var(--done) 15%, transparent); color: var(--done); }
+.alert-info { background: var(--lane); border: 1px solid var(--line-soft); color: var(--text); }
+.input[readonly] { background: var(--lane); color: var(--muted); }
+.state-tile { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 14px; background: var(--chip); color: var(--muted); margin-bottom: 4px; }
+.state-tile.ok { background: color-mix(in srgb, var(--done) 14%, transparent); color: var(--done); }
+.state-tile.wait { background: var(--active-bg); color: var(--link); }
+.btn-col { display: grid; gap: 12px; margin-top: 28px; }
+.history { display: flex; gap: 10px; align-items: flex-start; margin-top: 20px; padding: 12px 14px; border-radius: 12px; background: var(--lane); border: 1px solid var(--line-soft); font-size: 14px; }
+.history .ic { margin-top: 2px; color: var(--muted); }
+
+/* The emails, as plain text cards */
+.mail { width: 460px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); box-shadow: var(--shadow-1); overflow: hidden; font-size: 14.5px; }
+.mail-head { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px; color: var(--muted); display: grid; gap: 2px; }
+.mail-head b { color: var(--text); font-weight: 600; }
+.mail-body { padding: 16px; display: grid; gap: 12px; line-height: 1.55; }
+.mail-body .btn { justify-self: start; }
+
+/* Members: the waiting row's history line */
+.row-text { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.row-history { display: inline-flex; align-items: center; gap: 5px; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.row-actions { display: flex; gap: 8px; }
+.btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--line); }
+.phone-body .row-actions .btn, .phone-body .list-row .btn { min-height: 44px; }
+.frame-desk .row-actions .btn { min-height: 40px; }
+.phone-body .list-row.flex-wrap { flex-wrap: wrap; }
+.phone-body .list-row.flex-wrap .row-actions { width: 100%; padding-left: 48px; }
+.phone-body .list-row.flex-wrap .row-actions .btn { flex: 1; }
+.invite { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+.invite h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.skeleton { display: block; height: 12px; border-radius: 6px; background: var(--chip); }
+
+/* Section 5: the approved notice uses the Home .notice; done-tinted icon */
+.notice-icon.ok { background: color-mix(in srgb, var(--done) 14%, transparent); color: var(--done); }
+.notice-icon.muted { background: var(--chip); color: var(--muted); }
+
+/* Flow strip */
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; max-width: 1180px; }
+.flow-step { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; }
+.flow-step b { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.qlist { display: grid; gap: 14px; max-width: 900px; }
+.qlist .q { margin-top: 0; padding: 14px 16px; font-size: 14.5px; }
+.qlist .q b { font-size: 15px; margin-bottom: 4px; }
+.qlist .q .rec { display: block; margin-top: 6px; }
+</style>
+</head>
+<body data-view="both" data-mode="light">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-clock-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-list-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></symbol>
+  <symbol id="i-meetings" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></symbol>
+  <symbol id="i-log-out" viewBox="0 0 24 24"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M15 8V2"/><path d="M17 8a1 1 0 0 1 1 1v4a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1z"/><path d="M9 8V2"/></symbol>
+  <symbol id="i-monitor-smartphone" viewBox="0 0 24 24"><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect width="6" height="10" x="16" y="12" rx="2"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></symbol>
+  <symbol id="i-status-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-status-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+  <symbol id="i-status-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></symbol>
+  <symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+  <symbol id="i-user-plus" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></symbol>
+  <symbol id="i-user-x" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" x2="22" y1="8" y2="13"/><line x1="22" x2="17" y1="8" y2="13"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
+</svg>
+
+<header class="mock-bar">
+  <h1>Join with an existing account · multi-org PR 6 · mockup</h1>
+  <nav aria-label="Sections">
+    <a href="#out">1 Signed out</a><a href="#link">2 The email link</a><a href="#in">3 Signed in</a><a href="#member">4 Already there</a><a href="#after">5 After asking</a><a href="#approved">6 Approved</a><a href="#owner">7 Owner's side</a><a href="#edges">8 Edge cases</a><a href="#questions">9 Questions</a>
+  </nav>
+  <div class="seg" role="group" aria-label="Theme"><button type="button" data-mode-set="light" aria-pressed="true">Light</button><button type="button" data-mode-set="dark" aria-pressed="false">Dark</button><button type="button" data-mode-set="both" aria-pressed="false">Light and dark</button></div>
+  <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
+</header>
+
+<p class="lead" role="note" style="max-width:960px;margin:16px auto;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)"><b>Deferred (Raj, 20 October 2026, option A).</b> PR 6 keeps today's new-account form plus "Already have an account? Sign in to join". Section 2 (the email link), the two-tab signed-out shape in section 1, the email-link edge cases in section 8, and the Home "approved" and "declined" notices in section 6 move to the follow-up "email verification on /signup and /join" (board loop <code>email-verify</code>). Section 5 uses <code>/dashboard?requested=</code>, not <code>?asked=</code>. Everything else here sets the visuals and copy for PR 6.</p>
+
+<section class="section" id="story">
+  <h2>The story</h2>
+  <p class="lead">Priya owns Acme Studio, and Lumen Café since PR 4. Dev, who owns Northwind Bakery, sends her the join link <code>/join/northwind-bakery</code> so she can help with their Christmas menu. Today that page only makes new accounts, and Priya's email is refused with "An account with this email already exists". After PR 6 she can ask to join with the account she has.</p>
+  <div class="flow">
+    <div class="flow-step"><b>1 · Open the link</b>Signed in: "Ask to join Northwind Bakery" with her username filled in. Signed out: sign in with her password, or get an email link.</div>
+    <div class="flow-step"><b>2 · Ask</b>A pending membership attaches to her account. She lands on Home in Acme Studio with a notice. The switcher shows Northwind as "Waiting for approval".</div>
+    <div class="flow-step"><b>3 · Dev approves</b>On Members, Priya's row looks like anyone else's: username and email. Approving revokes any old tokens she had for Northwind.</div>
+    <div class="flow-step"><b>4 · She's in</b>Next page load: the switcher row goes live, and Home says "Northwind Bakery let you in" with a button to open it.</div>
+  </div>
+</section>
+
+<!-- ============================== 1. SIGNED OUT ============================== -->
+<section class="section" id="out">
+  <h2>1. The join page, signed out</h2>
+  <p class="lead">One page for new and existing people, with two tabs: "New here" and "I have an account". The person picks. The server never says which one fits, so the page reveals nothing about the email.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · "I have an account", filled in</span><div id="d-out"></div></div>
+    <div class="ann">
+      <h3>Recommended shape: two tabs, two proofs</h3>
+      <ol>
+        <li><b>I have an account:</b> email and password, then "Sign in and continue". This is a normal sign-in (same attempt limits, same "Email or password is incorrect."), which then shows the signed-in page in section 3. Nothing attaches until she presses "Ask to join" there.</li>
+        <li><b>New here:</b> email only, then "Email me a link". Everyone gets the same "Check your email" page. The email itself differs: a new address gets "finish joining", an existing account gets "join with your account" (section 2). Only the inbox owner sees the difference.</li>
+        <li>"Email me a link instead" under the password is for people who have an account but not their password to hand. It sends the same email from the same form, without a password.</li>
+        <li>The tabs are links (<code>/join/northwind-bakery</code> and <code>?with=password</code>), so they work without JavaScript and the back button behaves.</li>
+        <li>"New here" is the default. Most people who open a join link are new to the app.</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>Why not the other shapes</h3>
+      <ul>
+        <li><b>Keep today's form, plus "Already have an account? Sign in".</b> Today's form makes the account and signs you in on the spot, and refuses a known email. Both tell a stranger whether the email has an account. To fix that, the new-account path has to answer the same for every email, which means an email step. That is the "New here" tab.</li>
+        <li><b>Email first, then a fork.</b> The second step can't depend on the email without revealing it, so it would show both choices anyway. One extra step for everyone, for the same result.</li>
+      </ul>
+      <p><b>The cost:</b> brand-new people now go through their inbox before they can ask to join. Today they are in the waiting room straight away. In return, every joiner's email is proven. Today anyone can join with someone else's address. See question 1.</p>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · New here (default)</span><div id="p-out-new"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · I have an account</span><div id="p-out-have"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Sending the link</span><div id="p-out-busy"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Check your email (always this)</span><div id="p-out-sent"></div></div>
+    <div class="ann">
+      <h3>Copy</h3>
+      <ul>
+        <li>Heading: "Ask to join Northwind Bakery". The button on every path is "Ask to join", because joining needs an owner's yes. Today's page says "Request to join" and "Request access"; this replaces both.</li>
+        <li>"Check your email" names the address she typed, so a typo is easy to spot. It says the link works once, for 60 minutes.</li>
+        <li>It never says "if an account exists". Every address gets an email. The only exception is the send limit (3 per address, 10 per IP, per hour, as for "Forgot password"). Over it, the page is the same and nothing is sent.</li>
+      </ul>
+      <div class="q"><b>Question for Raj 2: the send limit</b>Recommended: reuse the "Forgot password" limits and the same silent page. A visible "Too many emails" would reveal nothing about the account, but it would be one more message to write and test for a rare case.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 2. THE EMAIL LINK ============================== -->
+<section class="section" id="link">
+  <h2>2. The email link</h2>
+  <p class="lead">The link proves the email is hers. It opens a page with the username field, and nothing attaches until she presses "Ask to join". It does not sign her in.</p>
+  <div class="shots">
+    <div class="shot"><span class="shot-label">Email · the address has an account</span><div id="m-existing"></div></div>
+    <div class="shot"><span class="shot-label">Email · a new address</span><div id="m-new"></div></div>
+    <div class="ann">
+      <h3>The two emails</h3>
+      <ol>
+        <li>Same sender, same look, both sent from the same request. The subject differs, which only the inbox owner sees.</li>
+        <li>Both say what to do if it wasn't you: ignore it, nothing changes. A stranger typing Priya's email costs her one email, as "Forgot password" already can.</li>
+        <li>The link is single use, 60 minutes, and stored hashed, like reset links.</li>
+      </ol>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · the link for an existing account</span><div id="d-link"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the link for an existing account</span><div id="p-link-existing"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · request sent, not signed in</span><div id="p-link-done"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the link for a new address</span><div id="p-link-new"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li><b>The link doesn't sign her in.</b> It only attaches a pending membership. A link that signs you in would be a new way in that skips the password and the account lock. She signs in as usual afterwards. See question 3.</li>
+        <li>If this browser is already signed in as Priya, "Ask to join" lands on Home with the notice from section 5, as the signed-in path does.</li>
+        <li>Signed out, it lands on "Request sent", with "Sign in" for when she wants it.</li>
+        <li>The username starts with her account's name, as on the signed-in page.</li>
+        <li>For a new address, the link page is today's join form without the email field: username and password. "Ask to join" makes the account, signs in and shows today's waiting page.</li>
+        <li>If the account is already in Northwind (active, waiting, declined or removed), the link page shows the same state as the signed-in page does (section 4).</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 3. SIGNED IN ============================== -->
+<section class="section" id="in">
+  <h2>3. The join page, signed in</h2>
+  <p class="lead">Priya opens Dev's link while signed in. Today she would be sent straight to her dashboard. Now she sees one question with her username filled in.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · signed in as Priya</span><div id="d-in"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li><b>The auth layout, not the app layout.</b> A centred card, as on today's join and waiting pages. It doesn't belong to any one of her organisations, and it works for someone whose only membership is pending or removed.</li>
+        <li>"Signed in as" with her email and "Not you? Sign out", because a shared laptop could be signed in as someone else.</li>
+        <li>The username starts with her username in the org this browser is in (here "priya", from Acme Studio). Same hint as PR 4: "How people in Northwind Bakery see you."</li>
+        <li>Two plain facts: who decides and what they see (username and email), and that nothing from Acme Studio is shared.</li>
+        <li>"Cancel" goes to Home. Nothing changes.</li>
+        <li>"Ask to join" is a plain form post with no org claim: it acts on the account, not on the current org. It never switches org.</li>
+      </ol>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · signed in</span><div id="p-in"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · username taken there</span><div id="p-in-taken"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · asking</span><div id="p-in-busy"></div></div>
+    <div class="ann">
+      <h3>Validation</h3>
+      <ul>
+        <li>Username: as on signup. "Start with a letter and use 3 to 30 letters or numbers." and "That name is reserved."</li>
+        <li>Taken in Northwind: "That username is already used in Northwind Bakery." Today's message says "in this organisation". Naming the org is clearer on a page that shows two orgs' worth of context.</li>
+        <li>A rejoin keeps its own old row. Its old username doesn't count as taken.</li>
+        <li>While sending, the button reads "Asking…" with a spinner, and the field locks. A double tap sends once.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 4. ALREADY THERE ============================== -->
+<section class="section" id="member">
+  <h2>4. Signed in, and already in Northwind Bakery</h2>
+  <p class="lead">What Priya sees at <code>/join/northwind-bakery</code> for each state her Northwind membership can be in. The same screens show after the password sign-in and on the email link. They only ever describe her own membership.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Active</span><div id="p-m-active"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Waiting</span><div id="p-m-pending"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Declined before</span><div id="p-m-declined"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Removed before</span><div id="p-m-removed"></div></div>
+    <div class="ann ann-wide">
+      <h3>Each state</h3>
+      <table>
+        <tr><th>Northwind</th><th>She sees</th><th>Buttons</th></tr>
+        <tr><td>Active</td><td>"You're already in Northwind Bakery. You're a member there as priya." If Northwind is already this browser's org, she goes straight to Home instead.</td><td>"Open Northwind Bakery" (the switch post), "Back to Home"</td></tr>
+        <tr><td>Waiting</td><td>"You've already asked to join." The date she asked, and the username she asked with. No second request.</td><td>"Back to Home"</td></tr>
+        <tr><td>Declined</td><td>The join form, with a note: "Your last request was declined on 14 October. You can ask again." Username starts with the one she used before.</td><td>"Ask to join": the same row goes back to waiting</td></tr>
+        <tr><td>Removed</td><td>The join form, with a note: "You were removed from Northwind Bakery on 3 October. You can ask to join again." She'd come back as a member, whatever her role was.</td><td>"Ask to join": the same row goes back to waiting</td></tr>
+      </table>
+      <p>A rejoin never makes a second row and never goes straight to active. It updates the declined or removed row to waiting, with the new username, and an owner or admin decides as for anyone else. The notes don't say who declined or removed her. Today's declined and removed pages don't say either.</p>
+      <div class="q"><b>Question for Raj 4: asking again after a decline</b>Recommended: allow it, with no wait. Requests send no email or notification, so asking again can't spam Dev. He can decline again. A "don't let them ask again" switch is a later idea (see Suggestions in the report).</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 5. AFTER ASKING ============================== -->
+<section class="section" id="after">
+  <h2>5. After asking</h2>
+  <p class="lead">Priya has other organisations, so she isn't stuck on the waiting page. She lands on Home in the org this browser was in, Acme Studio, with a notice. The switcher lists Northwind under a hairline as "Waiting for approval", which PR 3 already draws.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Home in Acme Studio, notice, switcher open</span><div id="d-after"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li><b>A notice, not a toast.</b> It has two things to say: she asked, and where to look for it. A toast would be gone before she reads the second part. It uses the Home notice from PR 3 and closes with the X.</li>
+        <li>She lands on <code>/dashboard?asked=31</code>. The notice names the org from her own membership there, and only if it is waiting. A made-up number shows nothing, the same rule as <code>?from=</code>. <code>app.ts</code> drops the parameter from the address.</li>
+        <li>The waiting row in the switcher is greyed and can't be chosen, as in PR 3.</li>
+        <li>Someone with no active org (a brand-new account, or someone whose only org removed them) sees today's waiting page instead, as now.</li>
+      </ol>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Home with the notice</span><div id="p-after"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the switcher sheet</span><div id="p-after-sheet"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · brand-new person: today's waiting page</span><div id="p-after-new"></div></div>
+  </div>
+</section>
+
+<!-- ============================== 6. APPROVED ============================== -->
+<section class="section" id="approved">
+  <h2>6. When Dev approves</h2>
+  <p class="lead">Today an approval sends nothing: no notification and no email (<code>docs/flows/notifications.md</code>: "Joining requests, approvals, removals and role changes send none"). A new person finds out by pressing "Check again" on the waiting page. Priya isn't on that page. She is working in Acme Studio, so she needs to be told there.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · next visit to Home in Acme Studio</span><div id="d-approved"></div></div>
+    <div class="ann">
+      <h3>Recommended</h3>
+      <ol>
+        <li><b>The switcher row goes live</b> on her next full page load, anywhere: Northwind moves up into the list, A to Z, with "Member". No new code, since the list is read on every load.</li>
+        <li><b>A one-time notice on Home</b>, in whichever org she is in: "Northwind Bakery let you in." with "Open Northwind Bakery". It shows until she opens Northwind or closes it.</li>
+        <li><b>Not a bell notification.</b> A notification belongs to one org, and her bell counts only the org she is in. One filed under Northwind would sit unseen until she opened Northwind, which is what it is meant to prompt.</li>
+        <li>Nothing live. The notice waits for her next Home load, as the switcher row does.</li>
+        <li>Open sessions get Northwind straight away. She doesn't sign in again.</li>
+      </ol>
+      <div class="q"><b>Question for Raj 5: how she hears about it</b>Recommended: switcher plus the one-time Home notice. It needs one new timestamp on the membership (for example <code>approval_seen_at</code>), so a small migration. An email "You're in Northwind Bakery" would reach her when she isn't using the app, but approvals email nobody today, new people included. Suggest it separately for everyone.</div>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Home in Acme Studio</span><div id="p-approved"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the switcher, Northwind live</span><div id="p-approved-sheet"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · after "Open Northwind Bakery"</span><div id="p-approved-in"></div></div>
+    <div class="ann">
+      <h3>Opening Northwind</h3>
+      <ul>
+        <li>"Open Northwind Bakery" is the switch post. It lands on Home with the usual "You're now in Northwind Bakery".</li>
+        <li>The "Getting started" guide shows member steps, as for any new member.</li>
+        <li>The welcome pop-up is skipped. She already uses the app, the same reason PR 4 skips it for a new org. See question 6.</li>
+        <li>If she used Claude in Northwind before a removal, those tokens were revoked on approval. She connects Claude again from More. No message about it: it's rare, and the connector page already shows "not connected".</li>
+      </ul>
+      <div class="later"><b>If Dev declines.</b> With another org, the waiting row just disappears from her switcher, since declined orgs aren't listed. Question 7 asks whether Home should say so once: "Northwind Bakery didn't approve your request."</div>
+      <div id="spec-declined-notice" style="margin-top:12px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 7. OWNER'S SIDE ============================== -->
+<section class="section" id="owner">
+  <h2>7. The owner's side: Members, "Waiting for approval"</h2>
+  <p class="lead">Dev owns Northwind Bakery. Three people are waiting: Priya (has an account through Acme Studio), Tomás (brand new) and Lena (was removed from Northwind on 3 October and asked again).</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Members, signed in as Dev (owner)</span><div id="d-owner"></div></div>
+    <div class="ann">
+      <h3>Recommended: no "has an account elsewhere"</h3>
+      <ol>
+        <li><b>Priya's row looks exactly like Tomás's.</b> Username and email. It doesn't say she has another account, which orgs she is in, or how many. Dev can't act on it, and it would tell him about other companies.</li>
+        <li><b>Lena's row says "Removed on 3 October".</b> That is Northwind's own history, so it reveals nothing from elsewhere, and it is what Dev needs to decide. A declined-before row says "Declined on 14 October". The date only, no name, to keep the row short.</li>
+        <li>Approve and Decline work as today. Approve is now "only if still waiting": a page left open while Lena's request was declined in another tab shows today's error toast, "Only pending requests can be approved."</li>
+        <li>Approving revokes any Claude tokens and codes Lena still had for Northwind and clears a logins unlock there. Dev doesn't see this happen.</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>Who sees what</h3>
+      <table>
+        <tr><th>Role</th><th>Members page</th></tr>
+        <tr><td>Owner</td><td>Invite link, time zone, "Waiting for approval" with Approve and Decline, members.</td></tr>
+        <tr><td>Admin</td><td>The same as an owner.</td></tr>
+        <tr><td>Member</td><td>Members only. No waiting list, no invite link (as today).</td></tr>
+        <tr><td>Super admin acting</td><td>The same as an owner, as today.</td></tr>
+      </table>
+      <p><b>Invite card copy.</b> Today: "People who use it sign up, then wait for you or another admin to approve them." New: "People who use it join with a new or existing account, then wait for you or another admin to let them in."</p>
+      <div class="q"><b>Question for Raj 8: the "Removed on" line</b>Recommended: yes, for removed and declined rows. It's the org's own record, and Dev would otherwise approve someone his admin removed last week without knowing.</div>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Members as Dev</span><div id="p-owner"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · many waiting</span><div id="p-owner-many"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · Members as Kai (member)</span><div id="p-member"></div></div>
+    <div class="shot shot-wide"><span class="shot-label">Close up · the waiting list: empty, after approving, a stale approve</span><div class="pair" id="spec-owner"></div></div>
+  </div>
+</section>
+
+<!-- ============================== 8. EDGE CASES ============================== -->
+<section class="section" id="edges">
+  <h2>8. Edge cases</h2>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Wrong password</span><div id="p-wrong"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Too many tries</span><div id="p-toomany"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Locked account, right password</span><div id="p-locked"></div></div>
+    <div class="ann">
+      <h3>Signing in on the join page</h3>
+      <ul>
+        <li>The same sign-in as <code>/login</code>: the attempt is recorded first, an unknown email still runs a hash, and the same three messages. None of them reveals an account to someone without the password.</li>
+        <li>After a wrong password the email stays, the password clears, and "Email me a link instead" is right there.</li>
+        <li>A locked account can still use "Email me a link instead", and the request attaches. She can't sign in to see it until she resets her password, as for any locked account.</li>
+      </ul>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Super admin acting in Acme</span><div id="p-acting"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Link used or expired</span><div id="p-expired"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Link opened while signed in as someone else</span><div id="p-other"></div></div>
+    <div class="ann">
+      <h3>Super admin</h3>
+      <ul>
+        <li>Raj is acting in Acme Studio and opens Northwind's link. The page says the request comes from his own account, and that asking ends acting.</li>
+        <li>Asking clears <code>acting_org</code>, as creating an org does in PR 4. He lands on Home in his own org with the section 5 notice.</li>
+        <li>A super admin with no membership of his own lands on <code>/admin</code> instead: a waiting membership must not send him to the waiting page. See question 9.</li>
+      </ul>
+      <h3>The org cap</h3>
+      <p>No cap and no screen. The 10-organisation cap counts orgs you created (<code>organisations.created_by_id</code>), and joining creates none. Every request still needs a yes from that org's owner. See question 10 for a daily limit on asking.</p>
+    </div>
+    <div class="shot shot-phone"><span class="shot-label">Something went wrong</span><div id="p-error"></div></div>
+    <div class="ann">
+      <h3>Failures</h3>
+      <ul>
+        <li>Server error: a red alert on the card, "Something went wrong, and nothing was sent. Try again." The username stays. The ask is one transaction, so nothing half-attaches.</li>
+        <li>No connection: these are plain forms, like today's join and sign-in pages, so the browser shows its own offline page and the back button returns to the filled form.</li>
+        <li>An unknown slug: today's public 404 page.</li>
+        <li>The email link, used twice or after 60 minutes: "This link has expired" with "Get a new link", back to the join page. One message for both, so it doesn't say whether it was used.</li>
+        <li>Opened while signed in as Dawa: "This link is for another account." The page names the address the link was sent to, since whoever holds the link already has that email. Nothing attaches to Dawa.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 9. QUESTIONS ============================== -->
+<section class="section" id="questions">
+  <h2>9. Questions for Raj</h2>
+  <p class="lead">Each comes with a recommendation. The mockup draws the recommended answer.</p>
+  <div class="qlist">
+    <div class="q"><b>1. The signed-out shape</b>Two tabs: "New here" (email link) and "I have an account" (password, or "Email me a link instead"). New people go through their inbox before they can ask.<span class="rec">Recommended: yes. It is the only shape where the reply is the same for every email, and it proves every joiner's email, which today nothing does. The alternative, today's instant form plus a sign-in link, keeps refusing known emails and so reveals them.</span></div>
+    <div class="q"><b>2. The send limit for join emails</b><span class="rec">Recommended: reuse "Forgot password"'s 3 per address and 10 per IP per hour, with the same page whether or not the limit was hit.</span></div>
+    <div class="q"><b>3. Does the email link sign you in?</b><span class="rec">Recommended: no. It only attaches a waiting membership. Signing in by link would be a new way in that skips the password and the account lock. She signs in as usual.</span></div>
+    <div class="q"><b>4. Asking again after a decline</b><span class="rec">Recommended: allowed, no wait. No one is notified of a request, so it can't spam the owner.</span></div>
+    <div class="q"><b>5. How she hears she was approved</b><span class="rec">Recommended: the switcher row goes live, plus a one-time Home notice in whichever org she is in. Not a bell notification, since the bell only counts the org you are in. Needs one timestamp on memberships (a small migration). An approval email for everyone is a separate suggestion.</span></div>
+    <div class="q"><b>6. The welcome pop-up after joining with an existing account</b><span class="rec">Recommended: skip it, as PR 4 does for a new org, because she already uses the app. Brand-new joiners keep it. The "Getting started" guide still shows.</span></div>
+    <div class="q"><b>7. Telling her about a decline</b><span class="rec">Recommended: yes, once, on Home: "Northwind Bakery didn't approve your request." Today's declined page already tells people with no other org, so this keeps them equal. Same timestamp as question 5.</span></div>
+    <div class="q"><b>8. "Removed on" and "Declined on" in the owner's waiting list</b><span class="rec">Recommended: yes, the date only. It's the org's own history. Never show that someone has an account or orgs elsewhere.</span></div>
+    <div class="q"><b>9. Super admin</b><span class="rec">Recommended: allowed. Asking ends acting, as creating an org does. With no membership of his own he lands on <code>/admin</code>, never the waiting page.</span></div>
+    <div class="q"><b>10. A daily limit on asking to join</b><span class="rec">Recommended: yes, 10 requests per account per 24 hours, counted from memberships created or re-opened. It stops one account filling many orgs' waiting lists. Over it: "You've asked to join 10 organisations today. Try again tomorrow." on the username field. No lifetime cap.</span></div>
+    <div class="q"><b>11. Signup still reveals emails</b><span class="rec"><code>/signup</code> says "An account with this email already exists", so a stranger can check any email there anyway. Recommended: accept it for PR 6 and fix signup the same way in a follow-up. Otherwise the join page's care buys little.</span></div>
+  </div>
+</section>
+
+<script>
+/* ---------- Data ---------- */
+const PRIYA = { name: "priya" };
+const RAJ = { name: "raj" };
+const DEV = { name: "dev" };
+const KAI = { name: "kai" };
+const PRIYA_EMAIL = "priya@acmestudio.co.uk";
+const ACME = { id: 12, name: "Acme Studio", role: "Owner" };
+const LUMEN = { id: 58, name: "Lumen Café", role: "Owner" };
+const NW = { id: 31, name: "Northwind Bakery", role: "Member" };
+const NW_OWNER = { id: 31, name: "Northwind Bakery", role: "Owner" };
+const NW_WAIT = { id: 31, name: "Northwind Bakery", pending: true };
+const ZEN = { id: 1, name: "Zen Scale", role: "Owner" };
+const HOME = {
+  "Acme Studio": {
+    stats: [6, 1, 4, 3],
+    projects: [["Studio website refresh", "Active", 35, "#3b6fe0", "6 of 17 done", ["kai", "priya"]], ["Spring lookbook", "Active", 20, "#2f9e6b", "2 of 10 done", ["ana", "maya"]]],
+    tasks: [["progress", "Send the Harbour Deli logo proofs"], ["blocked", "Fix the hero image crop on mobile"], ["todo", "Book the photographer for 4 November"]],
+    chat: [["design", "maya: New colour swatches are in Documents"], ["general", "sam: Office closed on Friday afternoon"]],
+  },
+  "Northwind Bakery": {
+    stats: [0, 1, 3, 4],
+    projects: [["Christmas menu launch", "Active", 40, "#3b6fe0", "4 of 10 done", ["dev", "ana"]], ["New shop signage", "Active", 60, "#2f9e6b", "3 of 5 done", ["sam", "kai"]]],
+    tasks: [],
+    chat: [["general", "dev: Welcome, priya! The menu draft is in Documents"], ["menu", "ana: Oat milk supplier confirmed for December"]],
+  },
+};
+const COLORS = { maya: "#ff758f", sam: "#6cb6ff", kai: "#c9d76a", ana: "#72e5b4", priya: "#df85ff", raj: "#ffb454", dawa: "#72e5b4", dev: "#9fd3ff", joe: "#ffd28a", tomas: "#b5a6ff", lena: "#ffb3a7", oskar: "#a8e6cf", mei: "#ffc6e5", farah: "#e8c39e", jonah: "#9be3f5", ines: "#f6b858" };
+const GUIDE = [];
+
+/* ---------- Helpers ---------- */
+const ic = (name, size = 18, cls = "") => `<svg class="ic ${cls}" width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const av = (n, size = "sm") => `<span class="avatar avatar-${size}" style="background:${COLORS[n] || "#e8dfce"}" aria-hidden="true">${n[0].toUpperCase()}</span>`;
+const logo = (org, cls = "") => `<span class="logo ${org.pending ? "logo-wait" : ""} ${cls}">${org.name[0]}</span>`;
+function both(html, stack = false) {
+  return `<div class="pair${stack ? " stack" : ""}"><div class="th th-light" data-theme="light">${html}</div><div class="th th-dark" data-theme="dark">${html}</div></div>`;
+}
+const put = (id, html) => { document.getElementById(id).innerHTML = both(html); };
+const putDesk = (id, html) => { document.getElementById(id).innerHTML = both(`<div class="desk-holder">${html}</div>`, true); };
+
+/* ---------- Switcher rows (PR 3) plus the new row ---------- */
+function orgRow(org, o = {}) {
+  if (org.pending) {
+    return `<div class="org-row" role="menuitem" aria-disabled="true" tabindex="-1">${logo(org, o.big ? "logo-lg" : "")}<span class="org-text"><span class="org-name truncate-1">${org.name}</span><span class="meta">${ic("clock-3", 13)}Waiting for approval</span></span></div>`;
+  }
+  const cur = o.current === org.name;
+  const role = o.roleOverride && cur ? `${ic("shield", 13)}${o.roleOverride}` : org.role;
+  return `<button type="button" class="org-row ${o.focus === org.name ? "focus" : ""}" role="menuitemradio" aria-checked="${cur}" tabindex="-1">${logo(org, o.big ? "logo-lg" : "")}<span class="org-text"><span class="org-name truncate-1">${org.name}</span><span class="meta">${role}</span></span>${cur ? ic("check", 20, "tick") : ""}</button>`;
+}
+const newRow = (o = {}) => `<a href="/orgs/new" class="org-row org-new ${o.focus === "new" ? "focus" : ""}" role="menuitem" tabindex="-1"><span class="logo-new">${ic("plus", 18)}</span><span class="org-text"><span class="org-name">New organisation</span></span></a>`;
+function orgList(orgs, o = {}) {
+  const active = orgs.filter((x) => !x.pending);
+  const pending = orgs.filter((x) => x.pending);
+  return active.map((x) => orgRow(x, o)).join("") + (pending.length ? `<div class="org-sep" role="separator"></div>` + pending.map((x) => orgRow(x, o)).join("") : "");
+}
+/* The whole body of the menu or sheet. The new row sits outside the scroll. */
+function orgBody(orgs, o = {}) {
+  if (o.acting) {
+    return `<div class="org-menu-label">Acting in</div>${orgRow(o.acting, { ...o, current: o.acting.name, roleOverride: "Platform admin" })}<div class="org-sep" role="separator"></div><div class="org-menu-label">Your organisations</div>${orgList(o.own, { ...o, current: null })}<p class="org-note">Switching ends acting in ${o.acting.name}.</p>`;
+  }
+  return `${o.sheet ? "" : `<div class="org-menu-label">Your organisations</div>`}<div class="${o.scroll ? "org-scroll" : ""}" style="${o.scroll && o.sheet ? "max-height:none" : ""}">${orgList(orgs, o)}</div><div class="org-sep" role="separator"></div>${newRow(o)}`;
+}
+const menu = (orgs, o = {}) => `<div class="org-menu" role="menu" aria-label="Your organisations"${o.style ? ` style="${o.style}"` : ""}>${orgBody(orgs, o)}</div>`;
+function orgButton(org, o = {}) {
+  if (o.single) return `<a href="#" class="org-static">${logo(org)}<strong class="truncate-1" style="font-size:15px">${org.name}</strong></a>`;
+  const sub = o.acting ? `<span class="sub">${ic("shield", 12)}Platform admin</span>` : "";
+  return `<button type="button" class="org-switch" aria-haspopup="menu" aria-expanded="${!!o.open}">${logo(org)}<span class="org-btn-text"><strong class="truncate-1">${org.name}</strong>${sub}</span>${ic("chevrons-up-down", 16, "chev")}</button>`;
+}
+function sidebar(org, o = {}) {
+  const links = [["house", "Home"], ["bell", "Notifications"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["map", "Roadmap"], ["meetings", "Meetings"], ["folder", "Documents"], ["users", "Members"]].filter(([, l]) => !(o.acting && l === "Documents"));
+  if (o.superAdmin) links.push(["shield", "Admin"]);
+  const me = o.me || PRIYA;
+  return `<nav class="sidebar">${orgButton(org, o)}${links.map(([i, l]) => `<a href="#" class="side-link"${l === (o.page || "Home") ? ' aria-current="page"' : ""}>${ic(i, 20)}<span style="flex:1">${l}</span>${l === "Chat" && o.chat ? `<span class="badge">${o.chat}</span>` : ""}</a>`).join("")}<div class="side-foot">${av(me.name, "md")}<span class="truncate-1" style="flex:1;font-size:14px;font-weight:500">${me.name}</span><span class="icon-btn">${ic("sun-moon", 20)}</span><span class="icon-btn">${ic("log-out", 20)}</span></div>${o.menu || ""}</nav>`;
+}
+const actingBanner = (name) => `<div class="acting"><span>You are inside <strong>${name}</strong> as platform admin. Changes you make are real.</span><button class="btn btn-secondary">Leave</button></div>`;
+
+/* ---------- Home ---------- */
+function stats(orgName) {
+  const s = HOME[orgName].stats;
+  const items = [["var(--progress)", "Your open tasks"], ["var(--blocked)", "Blocked"], ["var(--accent)", "Due this week"], ["var(--done)", "Unread messages"]];
+  return `<div class="stats">${items.map(([c, l], i) => `<a class="stat" style="--dot:${c}"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">${s[i]}</span><span class="meta">${l}</span></span></a>`).join("")}</div>`;
+}
+function projectCard(p) {
+  return `<a class="project-card" style="--accent-bar:${p[3]}"><span style="display:flex;align-items:center;gap:8px"><span class="truncate-1" style="flex:1;font-weight:700">${p[0]}</span><span class="pill">${p[1]}</span></span><span style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1;--bar:${p[3]}"><span style="width:${p[2]}%"></span></span><span class="meta">${p[2]}%</span></span><span style="display:flex;align-items:center;gap:8px"><span class="meta" style="flex:1">${p[4]}</span><span class="avatar-stack">${p[5].map((n) => av(n, "xs")).join("")}</span></span></a>`;
+}
+const statusIc = (s) => `<span style="color:var(--${s === "progress" ? "progress" : s === "blocked" ? "blocked" : "todo"});display:inline-grid">${ic("status-" + s, 20)}</span>`;
+function guide(orgName) {
+  return `<section class="guide" aria-labelledby="g"><span class="icon-btn guide-close">${ic("x", 18)}</span><div class="guide-top"><span class="guide-ring" style="--pct:0" role="img" aria-label="0 of 5 done"><span>0/5</span></span><div style="min-width:0"><h2 id="g" style="margin:0;font-size:17px;font-weight:800;letter-spacing:-0.01em">Getting started</h2><p class="meta" style="font-size:14px">A few quick steps to find your way around ${orgName}. They tick themselves as you go.</p></div></div><ul class="guide-steps">${GUIDE.map(([t, h, a], i) => `<li class="guide-step"><span class="guide-tick"></span><span style="display:flex;flex-direction:column;flex:1;min-width:0"><strong style="font-size:15px">${t}</strong><span class="meta guide-how">${h}</span></span><a class="btn ${i === 0 ? "btn-primary" : "btn-secondary"} guide-go">${a}</a></li>`).join("")}</ul></section>`;
+}
+function roadmapBlock(h, phone) {
+  const body = h.projects.length ? (phone ? projectCard(h.projects[0]) : `<div class="cards-3">${h.projects.map(projectCard).join("")}</div>`) : `<div class="card empty">Nothing in the "now" lane. <a>Add a project</a></div>`;
+  return `<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Roadmap: now</h2><a>Full roadmap</a></div>${body}</section>`;
+}
+function homeDesk(orgName, me) {
+  const h = HOME[orgName];
+  const tasks = h.tasks.length ? `<div class="list">${h.tasks.map(([s, t]) => `<div class="task-line">${statusIc(s)}${t}</div>`).join("")}</div>` : `<div class="card empty">Nothing on your plate. <a>Add a task</a></div>`;
+  const chat = h.chat.length ? `<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Recent chat</h2><a>All chats</a></div><div class="list">${h.chat.map(([c, t]) => `<div class="task-line"><span style="color:var(--muted);display:inline-grid">${ic("hash", 18)}</span><span style="display:flex;flex-direction:column;min-width:0"><strong style="font-size:14px">${c}</strong><span class="meta truncate-1">${t}</span></span></div>`).join("")}</div></section>` : "";
+  return `<div class="d-page"><div style="display:flex;align-items:flex-end;gap:12px"><div style="flex:1"><p class="greet-date">Tuesday 20 October</p><p class="greet">Good morning, ${me.name}</p></div><a class="btn btn-primary">${ic("plus", 16)}New task</a></div>${me.notice || ""}${h.fresh ? guide(orgName) : ""}${stats(orgName)}<div class="home-grid"><div style="display:flex;flex-direction:column;gap:24px">${roadmapBlock(h)}<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>My tasks</h2><a>All tasks</a></div>${tasks}</section></div><div>${chat}</div></div></div>`;
+}
+function homePhone(orgName, me) {
+  const h = HOME[orgName];
+  return `<div class="page"><div><p class="greet-date">Tuesday 20 October</p><p class="greet">Good morning, ${me.name}</p></div>${me.notice || ""}${h.fresh ? guide(orgName) : ""}${stats(orgName)}${roadmapBlock(h, true)}</div>`;
+}
+const tabbar = (active = "Home") => `<nav class="tabbar">${[["house", "Home"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["ellipsis", "More"]].map(([i, l]) => `<a class="tab"${l === active ? ' aria-current="page"' : ""}><span class="tab-icon">${ic(i, 22)}</span>${l}</a>`).join("")}</nav>`;
+function phoneHeader(orgName, me) {
+  return `<header class="topbar"><button type="button" class="org-head" aria-haspopup="dialog"><span class="truncate-1">${orgName}</span>${ic("chevron-down", 18)}</button><a class="icon-btn" aria-label="Account and settings">${av(me.name, "sm")}</a><a class="icon-btn" aria-label="Notifications">${ic("bell", 22)}</a></header>`;
+}
+const phone = (inner) => `<div class="frame-phone"><div class="statusbar"><span>9:41</span><span style="font-size:13px">●●● ▮</span></div><div class="phone-body">${inner}</div><span class="home-ind"></span></div>`;
+function sheet(body, o = {}) {
+  const title = o.title || "Your organisations";
+  const back = o.back ? `<button class="icon-btn" aria-label="Back to your organisations" style="margin-left:-12px">${ic("chevron-left", 22)}</button>` : "";
+  const role = o.form ? "" : ` role="menu" aria-label="${title}"`;
+  return `<div class="m-scrim"></div><div class="m-sheet" role="dialog" aria-label="${title}"><div class="sheet-handle"></div><div class="sheet-head"${o.back ? ' style="padding-left:8px"' : ""}>${back}<h2>${title}</h2><button class="icon-btn" aria-label="Close">${ic("x", 20)}</button></div>${o.form ? body : `<div class="sheet-body"${role}>${body}</div>`}</div>`;
+}
+const toast = (msg, cls = "", style = "") => `<div class="toast-region" role="status"${style ? ` style="${style}"` : ""}><div class="toast ${cls}">${msg}</div></div>`;
+
+
+/* ---------- NEW in PR 6: auth-layout pages ---------- */
+const BRAND = `<div class="brand"><span class="logo">C</span>Collaboration Tool</div>`;
+const card = (inner) => `<div class="auth-card">${BRAND}${inner}</div>`;
+const deskAuth = (inner) => `<div class="frame-auth">${card(inner)}</div>`;
+const phoneAuth = (inner) => phone(`<div class="phone-auth">${card(inner)}</div>`);
+const head = (title, sub, org = "Northwind Bakery") => `${org ? `<span class="auth-org">${org}</span>` : ""}<h2 class="auth-h">${title}</h2>${sub ? `<p class="auth-sub">${sub}</p>` : ""}`;
+const spin = (label) => `${ic("loader-circle", 18, "spin")}${label}`;
+const alertBox = (msg, kind = "error") => `<p class="alert alert-${kind}" role="alert" style="margin:20px 0 0">${msg}</p>`;
+const tile = (icon, cls = "") => `<span class="state-tile ${cls}">${ic(icon, 24)}</span>`;
+function field(o) {
+  const msg = o.error ? `<span class="field-error">${ic("circle-alert", 14)}${o.error}</span>` : o.hint ? `<span class="field-hint">${o.hint}</span>` : "";
+  return `<label class="field"><span class="field-label">${o.label}</span><input class="input ${o.focus ? "focus" : ""}" type="${o.type || "text"}" value="${o.value || ""}" ${o.readonly ? "readonly" : ""} ${o.error ? 'aria-invalid="true"' : ""} ${o.busy ? "disabled" : ""} ${o.attrs || ""}>${msg}</label>`;
+}
+const USERNAME_HINT = (org) => `How people in ${org} see you. Start with a letter, then 3 to 30 letters or numbers.`;
+
+/* 1. Signed out */
+function joinOut(o = {}) {
+  const have = o.tab === "have";
+  const seg = `<nav class="segmented" aria-label="How to join"><a href="/join/northwind-bakery" aria-current="${!have}">New here</a><a href="/join/northwind-bakery?with=password" aria-current="${have}">I have an account</a></nav>`;
+  const fields = have
+    ? field({ label: "Email", type: "email", value: o.email ?? PRIYA_EMAIL, busy: o.busy, attrs: 'autocomplete="email"' }) + field({ label: "Password", type: "password", value: o.pw ?? "nutmeg-crumble-42", focus: o.focus === "pw", busy: o.busy, attrs: 'autocomplete="current-password"' })
+    : field({ label: "Email", type: "email", value: o.email ?? "", focus: o.focus === "email", busy: o.busy, hint: "We'll email you a link to finish. If you already have an account, the link adds Northwind Bakery to it.", attrs: 'autocomplete="email"' });
+  const btn = have
+    ? `<button class="btn btn-primary btn-lg btn-full" ${o.busy ? "disabled" : ""}>${o.busy ? spin("Signing in…") : "Sign in and continue"}</button><div style="display:flex;justify-content:center;margin-top:-8px"><button class="link-btn">Email me a link instead</button></div>`
+    : `<button class="btn btn-primary btn-lg btn-full" ${o.busy ? 'disabled aria-busy="true"' : ""}>${o.busy ? spin("Sending…") : "Email me a link"}</button>`;
+  return head("Ask to join Northwind Bakery", "An owner or admin of Northwind Bakery lets new people in.") + seg + (o.alert ? alertBox(o.alert) : "") + `<form class="auth-form">${fields}${btn}</form>`;
+}
+const sentPage = () => head("Check your email", null) + `<p class="auth-sub">We've sent a link to <strong style="color:var(--text)">${PRIYA_EMAIL}</strong>. Open it on any device to finish joining Northwind Bakery.</p><p class="auth-sub">The link works once, for 60 minutes. Nothing there? Check your spam folder, or ask for another in a few minutes.</p><p class="auth-foot"><a href="#">Back to the join page</a></p>`;
+
+/* 2. Emails and the link pages */
+const mail = (subject, to, body) => `<div class="mail"><div class="mail-head"><span><b>${subject}</b></span><span>From Collaboration Tool · to ${to}</span></div><div class="mail-body">${body}</div></div>`;
+const MAIL_EXISTING = mail("Join Northwind Bakery with your account", PRIYA_EMAIL, `<p>Hi priya,</p><p>Someone asked to join Northwind Bakery on Collaboration Tool with this email. You already have an account, so you can join with it. Choose your username there, and an owner or admin will let you in.</p><a class="btn btn-primary btn-tall">Join Northwind Bakery</a><p class="meta">The link works once, for 60 minutes. If this wasn't you, ignore this email. Nothing changes unless the link is used.</p>`);
+const MAIL_NEW = mail("Finish joining Northwind Bakery", "tomas.reyes@gmail.com", `<p>Hi,</p><p>Someone asked to join Northwind Bakery on Collaboration Tool with this email. Choose a username and password to finish. An owner or admin will then let you in.</p><a class="btn btn-primary btn-tall">Finish joining</a><p class="meta">The link works once, for 60 minutes. If this wasn't you, ignore this email. No account is made unless the link is used.</p>`);
+const facts = (from) => `<ul class="facts" style="margin:0"><li>${ic("users", 16)}<span>An owner or admin of Northwind Bakery decides. They'll see this username and your email.</span></li><li>${ic("lock", 16)}<span>Nothing from ${from} is shared with Northwind Bakery.</span></li></ul>`;
+function askForm(o = {}) {
+  const v = o.username ?? "priya";
+  return `<form class="auth-form">${field({ label: "Your username in Northwind Bakery", value: v, error: o.error, hint: USERNAME_HINT("Northwind Bakery"), focus: o.focus, busy: o.busy, attrs: 'autocapitalize="off" spellcheck="false" autocomplete="username"' })}${facts(o.from || "Acme Studio")}<div class="btn-col" style="margin-top:4px"><button class="btn btn-primary btn-lg btn-full" ${o.busy ? 'disabled aria-busy="true"' : ""}>${o.busy ? spin("Asking…") : "Ask to join"}</button>${o.noCancel ? "" : `<button class="btn btn-secondary btn-lg btn-full" ${o.busy ? "disabled" : ""}>Cancel</button>`}</div></form>`;
+}
+const linkExisting = (o = {}) => head("Ask to join Northwind Bakery", `With your account <strong style="color:var(--text)">${PRIYA_EMAIL}</strong>.`) + (o.alert ? alertBox(o.alert) : "") + askForm({ ...o, from: "your other organisations", noCancel: true });
+const linkDone = () => tile("clock-3", "wait") + head("Request sent", "Northwind Bakery will show in your organisations as waiting for approval. An owner or admin lets you in.") + `<div class="btn-col"><a class="btn btn-primary btn-lg btn-full">Sign in</a></div>`;
+const linkNew = () => head("Finish joining Northwind Bakery", "Choose how people there see you, and a password for your new account.") + `<form class="auth-form">${field({ label: "Email", type: "email", value: "tomas.reyes@gmail.com", readonly: true })}${field({ label: "Username", value: "tomas", hint: "Start with a letter. 3 to 30 letters or numbers." })}${field({ label: "Password", type: "password", value: "", focus: true, hint: "At least 8 characters.", attrs: 'autocomplete="new-password"' })}<button class="btn btn-primary btn-lg btn-full">Ask to join</button></form>`;
+
+/* 3 and 4. Signed in */
+const signedAs = (email = PRIYA_EMAIL, who = "priya") => `<div class="signed-as">${av(who, "sm")}<span class="truncate-1">Signed in as <strong>${email}</strong></span><button class="link-btn">Sign out</button></div>`;
+function joinIn(o = {}) {
+  const acting = o.acting ? `<div class="acting-note" style="margin:20px 0 0">${ic("shield", 16)}<span>You're acting in <strong>Acme Studio</strong>. This request comes from your own account, raj. Asking ends acting.</span></div>` : "";
+  const hist = o.history ? `<div class="history">${ic("rotate-ccw", 16)}<span>${o.history}</span></div>` : "";
+  return head("Ask to join Northwind Bakery", "Use the account you have. You keep your other organisations.") + (o.acting ? signedAs("raj@zen-scale.io", "raj") : signedAs()) + acting + hist + (o.alert ? alertBox(o.alert) : "") + askForm(o);
+}
+const stActive = () => tile("circle-check", "ok") + head("You're already in Northwind Bakery", "You're a member there as priya.") + `<div class="btn-col"><button class="btn btn-primary btn-lg btn-full">Open Northwind Bakery</button><a class="btn btn-secondary btn-lg btn-full">Back to Home</a></div>`;
+const stPending = () => tile("clock-3", "wait") + head("You've already asked to join", "You asked on 20 October, as priya. An owner or admin of Northwind Bakery will let you in. Until then it shows in your organisations as waiting.") + `<div class="btn-col"><a class="btn btn-primary btn-lg btn-full">Back to Home</a></div>`;
+const stExpired = () => tile("link") + head("This link has expired", "Join links work once, for 60 minutes. Ask for a new one on Northwind Bakery's join page.") + `<div class="btn-col"><a class="btn btn-primary btn-lg btn-full">Get a new link</a></div>`;
+const stOther = () => tile("user-x") + head("This link is for another account", `It was sent to <strong style="color:var(--text)">${PRIYA_EMAIL}</strong>. You're signed in as dawa. Sign out, then open the link again.`) + `<div class="btn-col"><button class="btn btn-primary btn-lg btn-full">Sign out</button><a class="btn btn-secondary btn-lg btn-full">Back to Home</a></div>`;
+const waitingToday = () => head("Waiting for approval", "Hey tomas, you're waiting to be approved by an owner or admin of Northwind Bakery. You'll see the workspace as soon as someone lets you in.") + `<div class="btn-col"><a class="btn btn-primary btn-lg btn-full">Check again</a><button class="btn btn-secondary btn-lg btn-full">Sign out</button></div>`;
+
+/* 5 and 6. Notices on Home (the PR 3 .notice) */
+const notice = (icon, cls, title, meta, actions) => `<div class="notice" role="status"><span class="notice-icon ${cls}">${ic(icon, 18)}</span><div class="notice-body"><p class="notice-title">${title}</p>${meta ? `<p class="meta" style="font-size:14px">${meta}</p>` : ""}${actions ? `<div class="notice-actions">${actions}</div>` : ""}</div><button class="icon-btn" aria-label="Dismiss">${ic("x", 20)}</button></div>`;
+const ASKED = notice("clock-3", "", "You've asked to join Northwind Bakery.", "An owner or admin will let you in. Until then it shows in your organisations as waiting.");
+const APPROVED = notice("circle-check", "ok", "Northwind Bakery let you in.", "You're a member there as priya.", `<button class="btn btn-secondary btn-tall">Open Northwind Bakery</button>`);
+const DECLINED = notice("user-x", "muted", "Northwind Bakery didn't approve your request.", "It's no longer in your organisations.");
+const withNotice = (n) => ({ ...PRIYA, notice: n });
+
+/* 7. Members */
+const WAITING = [
+  { name: "priya", email: PRIYA_EMAIL },
+  { name: "tomas", email: "tomas.reyes@gmail.com" },
+  { name: "lena", email: "lena@harbourdeli.co.uk", hist: "Removed on 3 October" },
+];
+const WAITING_MANY = [...WAITING,
+  { name: "oskar", email: "oskar.lind@outlook.com" },
+  { name: "mei", email: "mei.tan@fastmail.com", hist: "Declined on 14 October" },
+  { name: "farah", email: "farah.k@gmail.com" },
+  { name: "jonah", email: "jonah@brightsidedental.co.uk" },
+  { name: "ines", email: "ines.costa@gmail.com" },
+];
+const TEAM = [
+  { name: "dev", email: "dev@northwindbakery.co.uk", role: "Owner" },
+  { name: "sam", email: "sam.okafor@gmail.com", role: "Admin" },
+  { name: "ana", email: "ana@northwindbakery.co.uk", role: "Member" },
+  { name: "kai", email: "kai.morgan@gmail.com", role: "Member" },
+  { name: "joe", email: "joe.baker@icloud.com", role: "Member" },
+];
+function waitingRow(p) {
+  const hist = p.hist ? `<span class="row-history">${ic("rotate-ccw", 13)}${p.hist}</span>` : "";
+  const end = p.state === "approved" ? `<span class="pill">Approved</span>` : `<div class="row-actions"><button class="btn btn-danger">Decline</button><button class="btn btn-primary">Approve</button></div>`;
+  return `<div class="list-row flex-wrap">${av(p.name, "md")}<div class="row-text"><p class="truncate-1" style="font-weight:500">${p.name}</p><p class="meta truncate-1">${p.email}</p>${hist}</div>${end}</div>`;
+}
+const memberRow = (m) => `<div class="list-row">${av(m.name, "md")}<div class="row-text"><p class="truncate-1" style="font-weight:500">${m.name}</p><p class="meta truncate-1">${m.email}</p></div><span class="pill">${m.role}</span></div>`;
+const waitingSection = (rows) => `<section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Waiting for approval · ${rows.length}</h2><div class="list">${rows.length ? rows.map(waitingRow).join("") : `<p class="empty">No one is waiting right now.</p>`}</div></section>`;
+function membersBody(o = {}) {
+  const invite = `<section class="card invite"><h2>Invite people</h2><p class="meta" style="font-size:14px">Share this link. People who use it join with a new or existing account, then wait for you or another admin to let them in.</p><div style="display:flex;gap:8px"><input class="input mono" readonly value="collab.zen-scale.io/join/northwind-bakery" aria-label="Join link"><button class="btn btn-secondary btn-tall">Copy</button></div></section>`;
+  const team = `<section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">Members · ${TEAM.length}</h2><div class="list">${TEAM.map(memberRow).join("")}</div></section>`;
+  if (o.member) return `${team}`;
+  return `${invite}${waitingSection(o.rows || WAITING)}${team}`;
+}
+const membersDesk = () => `<div class="frame-desk">${sidebar(NW_OWNER, { page: "Members", me: DEV })}<div class="d-main"><div class="d-page" style="max-width:860px"><h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.02em">Members</h1>${membersBody()}</div></div></div>`;
+const membersPhone = (o = {}) => phone(`<header class="topbar"><a class="icon-btn" aria-label="Back to More" style="margin-left:-12px">${ic("chevron-left", 22)}</a><h1>Members</h1></header><div class="page" style="overflow-y:auto;flex:1">${membersBody(o)}</div>${tabbar("More")}`);
+
+/* ---------- Render ---------- */
+// 1. Signed out
+putDesk("d-out", deskAuth(joinOut({ tab: "have" })));
+put("p-out-new", phoneAuth(joinOut({ email: "", focus: "email" })));
+put("p-out-have", phoneAuth(joinOut({ tab: "have" })));
+put("p-out-busy", phoneAuth(joinOut({ email: PRIYA_EMAIL, busy: true })));
+put("p-out-sent", phoneAuth(sentPage()));
+
+// 2. Email link
+document.getElementById("m-existing").innerHTML = both(MAIL_EXISTING);
+document.getElementById("m-new").innerHTML = both(MAIL_NEW);
+putDesk("d-link", deskAuth(linkExisting()));
+put("p-link-existing", phoneAuth(linkExisting()));
+put("p-link-done", phoneAuth(linkDone()));
+put("p-link-new", phoneAuth(linkNew()));
+
+// 3. Signed in
+putDesk("d-in", deskAuth(joinIn()));
+put("p-in", phoneAuth(joinIn()));
+put("p-in-taken", phoneAuth(joinIn({ username: "priya", error: "That username is already used in Northwind Bakery.", focus: true })));
+put("p-in-busy", phoneAuth(joinIn({ busy: true })));
+
+// 4. Already there
+put("p-m-active", phoneAuth(stActive()));
+put("p-m-pending", phoneAuth(stPending()));
+put("p-m-declined", phoneAuth(joinIn({ history: "Your last request was declined on 14 October. You can ask again." })));
+put("p-m-removed", phoneAuth(joinIn({ history: "You were removed from Northwind Bakery on 3 October. You can ask to join again, and you'd come back as a member." })));
+
+// 5. After asking
+const ORGS_WAIT = [ACME, LUMEN, NW_WAIT];
+const ORGS_LIVE = [ACME, LUMEN, NW];
+putDesk("d-after", `<div class="frame-desk">${sidebar(ACME, { open: true, chat: 3, menu: menu(ORGS_WAIT, { current: "Acme Studio" }) })}<div class="d-main">${homeDesk("Acme Studio", withNotice(ASKED))}</div></div>`);
+put("p-after", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", withNotice(ASKED)) + tabbar()));
+put("p-after-sheet", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar() + sheet(orgBody(ORGS_WAIT, { current: "Acme Studio", big: true, sheet: true }))));
+put("p-after-new", phoneAuth(waitingToday()));
+
+// 6. Approved
+putDesk("d-approved", `<div class="frame-desk">${sidebar(ACME, { open: true, chat: 3, menu: menu(ORGS_LIVE, { current: "Acme Studio" }) })}<div class="d-main">${homeDesk("Acme Studio", withNotice(APPROVED))}</div></div>`);
+put("p-approved", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", withNotice(APPROVED)) + tabbar()));
+put("p-approved-sheet", phone(phoneHeader("Acme Studio", PRIYA) + homePhone("Acme Studio", PRIYA) + tabbar() + sheet(orgBody(ORGS_LIVE, { current: "Acme Studio", big: true, sheet: true }))));
+put("p-approved-in", phone(phoneHeader("Northwind Bakery", PRIYA) + homePhone("Northwind Bakery", PRIYA) + tabbar() + toast("You're now in Northwind Bakery")));
+document.getElementById("spec-declined-notice").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}" style="padding:12px;border-radius:14px;background:var(--bg);margin-bottom:10px">${DECLINED}</div>`).join("");
+
+// 7. Owner's side
+putDesk("d-owner", membersDesk());
+put("p-owner", membersPhone());
+put("p-owner-many", membersPhone({ rows: WAITING_MANY }));
+put("p-member", membersPhone({ member: true }));
+const ownerSpecs = [
+  ["Empty", waitingSection([])],
+  ["After approving Priya", waitingSection([{ ...WAITING[0], state: "approved" }, WAITING[1], WAITING[2]])],
+  ["Stale page: Lena was declined in another tab", `${waitingSection([WAITING[2]])}<div class="toast toast-error" style="margin-top:12px">Only pending requests can be approved.</div>`],
+];
+document.getElementById("spec-owner").innerHTML = ["light", "dark"].map((t) => `<div class="th th-${t}" data-theme="${t}" style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">${ownerSpecs.map(([l, h]) => `<div class="specimen" style="width:440px;background:var(--bg)"><p class="spec-label">${l}</p>${h}</div>`).join("")}</div>`).join("");
+
+// 8. Edge cases
+put("p-wrong", phoneAuth(joinOut({ tab: "have", pw: "", focus: "pw", alert: "Email or password is incorrect." })));
+put("p-toomany", phoneAuth(joinOut({ tab: "have", pw: "", alert: "Too many failed sign-ins. Try again in 15 minutes, or reset your password." })));
+put("p-locked", phoneAuth(joinOut({ tab: "have", pw: "", alert: "Your account is locked after too many wrong passwords. Reset your password with \"Forgot password\" to unlock it." })));
+put("p-acting", phoneAuth(joinIn({ acting: true, username: "raj", from: "your other organisations" })));
+put("p-expired", phoneAuth(stExpired()));
+put("p-other", phoneAuth(stOther()));
+put("p-error", phoneAuth(joinIn({ alert: "Something went wrong, and your request wasn't sent. Try again." })));
+
+/* ---------- Desktop frames, scaled to fit ---------- */
+function renderDesk() {
+  document.querySelectorAll(".desk-holder").forEach((h) => {
+    const frame = h.firstElementChild;
+    const avail = h.closest(".shot").clientWidth;
+    const z = Math.min(1440, avail || 1440) / 1440;
+    h.style.width = `${1440 * z}px`;
+    h.style.height = `${900 * z}px`;
+    frame.style.transform = `scale(${z})`;
+  });
+}
+renderDesk();
+addEventListener("resize", renderDesk);
+document.querySelectorAll("[data-mode-set]").forEach((b) => b.addEventListener("click", () => {
+  const m = b.dataset.modeSet;
+  document.body.dataset.mode = m;
+  document.documentElement.dataset.theme = m === "dark" ? "dark" : "light";
+  document.querySelectorAll("[data-mode-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+document.querySelectorAll("[data-view-set]").forEach((b) => b.addEventListener("click", () => {
+  document.body.dataset.view = b.dataset.viewSet;
+  document.querySelectorAll("[data-view-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+</script>
+</body>
+</html>

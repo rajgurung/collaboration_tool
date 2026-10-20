@@ -213,19 +213,38 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted || nav?.type === "back_forward") probeOrg();
 });
 
-// After a switch, a create or a stale-tab move, drop ?switched=, ?created=
-// and ?from= from Home's address, so a reload doesn't repeat the toast or
-// the notice.
+// After a switch, a create, a stale-tab move or asking to join, drop
+// ?switched=, ?created=, ?from= and ?requested= from Home's address, so a
+// reload doesn't repeat the toast or the notice.
 {
   const here = new URL(window.location.href);
-  const flags = ["switched", "created", "from"];
+  const flags = ["switched", "created", "from", "requested"];
   if (flags.some((flag) => here.searchParams.has(flag))) {
     flags.forEach((flag) => here.searchParams.delete(flag));
     history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
   }
 }
+// A plain form whose button has data-busy-label ("Ask to join") says so
+// while it sends, and can't be sent twice. A page restored from the
+// back-forward cache gets its button back.
+document.addEventListener("submit", (event) => {
+  if (event.defaultPrevented) return;
+  const button = (event.target as HTMLFormElement).querySelector<HTMLButtonElement>("button[data-busy-label]");
+  if (!button) return;
+  button.dataset.idleLabel = button.textContent ?? "";
+  button.textContent = button.dataset.busyLabel ?? "";
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+});
+window.addEventListener("pageshow", () => {
+  document.querySelectorAll<HTMLButtonElement>("button[data-busy-label][disabled]").forEach((button) => {
+    button.textContent = button.dataset.idleLabel ?? button.textContent;
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+  });
+});
 document.addEventListener("click", (event) => {
-  (event.target as Element | null)?.closest("[data-dismiss-notice]")?.closest("[data-stale-notice]")?.remove();
+  (event.target as Element | null)?.closest("[data-dismiss-notice]")?.closest("[data-stale-notice], [data-requested-notice]")?.remove();
 });
 
 // Chat: Enter sends, Shift+Enter adds a new line.

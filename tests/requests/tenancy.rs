@@ -13,7 +13,7 @@ use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{EntityTrait, PaginatorTrait};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up_member, AsMember};
+use super::prepare_data::{approve_as_owner, join, sign_up_member, AsMember};
 
 const SECRET: &str = "GLOBEX-SECRET";
 
@@ -357,7 +357,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
             .await
             .unwrap()
             .unwrap();
-        let ivy_m = ivy_m.approve(&ctx.db, globex.owner.id).await.unwrap();
+        let ivy_m = approve_as_owner(&ctx, &ivy_m).await;
         memberships::Model::remove(
             &ctx,
             globex.folder.organisation_id,

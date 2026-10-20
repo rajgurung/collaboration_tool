@@ -28,6 +28,18 @@
   </div>
   {% endif %}
 
+  {% if requested %}
+  {# After "Ask to join". Names the org only while your own request there is waiting. #}
+  <div class="notice" role="status" data-requested-notice>
+    <span class="notice-icon">{{<icon name="clock-3" class="h-[18px] w-[18px]"/>}}</span>
+    <div class="notice-body">
+      <p class="notice-title">You've asked to join {{ requested.name }}.</p>
+      <p class="meta m-0 text-[14px]">An owner or admin will let you in. Until then it shows in your organisations as waiting.</p>
+    </div>
+    <button type="button" class="icon-btn" aria-label="Dismiss" data-dismiss-notice>{{<icon name="x" class="h-5 w-5"/>}}</button>
+  </div>
+  {% endif %}
+
   <div class="flex flex-wrap items-end gap-3">
     <div class="flex-1">
       <p class="meta m-0 mb-1 text-[14px]">{{ today }}</p>

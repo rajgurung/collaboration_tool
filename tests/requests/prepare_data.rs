@@ -1,6 +1,6 @@
 use axum::http::{HeaderName, HeaderValue};
 use collab::models::{
-    organisations,
+    memberships, organisations,
     users::{self, RegisterParams},
 };
 use loco_rs::{app::AppContext, TestServer};
@@ -166,6 +166,32 @@ pub async fn join(
         response.text()
     );
     TestMember::new(cookie_from(&response.headers().clone()), org.id)
+}
+
+/// Approves a pending membership as the organisation's first owner.
+#[allow(dead_code)]
+pub async fn approve_as_owner(
+    ctx: &AppContext,
+    pending: &memberships::Model,
+) -> memberships::Model {
+    let owner = memberships::Model::owners(&ctx.db, pending.organisation_id)
+        .await
+        .unwrap()
+        .first()
+        .expect("the organisation has an owner")
+        .0
+        .user_id;
+    memberships::Model::approve(
+        &ctx.db,
+        pending.organisation_id,
+        memberships::Approver {
+            user_id: owner,
+            acting: false,
+        },
+        pending.id,
+    )
+    .await
+    .expect("the request is approved")
 }
 
 pub fn cookie_from(headers: &axum::http::HeaderMap) -> (HeaderName, HeaderValue) {

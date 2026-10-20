@@ -583,11 +583,13 @@ async fn unseen_mentions_are_emailed_once() {
         // Bob reads his mentions; carol hasn't opened either of hers.
         request.post("/notifications/read").as_member(&bob).await;
         age_notifications(&ctx, 20).await;
+        // Bob and Carol's approval emails went out already.
+        let before = ctx.mailer.as_ref().unwrap().deliveries().count;
 
         assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 1);
         let deliveries = ctx.mailer.as_ref().unwrap().deliveries();
-        assert_eq!(deliveries.count, 1, "one email, to carol only");
-        let email = deliveries.messages[0].replace("=\r\n", "");
+        assert_eq!(deliveries.count, before + 1, "one email, to carol only");
+        let email = deliveries.messages[before].replace("=\r\n", "");
         assert!(email.contains("carol@example.com"));
         assert!(email.contains("2 mentions waiting for you in Acme"));
         assert!(email.contains("alice mentioned everyone in #general"));

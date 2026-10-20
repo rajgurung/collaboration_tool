@@ -11,5 +11,5 @@
   {{<text_field name="password" label="Password" type="password" error={errors.password | default(value="")} autocomplete="new-password" hint="At least 8 characters."/>}}
   <button type="submit" class="btn btn-primary btn-lg">Request access</button>
 </form>
-<p class="mt-6 text-sm text-muted">Already have an account? <a href="/login" class="text-text hover:text-text">Sign in</a></p>
+<p class="mt-6 text-sm text-muted">Already have an account? <a href="/login?next=/join/{{ org.slug }}" class="join-sign-in">Sign in to join {{ org.name }}</a></p>
 {% endblock panel %}
