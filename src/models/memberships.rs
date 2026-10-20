@@ -416,9 +416,11 @@ impl Model {
         let membership = membership.update(&txn).await?;
         // The account row before the tokens, the order a password reset, a
         // lock and a token refresh use, so they wait for each other instead
-        // of deadlocking.
+        // of deadlocking. FOR NO KEY UPDATE, so inserts elsewhere that point
+        // at this user (their FOR KEY SHARE checks) don't wait on it, and
+        // nor does `removed_by_id` in a removal the other way round.
         users::Entity::find_by_id(user_id)
-            .lock_exclusive()
+            .lock(sea_orm::sea_query::LockType::NoKeyUpdate)
             .one(&txn)
             .await?;
         users::Model::end_unlock_in(&txn, user_id, org_id).await?;

@@ -534,3 +534,46 @@ async fn minting_waits_for_a_removal_in_progress() {
     let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
     assert_eq!(alice.secrets_unlocked_org_id, None);
 }
+
+/// Bob removes Alice from Beta while, on another connection, Alice removes
+/// Bob from Acme. Each removal's `removed_by_id` takes FOR KEY SHARE on the
+/// remover's account row. The other connection then locks Bob's row FOR
+/// UPDATE, as `remove` used to; `remove` must take only FOR NO KEY UPDATE on
+/// Alice's row, which doesn't wait on that key share, or the two deadlock and
+/// one fails.
+#[tokio::test]
+#[serial]
+async fn removals_the_other_way_round_do_not_deadlock() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let bob_in_acme = add_member(ctx, orgs.acme, orgs.bob, "bob").await.unwrap();
+    let other = second_connection(ctx).await;
+
+    let alice_removes_bob = async {
+        let txn = other.begin().await.unwrap();
+        let row = memberships::Entity::find_by_id(bob_in_acme.id)
+            .lock_exclusive()
+            .one(&txn)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut removed = row.into_active_model();
+        removed.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
+        removed.removed_by_id = ActiveValue::Set(Some(orgs.alice));
+        removed.update(&txn).await.unwrap();
+        tokio::time::sleep(HOLD).await;
+        users::Entity::find_by_id(orgs.bob)
+            .lock_exclusive()
+            .one(&txn)
+            .await?;
+        txn.commit().await
+    };
+    let bob_removes_alice = async {
+        tokio::time::sleep(HOLD / 5).await;
+        memberships::Model::remove(ctx, orgs.beta, orgs.bob, orgs.in_beta.id, &client()).await
+    };
+    let (theirs, ours) = tokio::join!(alice_removes_bob, bob_removes_alice);
+    assert!(ours.is_ok(), "{ours:?}");
+    assert!(theirs.is_ok(), "{theirs:?}");
+}
