@@ -2,7 +2,10 @@
 //! them out of chat, revokes their Claude tokens and stops their emails.
 use collab::{
     app::App,
-    data::notify_hub::{NotifyEvent, NotifyHub},
+    data::{
+        live::CloseScope,
+        notify_hub::{NotifyEvent, NotifyHub},
+    },
     models::{
         access_tokens, conversation_members, conversations, memberships, messages, note_reactions,
         notifications, organisations, reactions, task_notes, tasks, users,
@@ -141,7 +144,9 @@ async fn removing_someone_locks_them_out_of_everything() {
         assert_eq!(res.status_code(), 303);
         assert_eq!(
             notify.try_recv().unwrap(),
-            NotifyEvent::SignedOut(carol_m.user_id)
+            NotifyEvent::Close(CloseScope::Account {
+                user_id: carol_m.user_id
+            })
         );
 
         // Signing in again shows why, and nothing else.

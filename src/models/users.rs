@@ -4,12 +4,13 @@ use loco_rs::{auth::jwt, hash, prelude::*};
 use sea_orm::{sea_query::ExprTrait, TransactionSession};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use uuid::Uuid;
 
 pub use super::_entities::users::{self, ActiveModel, Entity, Model};
 use crate::data::{
     chat_hub::{ChatEvent, ChatHub},
+    live::CloseScope,
     notify_hub::NotifyHub,
 };
 
@@ -466,6 +467,43 @@ impl Model {
     /// # Errors
     /// On database errors.
     pub async fn end_unlock<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<()> {
+        Self::end_unlock_where(db, user_id, Condition::all()).await
+    }
+
+    /// Ends an unlock of logins only if it is for this organisation, so an
+    /// unlock in another of the person's organisations keeps running. For a
+    /// removal. One `UPDATE`.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn end_unlock_in<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        org_id: i64,
+    ) -> ModelResult<()> {
+        let only = Condition::all().add(users::Column::SecretsUnlockedOrgId.eq(org_id));
+        Self::end_unlock_where(db, user_id, only).await
+    }
+
+    /// Ends an unlock of logins only if this sign-in made it, so a switch in
+    /// one browser leaves an unlock in another alone. One `UPDATE`.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn end_unlock_for_session<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        session_id: &str,
+    ) -> ModelResult<()> {
+        let only = Condition::all().add(users::Column::SecretsUnlockedSid.eq(session_id));
+        Self::end_unlock_where(db, user_id, only).await
+    }
+
+    async fn end_unlock_where<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        only: Condition,
+    ) -> ModelResult<()> {
         users::Entity::update_many()
             .col_expr(
                 users::Column::SecretsUnlockedUntil,
@@ -480,6 +518,7 @@ impl Model {
                 Expr::value(None::<i64>),
             )
             .filter(users::Column::Id.eq(user_id))
+            .filter(only)
             .exec(db)
             .await?;
         Ok(())
@@ -587,13 +626,38 @@ impl Model {
         Ok(user)
     }
 
-    /// Closes the user's open chat sockets and notification streams.
+    /// Closes every open chat socket and notification stream of the user,
+    /// in every organisation: sign out everywhere, a reset and a lock.
     pub fn close_live_connections(ctx: &AppContext, user_id: i64) {
+        Self::close(ctx, CloseScope::Account { user_id });
+    }
+
+    /// Closes the user's chat sockets and notification streams in one
+    /// organisation, on every device: a removal.
+    pub fn close_in_org(ctx: &AppContext, org_id: i64, user_id: i64) {
+        Self::close(ctx, CloseScope::Org { org_id, user_id });
+    }
+
+    /// Closes the chat sockets and notification streams of one browser's
+    /// sign-in: a switch or a create. With no sign-in id (a cookie from
+    /// before sign-in ids) it closes all of them, as before.
+    pub fn close_in_browser(ctx: &AppContext, user_id: i64, session_id: Option<&str>) {
+        let scope = match session_id {
+            Some(sid) => CloseScope::Browser {
+                user_id,
+                session_id: Arc::from(sid),
+            },
+            None => CloseScope::Account { user_id },
+        };
+        Self::close(ctx, scope);
+    }
+
+    fn close(ctx: &AppContext, scope: CloseScope) {
         if let Some(hub) = ctx.shared_store.get::<ChatHub>() {
-            hub.publish(ChatEvent::SignedOut { user_id });
+            hub.publish(ChatEvent::Close(scope.clone()));
         }
         if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
-            hub.sign_out(user_id);
+            hub.close(scope);
         }
     }
 }

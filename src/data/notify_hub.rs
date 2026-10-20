@@ -2,15 +2,17 @@
 //! Like the chat hub, it needs the app to run as a single instance.
 use tokio::sync::broadcast;
 
+use super::live::CloseScope;
+
 const CAPACITY: usize = 256;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotifyEvent {
-    /// This user has new notifications.
-    Changed(i64),
-    /// This user's sessions were ended, or they switched organisation;
-    /// their open streams close.
-    SignedOut(i64),
+    /// This user has new notifications in this organisation.
+    Changed { org_id: i64, user_id: i64 },
+    /// Some of a person's streams close, as for chat sockets (see
+    /// [`CloseScope`]).
+    Close(CloseScope),
 }
 
 #[derive(Clone)]
@@ -31,16 +33,20 @@ impl NotifyHub {
         Self { tx }
     }
 
-    /// Tells every open page of these users to refresh their bell.
-    pub fn publish(&self, user_ids: &[i64]) {
+    /// Tells these users' open pages in this organisation to refresh their
+    /// bell.
+    pub fn publish(&self, org_id: i64, user_ids: &[i64]) {
         for id in user_ids {
-            let _ = self.tx.send(NotifyEvent::Changed(*id));
+            let _ = self.tx.send(NotifyEvent::Changed {
+                org_id,
+                user_id: *id,
+            });
         }
     }
 
-    /// Closes every open stream of this user.
-    pub fn sign_out(&self, user_id: i64) {
-        let _ = self.tx.send(NotifyEvent::SignedOut(user_id));
+    /// Closes the streams this scope matches.
+    pub fn close(&self, scope: CloseScope) {
+        let _ = self.tx.send(NotifyEvent::Close(scope));
     }
 
     #[must_use]

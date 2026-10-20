@@ -1,10 +1,13 @@
-use axum::http::{header, HeaderMap, HeaderValue};
+use axum::{
+    http::{header, HeaderMap, HeaderValue},
+    Extension,
+};
 use loco_rs::prelude::*;
 
 use crate::{
     extractors::{
         current_member::{CurrentMember, CURRENT_ORG_COOKIE},
-        current_user::CurrentUser,
+        current_user::{CurrentUser, SessionId},
         session::{
             append_cookie, cleared_acting_org_cookie, current_org_cookie, redirect_response,
         },
@@ -24,22 +27,29 @@ const AFTER_SWITCH: &str = "/dashboard?switched=1";
 const AFTER_CREATE: &str = "/dashboard?created=1";
 
 /// Moves this browser into `org_id`, the same way for a switch and a
-/// create: ends any unlock of logins, sets `current_org`, clears
-/// `acting_org`, and closes the person's chat sockets and notification
-/// streams so they reconnect in the new org.
+/// create: ends this sign-in's unlock of logins, sets `current_org`, clears
+/// `acting_org`, and closes this browser's chat sockets and notification
+/// streams so they reconnect in the new org. The person's other browsers
+/// keep their own org, so they are left alone. `session_id` is the request's
+/// sign-in id; without one (a cookie from before sign-in ids) every unlock
+/// ends and every socket closes, as before.
 async fn enter_org(
     ctx: &AppContext,
     headers: &HeaderMap,
     user_id: i64,
+    session_id: Option<&str>,
     org_id: i64,
     target: &str,
 ) -> Result<Response> {
     // The unlock is already tied to its org. This is a backstop.
-    users::Model::end_unlock(&ctx.db, user_id).await?;
+    match session_id {
+        Some(sid) => users::Model::end_unlock_for_session(&ctx.db, user_id, sid).await?,
+        None => users::Model::end_unlock(&ctx.db, user_id).await?,
+    }
     let mut response = redirect_response(headers, target);
     append_cookie(&mut response, &current_org_cookie(ctx, org_id)?)?;
     append_cookie(&mut response, &cleared_acting_org_cookie(ctx)?)?;
-    users::Model::close_live_connections(ctx, user_id);
+    users::Model::close_in_browser(ctx, user_id, session_id);
     Ok(response)
 }
 
@@ -59,6 +69,8 @@ fn from_org(headers: &HeaderMap) -> Option<i64> {
 #[debug_handler]
 async fn switch(
     CurrentUser(user): CurrentUser,
+    // After `CurrentUser`, which sets it.
+    session_id: Option<Extension<SessionId>>,
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -70,7 +82,10 @@ async fn switch(
     {
         return Err(Error::NotFound);
     }
-    let response = enter_org(&ctx, &headers, user.id, id, AFTER_SWITCH).await?;
+    let sid = session_id
+        .as_ref()
+        .map(|Extension(SessionId(sid))| sid.as_str());
+    let response = enter_org(&ctx, &headers, user.id, sid, id, AFTER_SWITCH).await?;
     tracing::info!(
         user_id = user.id,
         from_org = from_org(&headers),
@@ -161,7 +176,15 @@ async fn create(
     let timezone = (!member.acting).then_some(member.org.timezone.as_str());
     match organisations::Model::create_for_user(&ctx.db, &member.user, &params, timezone).await {
         Ok(org) => {
-            let response = enter_org(&ctx, &headers, member.user.id, org.id, AFTER_CREATE).await?;
+            let response = enter_org(
+                &ctx,
+                &headers,
+                member.user.id,
+                member.session_id.as_deref(),
+                org.id,
+                AFTER_CREATE,
+            )
+            .await?;
             tracing::info!(
                 user_id = member.user.id,
                 org_id = org.id,
