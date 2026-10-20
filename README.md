@@ -1,7 +1,7 @@
 # Collaboration Tool
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/rajgurung/collaboration_tool/ci.yaml?branch=main&label=tests&logo=github)](https://github.com/rajgurung/collaboration_tool/actions/workflows/ci.yaml)
-[![Live site](https://img.shields.io/website?url=https%3A%2F%2Fcollab.rajgurung.me%2F_health&label=live%20site&up_message=online&down_message=offline)](https://collab.rajgurung.me)
+[![Live site](https://img.shields.io/website?url=https%3A%2F%2Fcollab.zen-scale.io%2F_health&label=live%20site&up_message=online&down_message=offline)](https://collab.zen-scale.io)
 [![Last commit](https://img.shields.io/github/last-commit/rajgurung/collaboration_tool/main)](https://github.com/rajgurung/collaboration_tool/commits/main)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Code review](https://img.shields.io/badge/code%20review-Michael%20Scott%20%F0%9F%8F%86-f2a93b)](.github/workflows/claude-code-review.yml)
@@ -15,7 +15,7 @@
 
 A calm workspace for small teams. Plan the roadmap, track tasks, keep meeting notes and chat, all in one place.
 
-**[Try it at collab.rajgurung.me →](https://collab.rajgurung.me)**
+**[Try it at collab.zen-scale.io →](https://collab.zen-scale.io)**
 
 ![The task board on desktop](docs/images/board.png)
 
@@ -40,8 +40,8 @@ A calm workspace for small teams. Plan the roadmap, track tasks, keep meeting no
 
 Claude can read and change your projects, tasks and task notes, as you. It can't see chat, meetings or emails.
 
-- **claude.ai and the Claude apps:** Settings → Connectors → Add custom connector, paste `https://collab.rajgurung.me/mcp`, press Connect, then Allow.
-- **Claude Code:** `claude mcp add --transport http collab https://collab.rajgurung.me/mcp`, then sign in when asked.
+- **claude.ai and the Claude apps:** Settings → Connectors → Add custom connector, paste `https://collab.zen-scale.io/mcp`, press Connect, then Allow.
+- **Claude Code:** `claude mcp add --transport http collab https://collab.zen-scale.io/mcp`, then sign in when asked.
 
 In Collab Tool, More → Connect Claude has the details, personal tokens, and a Revoke button for every connection. How it works: [docs/notes/claude-connector.md](docs/notes/claude-connector.md).
 
