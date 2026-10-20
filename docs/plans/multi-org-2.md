@@ -2,6 +2,11 @@
 
 Status: Approved by Raj 19 October 2026, all five decisions as recommended (staff: approve with changes, applied; security: approve with changes, applied) · PR 2 of 7 · Owner: Raj · 19 October 2026
 
+
+> Superseded in part by `docs/plans/org-url-1.md` (20 October 2026): the
+> address `/o/{slug}/` now picks the organisation, the `current_org` cookie
+> only remembers the last one, and a switch no longer closes connections.
+
 ## Summary
 
 PR 1 (#41) stopped the code assuming one membership per user. This PR lets

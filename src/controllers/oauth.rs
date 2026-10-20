@@ -286,7 +286,9 @@ async fn authorize_page(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     user: Option<CurrentUser>,
-    member: std::result::Result<CurrentMember, Response>,
+    // PinnedMember: the page stays bare and picks the last org (PR 3 adds a
+    // picker). A plain GET was never claim-checked anyway.
+    member: std::result::Result<PinnedMember, Response>,
     uri: axum::http::Uri,
     Query(params): Query<AuthorizeParams>,
 ) -> Result<Response> {
@@ -307,7 +309,7 @@ async fn authorize_page(
         ));
     }
     let member = match member {
-        Ok(member) => member,
+        Ok(PinnedMember(member)) => member,
         Err(page) => return Ok(guarded(page)),
     };
     if member.acting {

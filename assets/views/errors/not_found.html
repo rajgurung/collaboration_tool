@@ -6,7 +6,7 @@
 <div class="card flex max-w-[560px] flex-col items-start gap-3 p-6">
   <span class="meta font-semibold">404</span>
   <h2 class="m-0 text-[22px] font-bold tracking-tight">We couldn't find that in {{ org.name }}</h2>
-  <p class="m-0 text-[15px] leading-6 text-muted">It may be in another of your organisations. Switch from the menu, then open the link again.</p>
-  <a href="/dashboard" class="btn btn-primary btn-tall mt-2">Go to Home</a>
+  <p class="m-0 text-[15px] leading-6 text-muted">It may have been deleted, or the link may be wrong.</p>
+  {% if back %}<a href="{{ org_url(path=back.path) }}" class="btn btn-primary btn-tall mt-2">Back to {{ back.name }}</a>{% else %}<a href="{{ org_url(path="/dashboard") }}" class="btn btn-primary btn-tall mt-2">Go to Home</a>{% endif %}
 </div>
 {% endblock content %}

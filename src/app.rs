@@ -73,12 +73,43 @@ async fn not_found_page(
         match crate::extractors::current_member::PinnedMember::from_request_parts(&mut saved, ctx)
             .await
         {
-            Ok(crate::extractors::current_member::PinnedMember(member)) => view.render(
-                "errors/not_found.html",
-                member.page("not_found", serde_json::json!({})),
-            ),
-            // Signed out, or no active membership: the plain page.
-            Err(_) => view.render("errors/not_found_public.html", serde_json::json!({})),
+            Ok(crate::extractors::current_member::PinnedMember(member)) => {
+                // The section's list, from the path the router saw.
+                let section = crate::views::links::section_of(saved.uri.path());
+                let back = section.map(|(active, name)| {
+                    serde_json::json!({
+                        "name": name,
+                        "path": crate::views::links::section_path(active),
+                    })
+                });
+                view.render(
+                    "errors/not_found.html",
+                    member.page(
+                        section.map_or("not_found", |(active, _)| active),
+                        serde_json::json!({ "back": back }),
+                    ),
+                )
+            }
+            // Signed in, but no org for this address (or none at all). It
+            // reads only the user, never the slug, so a stranger's org and
+            // a made-up one look the same.
+            Err(_) => match crate::extractors::current_user::CurrentUser::from_request_parts(
+                &mut saved, ctx,
+            )
+            .await
+            {
+                Ok(crate::extractors::current_user::CurrentUser(user)) => view.render(
+                    "errors/not_found_signed_in.html",
+                    serde_json::json!({
+                        "account": {
+                            "name": user.name,
+                            "email": user.email,
+                            "color": crate::views::layout::avatar_color(&user.name),
+                        },
+                    }),
+                ),
+                Err(_) => view.render("errors/not_found_public.html", serde_json::json!({})),
+            },
         };
     match html {
         Ok(html) => (StatusCode::NOT_FOUND, axum::response::Html(html)).into_response(),
@@ -178,6 +209,9 @@ impl Hooks for App {
             // current-org buffers its body.
             Box::new(initializers::origin_check::OriginCheckInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
+            // Last, so it is outermost: it rewrites `/o/{slug}/...` before
+            // routing, and routing happens inside it.
+            Box::new(initializers::org_path::OrgPathInitializer),
         ])
     }
 

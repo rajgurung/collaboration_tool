@@ -6,7 +6,7 @@
   {% if team | length > 0 %}
   <div class="list">
     {% for person in team %}
-    <form method="post" action="/chat/dms" hx-post="/chat/dms">
+    <form method="post" action="{{ org_url(path="/chat/dms") }}" hx-post="{{ org_url(path="/chat/dms") }}">
       <input type="hidden" name="user_id" value="{{ person.id }}">
       <button type="submit" class="list-row w-full border-0 bg-transparent text-left text-text">{{<avatar name={person.username} color={person.color} size="md"/>}}<span class="flex-1 text-base font-medium">{{ person.username }}</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</button>
     </form>

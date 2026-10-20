@@ -3,7 +3,7 @@
 {% block heading %}Roadmap{% endblock heading %}
 {% block actions %}
 <button type="button" class="btn btn-primary"
-        hx-get="/roadmap/projects/new" hx-target="#project-dialog-body"
+        hx-get="{{ org_url(path="/roadmap/projects/new") }}" hx-target="#project-dialog-body"
         hx-on::after-request="document.getElementById('project-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}Project</button>
 {% endblock actions %}
 {% block content %}

@@ -1,7 +1,7 @@
 {% extends "layouts/app.html" %}
 {% block title %}Change these at the source · {{ org.name }}{% endblock title %}
 {% block topbar %}
-<a href="/members" class="back">{{<icon name="chevron-left" class="h-5 w-5"/>}}Members</a>
+<a href="{{ org_url(path="/members") }}" class="back">{{<icon name="chevron-left" class="h-5 w-5"/>}}Members</a>
 <span class="flex-1"></span>
 {% endblock topbar %}
 {% block content %}
@@ -21,7 +21,7 @@
         <p class="meta m-0">{{ row.meta }}</p>
         <div class="mt-2 flex flex-wrap gap-2">
           {% if row.url %}<a class="btn btn-secondary" href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{<icon name="external-link" class="h-4 w-4"/>}}Open site</a>{% endif %}
-          <a class="btn btn-secondary" href="/documents/logins/{{ row.id }}">{{<icon name="pencil" class="h-4 w-4"/>}}Update</a>
+          <a class="btn btn-secondary" href="{{ org_url(path="/documents/logins/" ~ (row.id)) }}">{{<icon name="pencil" class="h-4 w-4"/>}}Update</a>
         </div>
       </div>
     </div>
@@ -33,7 +33,7 @@
     <span class="tile">{{<icon name="check" class="h-[22px] w-[22px]"/>}}</span>
     <h2>No passwords to change</h2>
     <p>{{ former.username }} couldn't see any login passwords, so there is nothing to change.</p>
-    <a class="btn btn-secondary" href="/members">Back to Members</a>
+    <a class="btn btn-secondary" href="{{ org_url(path="/members") }}">Back to Members</a>
   </div>
   {% endif %}
 </div>

@@ -28,7 +28,7 @@ use crate::{
         messages::{self, MessageParams},
         organisations, users,
     },
-    views::time,
+    views::{links::org_base, time},
 };
 
 /// Who is on this socket and which conversation it follows.
@@ -40,13 +40,24 @@ struct Session {
     user_id: i64,
     /// The session version this socket was opened with.
     session_version: i32,
-    /// The sign-in this socket was opened with, for closing one browser's
-    /// sockets on a switch. `None` for cookies from before sign-in ids.
-    session_id: Option<String>,
+    /// The organisation's slug, for the links in the fragments it renders
+    /// for broadcast (`org_url`). Every subscriber is in this org.
+    org_slug: String,
     conversation_id: i64,
     conversation_kind: String,
     /// The thread's parent, on a thread page's socket.
     thread_id: Option<i64>,
+}
+
+impl Session {
+    /// `org_base` for the fragments this socket renders, as
+    /// `CurrentMember::fragment` adds it for a request's.
+    fn fragment(&self, mut data: serde_json::Value) -> serde_json::Value {
+        if let Some(map) = data.as_object_mut() {
+            map.insert("org_base".to_string(), org_base(&self.org_slug).into());
+        }
+        data
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -93,7 +104,7 @@ async fn connect(
         org_id: member.org.id,
         user_id: member.user.id,
         session_version: member.user.session_version,
-        session_id: member.session_id,
+        org_slug: member.org.slug.clone(),
         conversation_id: conversation.id,
         conversation_kind: conversation.kind,
         thread_id: query.thread,
@@ -150,7 +161,7 @@ async fn run(mut socket: WebSocket, session: Session) {
             },
             event = events.recv() => match event {
                 Ok(ChatEvent::Close(scope))
-                    if scope.closes(session.org_id, session.user_id, session.session_id.as_deref()) =>
+                    if scope.closes(session.org_id, session.user_id) =>
                 {
                     let _ = socket.send(Message::Close(None)).await;
                     break;
@@ -184,7 +195,7 @@ async fn run(mut socket: WebSocket, session: Session) {
                     }
                 }
                 Ok(ChatEvent::Reactions { message_id, rows, .. }) => {
-                    match render_reactions(&session.view, session.conversation_id, message_id, &rows, session.user_id) {
+                    match render_reactions(&session.view, &org_base(&session.org_slug), session.conversation_id, message_id, &rows, session.user_id) {
                         Ok(html) => {
                             if socket.send(Message::Text(html.into())).await.is_err() {
                                 break;
@@ -423,9 +434,10 @@ pub async fn mark_read(
 fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result<String> {
     message.own = author_id == session.user_id;
     message.read_receipts = shows_receipt(&session.conversation_kind, message.own);
-    session
-        .view
-        .render("chat/_message_oob.html", data!({ "message": message }))
+    session.view.render(
+        "chat/_message_oob.html",
+        session.fragment(data!({ "message": message })),
+    )
 }
 
 /// A reply for this socket's viewer. A main-feed socket swaps the parent's
@@ -448,7 +460,8 @@ fn render_reply(
         }
         return session.view.render(
             "chat/_thread_link.html",
-            data!({ "message": { "id": parent_id, "thread": line }, "oob": true }),
+            session
+                .fragment(data!({ "message": { "id": parent_id, "thread": line }, "oob": true })),
         );
     }
     message.own = author_id == session.user_id;
@@ -456,13 +469,17 @@ fn render_reply(
     message.can_reply = false;
     let mut html = session.view.render(
         "chat/_message_oob.html",
-        data!({ "message": message, "in_thread": true }),
+        session.fragment(data!({ "message": message, "in_thread": true })),
     )?;
     if grew {
-        html.push_str(&session.view.render(
-            "chat/_thread_count.html",
-            data!({ "count": line.count, "count_label": line.label, "oob": true }),
-        )?);
+        html.push_str(
+            &session.view.render(
+                "chat/_thread_count.html",
+                session.fragment(
+                    data!({ "count": line.count, "count_label": line.label, "oob": true }),
+                ),
+            )?,
+        );
     }
     Ok(html)
 }
@@ -573,14 +590,14 @@ fn render_receipts(session: &Session, updates: &[&ReceiptUpdate]) -> Result<Stri
     for update in updates {
         html.push_str(&session.view.render(
             "chat/_receipt.html",
-            data!({
+            session.fragment(data!({
                 "message": {
                     "id": update.message_id,
                     "receipt": update.receipt,
                     "own": update.author_id == session.user_id,
                 },
                 "oob": true,
-            }),
+            })),
         )?);
     }
     Ok(html)

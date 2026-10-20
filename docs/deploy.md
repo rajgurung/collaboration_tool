@@ -64,6 +64,16 @@ Live at https://collab.zen-scale.io (Railway project `collaboration-tool`, servi
 
 Wrangler cannot manage DNS records; use the Cloudflare API, dashboard or the `cf` CLI.
 
+## Logs and app addresses
+
+App pages live at `/o/{slug}/...`. The org-path layer strips the prefix
+before routing, so Loco's request logs show the stripped path (`/tasks/58`).
+The slug is on a span of its own, `org{slug=acme-studio}`, around each such
+request; dashboards or alerts keyed on paths need that field. Every response
+sets `Referrer-Policy: same-origin`, and every response but the homepage
+`X-Robots-Tag: noindex`. `/robots.txt` disallows `/o/`, `/oauth/`, `/admin`
+and `/mcp`, and leaves `/join/` open so crawlers can see its `noindex`.
+
 ## Notes
 
 - **One instance.** Live chat keeps WebSocket subscribers in memory, so run a single replica. Removal, sign out everywhere, password reset and the account lock also close live chat sockets and notification streams through in-memory events (`src/data/live.rs`). With a second replica, a removed person's open socket on the other instance would stay connected until it reconnects, so scaling out first needs a shared event bus.

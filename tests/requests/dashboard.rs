@@ -26,7 +26,7 @@ async fn active_members_reach_every_page_with_their_org_in_the_header() {
         let cookie = sign_up_member(&request, "Himalayan Ritual", "raj", "raj@example.com").await;
         for page in TENANT_PAGES {
             let res = request
-                .get(page)
+                .get(&cookie.at(page))
                 .add_header(cookie.0.clone(), cookie.1.clone())
                 .await;
             assert_eq!(res.status_code(), 200, "{page}");

@@ -1,5 +1,5 @@
-{# The switcher's rows: the sidebar menu, the phone sheet and the /orgs page share them. One form, and each row a button with its own formaction, so it works without JavaScript; app.ts adds the keys and the "Switching…" state. "New organisation" is a link after the form, outside the scrolling part, and never while acting. #}
-<form method="post" class="org-list" data-org-list>
+{# The switcher's rows: the sidebar menu, the phone sheet and the /orgs page share them. Each other org is a link to the same section there, so Cmd-click and long-press open it in a new tab; app.ts adds the keys and the "Opening…" state on a plain click. "New organisation" is a link after the list, outside the scrolling part, and never while acting. #}
+<div class="org-list" data-org-list>
   {% if me.acting %}
   <div class="org-menu-label">Acting in</div>
   <button type="button" class="org-row" role="menuitemradio" aria-checked="true" data-org-current>
@@ -21,11 +21,11 @@
       {{<icon name="check" class="tick h-5 w-5"/>}}
     </button>
     {% else %}
-    <button type="submit" formaction="/orgs/{{ o.id }}/switch" hx-post="/orgs/{{ o.id }}/switch" class="org-row" role="menuitemradio" aria-checked="false" data-org-name="{{ o.name }}">
+    <a href="{{ o.url }}" class="org-row" role="menuitemradio" aria-checked="false" data-org-name="{{ o.name }}">
       <span class="org-logo">{{ o.name | truncate(length=1, end="") | upper }}</span>
       <span class="org-text"><span class="org-name truncate-1">{{ o.name }}</span><span class="meta capitalize" data-org-role>{{ o.role }}</span></span>
       <span class="org-spinner" aria-hidden="true">{{<icon name="loader-circle" class="spin h-5 w-5"/>}}</span>
-    </button>
+    </a>
     {% endif %}
     {% endfor %}
     {% if pending_orgs | length > 0 %}
@@ -38,9 +38,8 @@
     {% endfor %}
     {% endif %}
   </div>
-  {% if me.acting %}<p class="org-note">Switching ends acting in {{ org.name }}.</p>{% endif %}
-</form>
+</div>
 {% if not me.acting %}
 <div class="org-sep" role="separator"></div>
-<a href="/orgs/new" class="org-row org-new" role="menuitem" data-org-new><span class="org-logo-new">{{<icon name="plus" class="h-[18px] w-[18px]"/>}}</span><span class="org-text"><span class="org-name">New organisation</span></span></a>
+<a href="{{ org_url(path="/orgs/new") }}" class="org-row org-new" role="menuitem" data-org-new><span class="org-logo-new">{{<icon name="plus" class="h-[18px] w-[18px]"/>}}</span><span class="org-text"><span class="org-name">New organisation</span></span></a>
 {% endif %}

@@ -86,15 +86,23 @@ pub(super) fn org_heading(html: &str) -> String {
 }
 
 /// The session cookie plus `current_org=<value>`, as one request header.
-/// Its pages are drawn for that org when `value` is an org id, else for the
-/// default one.
-pub(super) fn with_org(cookie: &TestMember, value: impl std::fmt::Display) -> TestMember {
+/// Its pages (address and claim) are for that org when `value` is the id of
+/// an org, else for the member's own.
+pub(super) async fn with_org(
+    ctx: &AppContext,
+    cookie: &TestMember,
+    value: impl std::fmt::Display,
+) -> TestMember {
     let value = value.to_string();
     let both = format!("{}; current_org={value}", cookie.1.to_str().unwrap());
-    TestMember::new(
-        (cookie.0.clone(), HeaderValue::from_str(&both).unwrap()),
-        value.parse().unwrap_or(cookie.org_id),
-    )
+    let both = (cookie.0.clone(), HeaderValue::from_str(&both).unwrap());
+    match value.parse::<i64>() {
+        Ok(id) => match organisations::Model::find_by_id(&ctx.db, id).await {
+            Ok(org) => TestMember::new(both, id, org.slug),
+            Err(_) => TestMember::new(both, id, cookie.slug.clone()),
+        },
+        Err(_) => TestMember::new(both, cookie.org_id, cookie.slug.clone()),
+    }
 }
 
 /// The response's `Set-Cookie` for this cookie name, if any.
@@ -123,11 +131,48 @@ pub(super) async fn switch(
         .await
 }
 
-async fn dashboard(request: &TestServer, cookie: &TestMember) -> axum_test::TestResponse {
-    request
+/// Home at the bare address, as a bookmark opens it: the cookie picks the
+/// last org, which the redirect names. What the browser ends up with.
+struct Home {
+    status: u16,
+    html: String,
+    /// The `current_org` the first answer set or cleared.
+    set: Option<String>,
+}
+
+async fn dashboard(request: &TestServer, cookie: &TestMember) -> Home {
+    let hop = request
         .get("/dashboard")
         .add_header(cookie.0.clone(), cookie.1.clone())
-        .await
+        .await;
+    let set = set_cookie(&hop, "current_org");
+    let to = hop
+        .headers()
+        .get("location")
+        .map(|v| v.to_str().unwrap().to_string())
+        .filter(|to| to.starts_with("/o/"));
+    let page = match to {
+        Some(to) => {
+            request
+                .get(&to)
+                .add_header(cookie.0.clone(), cookie.1.clone())
+                .await
+        }
+        None => hop,
+    };
+    Home {
+        status: page.status_code().as_u16(),
+        html: page.text(),
+        set,
+    }
+}
+
+impl Home {
+    fn cleared(&self) -> bool {
+        self.set
+            .as_deref()
+            .is_some_and(|c| c.starts_with("current_org=;") && c.contains("Max-Age=0"))
+    }
 }
 
 async fn token_in(ctx: &AppContext, org_id: i64, user_id: i64) -> String {
@@ -206,21 +251,15 @@ async fn for_user_is_oldest_first_and_the_default_prefers_active() {
 async fn pages_use_the_oldest_active_organisation() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, in_acme, _) = alice_in_two_orgs(&request, &ctx).await;
-        let res = request
-            .get("/dashboard")
-            .add_header(cookie.0.clone(), cookie.1.clone())
-            .await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Acme");
+        let res = dashboard(&request, &cookie).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Acme");
 
         // Removed from Acme, still active in Beta: Beta, not the removed page.
         set_status(&ctx, in_acme, memberships::status::REMOVED).await;
-        let res = request
-            .get("/dashboard")
-            .add_header(cookie.0.clone(), cookie.1.clone())
-            .await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Beta");
+        let res = dashboard(&request, &cookie).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Beta");
     })
     .await;
 }
@@ -406,18 +445,18 @@ async fn switching_sets_the_cookie_and_pages_follow_it() {
 
         let res = switch(&request, &cookie, beta).await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(res.headers()["location"], "/dashboard?switched=1");
+        assert_eq!(res.headers()["location"], "/o/beta/dashboard");
         let set = set_cookie(&res, "current_org").unwrap();
         assert!(set.starts_with(&format!("current_org={beta};")), "{set}");
-        let res = dashboard(&request, &with_org(&cookie, beta)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Beta");
+        let res = dashboard(&request, &with_org(&ctx, &cookie, beta).await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Beta");
 
-        let res = switch(&request, &with_org(&cookie, beta), acme).await;
+        let res = switch(&request, &with_org(&ctx, &cookie, beta).await, acme).await;
         let set = set_cookie(&res, "current_org").unwrap();
         assert!(set.starts_with(&format!("current_org={acme};")), "{set}");
-        let res = dashboard(&request, &with_org(&cookie, acme)).await;
-        assert_eq!(org_heading(&res.text()), "Acme");
+        let res = dashboard(&request, &with_org(&ctx, &cookie, acme).await).await;
+        assert_eq!(org_heading(&res.html), "Acme");
     })
     .await;
 }
@@ -433,7 +472,7 @@ async fn switching_over_htmx_returns_hx_redirect_with_the_cookies() {
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
-        assert_eq!(res.headers()["HX-Redirect"], "/dashboard?switched=1");
+        assert_eq!(res.headers()["HX-Redirect"], "/o/beta/dashboard");
         let set = set_cookie(&res, "current_org").unwrap();
         assert!(set.starts_with(&format!("current_org={};", in_beta.organisation_id)));
         assert!(clears(&res, "acting_org"));
@@ -463,9 +502,13 @@ async fn the_current_org_cookie_is_http_only_lax_and_lasts_a_session() {
 async fn a_valid_cookie_sends_no_clearing_cookie() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
-        let res = dashboard(&request, &with_org(&cookie, in_beta.organisation_id)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(set_cookie(&res, "current_org"), None);
+        let res = dashboard(
+            &request,
+            &with_org(&ctx, &cookie, in_beta.organisation_id).await,
+        )
+        .await;
+        assert_eq!(res.status, 200);
+        assert_eq!(res.set, None);
     })
     .await;
 }
@@ -526,10 +569,10 @@ async fn a_forged_cookie_falls_back_and_is_cleared() {
         let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
             .await
             .unwrap();
-        let res = dashboard(&request, &with_org(&cookie, globex.id)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Acme");
-        assert!(clears(&res, "current_org"));
+        let res = dashboard(&request, &with_org(&ctx, &cookie, globex.id).await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Acme");
+        assert!(res.cleared());
     })
     .await;
 }
@@ -539,10 +582,10 @@ async fn a_forged_cookie_falls_back_and_is_cleared() {
 async fn a_garbage_cookie_falls_back_and_is_cleared() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, _, _) = alice_in_two_orgs(&request, &ctx).await;
-        let res = dashboard(&request, &with_org(&cookie, "abc")).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Acme");
-        assert!(clears(&res, "current_org"));
+        let res = dashboard(&request, &with_org(&ctx, &cookie, "abc").await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Acme");
+        assert!(res.cleared());
     })
     .await;
 }
@@ -557,10 +600,10 @@ async fn a_cookie_for_a_deleted_org_falls_back() {
             .execute_unprepared(&format!("DELETE FROM organisations WHERE id = {beta}"))
             .await
             .unwrap();
-        let res = dashboard(&request, &with_org(&cookie, beta)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Acme");
-        assert!(clears(&res, "current_org"));
+        let res = dashboard(&request, &with_org(&ctx, &cookie, beta).await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Acme");
+        assert!(res.cleared());
     })
     .await;
 }
@@ -572,10 +615,10 @@ async fn a_cookie_for_an_org_you_were_removed_from_falls_back() {
         let (cookie, _, in_acme, _) = alice_in_two_orgs(&request, &ctx).await;
         let acme = in_acme.organisation_id;
         set_status(&ctx, in_acme, memberships::status::REMOVED).await;
-        let res = dashboard(&request, &with_org(&cookie, acme)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Beta");
-        assert!(clears(&res, "current_org"));
+        let res = dashboard(&request, &with_org(&ctx, &cookie, acme).await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Beta");
+        assert!(res.cleared());
     })
     .await;
 }
@@ -587,16 +630,16 @@ async fn the_waiting_page_shows_only_without_an_active_membership() {
         let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         let acme = in_acme.organisation_id;
         set_status(&ctx, in_acme, memberships::status::PENDING).await;
-        let res = dashboard(&request, &with_org(&cookie, acme)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Beta");
-        assert!(clears(&res, "current_org"));
+        let res = dashboard(&request, &with_org(&ctx, &cookie, acme).await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Beta");
+        assert!(res.cleared());
 
         set_status(&ctx, in_beta, memberships::status::REMOVED).await;
-        let res = dashboard(&request, &with_org(&cookie, acme)).await;
-        assert_eq!(res.status_code(), 403);
-        assert!(res.text().contains("Acme"), "the Acme waiting page");
-        assert!(clears(&res, "current_org"));
+        let res = dashboard(&request, &with_org(&ctx, &cookie, acme).await).await;
+        assert_eq!(res.status, 403);
+        assert!(res.html.contains("Acme"), "the Acme waiting page");
+        assert!(res.cleared());
     })
     .await;
 }
@@ -609,7 +652,7 @@ async fn with_a_beta_cookie_acme_tasks_404_and_an_acme_tab_is_refused() {
         let acme_project = project_in(&ctx, "acme", "Acme launch").await;
         let beta_project = project_in(&ctx, "beta", "Beta launch").await;
         let res = request
-            .post("/tasks")
+            .post(&cookie.at("/tasks"))
             .as_member(&cookie)
             .form(&task_form("Acme task", acme_project.id, ""))
             .await;
@@ -617,9 +660,9 @@ async fn with_a_beta_cookie_acme_tasks_404_and_an_acme_tab_is_refused() {
         let acme_task = task_titled(&ctx, "Acme task").await;
         assert_eq!(acme_task.organisation_id, in_acme.organisation_id);
 
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         let res = request
-            .get(&format!("/tasks/{}", acme_task.id))
+            .get(&in_beta_cookie.at(&format!("/tasks/{}", acme_task.id)))
             .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
             .await;
         assert_eq!(res.status_code(), 404);
@@ -627,7 +670,7 @@ async fn with_a_beta_cookie_acme_tasks_404_and_an_acme_tab_is_refused() {
         // A form drawn for Acme, posted with the Beta cookie, is refused and
         // saves nothing anywhere.
         let res = request
-            .post("/tasks")
+            .post(&in_beta_cookie.at("/tasks"))
             .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
             .form(&json!({
                 "title": "Acme tab task",
@@ -638,7 +681,7 @@ async fn with_a_beta_cookie_acme_tasks_404_and_an_acme_tab_is_refused() {
         assert_eq!(res.status_code(), 303);
         assert_eq!(
             res.headers()["location"],
-            format!("/dashboard?from={}", in_acme.organisation_id)
+            format!("/o/beta/dashboard?from={}", in_acme.organisation_id)
         );
         assert_eq!(
             tasks::Entity::find()
@@ -651,7 +694,7 @@ async fn with_a_beta_cookie_acme_tasks_404_and_an_acme_tab_is_refused() {
 
         // A form drawn for Beta goes to Beta.
         let res = request
-            .post("/tasks")
+            .post(&in_beta_cookie.at("/tasks"))
             .as_member(&in_beta_cookie)
             .form(&task_form("Beta task", beta_project.id, ""))
             .await;
@@ -679,7 +722,7 @@ async fn an_acme_token_acts_in_acme_whatever_the_cookie() {
         project_in(&ctx, "acme", "Acme launch").await;
         project_in(&ctx, "beta", "Beta launch").await;
         let acme_token = token_in(&ctx, in_acme.organisation_id, alice).await;
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         let res = request
             .post("/mcp")
             .add_header("authorization", format!("Bearer {acme_token}"))
@@ -700,7 +743,7 @@ async fn an_acme_token_acts_in_acme_whatever_the_cookie() {
 
 #[tokio::test]
 #[serial]
-async fn switching_ends_an_unlock_of_logins() {
+async fn the_old_switch_keeps_an_unlock_in_its_own_org() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, alice, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         let res = unlock(&request, &cookie).await;
@@ -711,13 +754,17 @@ async fn switching_ends_an_unlock_of_logins() {
             Some(in_acme.organisation_id)
         );
 
+        // An Acme tab may still be open: the unlock stays, tied to Acme.
         switch(&request, &cookie, in_beta.organisation_id).await;
         let after = users::Model::find_by_id(&ctx.db, alice).await.unwrap();
-        assert_eq!(after.secrets_unlocked_until, None);
-        assert_eq!(after.secrets_unlocked_org_id, None);
-        assert!(!after.secrets_unlocked(
+        assert_eq!(after.secrets_unlocked_org_id, Some(in_acme.organisation_id));
+        assert!(after.secrets_unlocked(
             unlocked.secrets_unlocked_sid.as_deref(),
             in_acme.organisation_id
+        ));
+        assert!(!after.secrets_unlocked(
+            unlocked.secrets_unlocked_sid.as_deref(),
+            in_beta.organisation_id
         ));
     })
     .await;
@@ -725,7 +772,7 @@ async fn switching_ends_an_unlock_of_logins() {
 
 async fn unlock(request: &TestServer, cookie: &TestMember) -> axum_test::TestResponse {
     request
-        .post("/documents/logins/unlock")
+        .post(&cookie.at("/documents/logins/unlock"))
         .as_member(cookie)
         .form(&[("password", USER_PASSWORD)])
         .await
@@ -733,7 +780,7 @@ async fn unlock(request: &TestServer, cookie: &TestMember) -> axum_test::TestRes
 
 async fn reveal(request: &TestServer, cookie: &TestMember, id: i64) -> axum_test::TestResponse {
     request
-        .post(&format!("/documents/logins/{id}/reveal"))
+        .post(&cookie.at(&format!("/documents/logins/{id}/reveal")))
         .as_member(cookie)
         .form(&[("field", "password")])
         .await
@@ -749,7 +796,7 @@ async fn an_acme_unlock_does_not_reveal_beta_logins() {
         let mut admin = in_beta.into_active_model();
         admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
         admin.update(&ctx.db).await.unwrap();
-        let in_beta_cookie = with_org(&cookie, beta);
+        let in_beta_cookie = with_org(&ctx, &cookie, beta).await;
         let folder = folders::Model::list_for_org(&ctx.db, beta)
             .await
             .unwrap()
@@ -758,7 +805,7 @@ async fn an_acme_unlock_does_not_reveal_beta_logins() {
             .unwrap()
             .folder;
         let res = request
-            .post(&format!("/documents/folders/{}/logins", folder.id))
+            .post(&in_beta_cookie.at(&format!("/documents/folders/{}/logins", folder.id)))
             .as_member(&in_beta_cookie)
             .form(&[
                 ("title", "Beta bank"),
@@ -789,7 +836,7 @@ async fn an_acme_unlock_does_not_reveal_beta_logins() {
 async fn logout_clears_current_org_and_acting_org() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         let res = request
             .post("/logout")
             .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
@@ -861,7 +908,7 @@ async fn sign_out_everywhere_keeps_this_browsers_org() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         let beta = in_beta.organisation_id;
-        let in_beta_cookie = with_org(&cookie, beta);
+        let in_beta_cookie = with_org(&ctx, &cookie, beta).await;
         let res = request
             .post("/account/sign-out-everywhere")
             .add_header(in_beta_cookie.0.clone(), in_beta_cookie.1.clone())
@@ -872,10 +919,11 @@ async fn sign_out_everywhere_keeps_this_browsers_org() {
         let fresh = TestMember::new(
             super::prepare_data::cookie_from(&res.headers().clone()),
             cookie.org_id,
+            cookie.slug.clone(),
         );
-        let res = dashboard(&request, &with_org(&fresh, beta)).await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(org_heading(&res.text()), "Beta");
+        let res = dashboard(&request, &with_org(&ctx, &fresh, beta).await).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(org_heading(&res.html), "Beta");
     })
     .await;
 }

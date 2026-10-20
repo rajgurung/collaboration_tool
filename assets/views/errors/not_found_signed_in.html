@@ -1,0 +1,17 @@
+{% extends "layouts/auth.html" %}
+{# A page load 404 for someone signed in with no org for this address (src/app.rs, not_found_page). It reads only the user: a stranger's org and a made-up slug look the same. #}
+{% block title %}Not found · Collaboration Tool{% endblock title %}
+{% block panel %}
+<span class="state-tile">{{<icon name="search" class="h-6 w-6"/>}}</span>
+<span class="meta font-semibold">404</span>
+<h2 class="mt-2 mb-0 text-2xl font-semibold">We couldn't find that page</h2>
+<p class="mt-3 text-sm leading-6 text-muted">The link may be wrong, or it may be for an organisation you're not in. Ask whoever sent it to check.</p>
+<div class="signed-as signed-as-row">
+  {{<avatar name={account.name} color={account.color} size="sm" label={false}/>}}
+  <span>Signed in as <strong>{{ account.email }}</strong></span>
+</div>
+<div class="btn-col">
+  <a href="/dashboard" class="btn btn-primary btn-lg">Go to Home</a>
+  <form method="post" action="/logout"><button type="submit" class="btn btn-secondary btn-lg w-full">Use another account</button></form>
+</div>
+{% endblock panel %}

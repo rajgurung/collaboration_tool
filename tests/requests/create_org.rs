@@ -19,14 +19,14 @@ use super::{
 
 async fn get(request: &TestServer, who: &TestMember, path: &str) -> axum_test::TestResponse {
     request
-        .get(path)
+        .get(&who.to(path))
         .add_header(who.0.clone(), who.1.clone())
         .await
 }
 
 async fn htmx_get(request: &TestServer, who: &TestMember, path: &str) -> axum_test::TestResponse {
     request
-        .get(path)
+        .get(&who.to(path))
         .add_header(who.0.clone(), who.1.clone())
         .add_header("HX-Request", "true")
         .await
@@ -40,7 +40,7 @@ async fn create(
     username: &str,
 ) -> axum_test::TestResponse {
     request
-        .post("/orgs")
+        .post(&who.at("/orgs"))
         .as_member(who)
         .form(&[("organisation_name", name), ("name", username)])
         .await
@@ -59,7 +59,19 @@ fn created_id(res: &axum_test::TestResponse) -> i64 {
 async fn lumen(request: &TestServer, who: &TestMember) -> TestMember {
     let res = create(request, who, "Lumen Café", "ali").await;
     assert_eq!(res.status_code(), 303, "{}", res.text());
-    with_org(who, created_id(&res))
+    let slug = super::prepare_data::slug_of(res.headers()["location"].to_str().unwrap())
+        .expect("lands under /o/")
+        .to_string();
+    let mut inside = who.clone();
+    let both = format!(
+        "{}; current_org={}",
+        who.1.to_str().unwrap(),
+        created_id(&res)
+    );
+    inside.cookie.1 = both.parse().unwrap();
+    inside.org_id = created_id(&res);
+    inside.slug = slug;
+    inside
 }
 
 async fn alice(request: &TestServer) -> TestMember {
@@ -74,9 +86,14 @@ async fn org_count(ctx: &AppContext) -> u64 {
     organisations::Entity::find().count(&ctx.db).await.unwrap()
 }
 
-/// A super admin's cookie with `acting_org` set.
-fn acting_in(admin: &super::prepare_data::Cookie, org_id: i64) -> TestMember {
-    TestMember::new(
+/// A super admin's cookie with `acting_org` set, at that org's address.
+async fn acting_in(
+    ctx: &AppContext,
+    admin: &super::prepare_data::Cookie,
+    org_id: i64,
+) -> TestMember {
+    TestMember::of(
+        ctx,
         (
             admin.0.clone(),
             format!("{}; acting_org={org_id}", admin.1.to_str().unwrap())
@@ -85,6 +102,7 @@ fn acting_in(admin: &super::prepare_data::Cookie, org_id: i64) -> TestMember {
         ),
         org_id,
     )
+    .await
 }
 
 /// Moves this person's created orgs out of the daily window.
@@ -141,7 +159,9 @@ async fn the_form_renders_with_your_username_and_the_org_field() {
             r#"<input type="hidden" name="_org" value="{}">"#,
             alice.org_id
         )));
-        assert!(page.contains(r#"method="post" action="/orgs" hx-post="/orgs""#));
+        assert!(page.contains(
+            r#"method="post" action="/o/acme-studio/orgs" hx-post="/o/acme-studio/orgs""#
+        ));
         assert!(page.contains("How people in this organisation see you."));
         assert!(page.contains("Nothing from Acme Studio is shared with it."));
         assert!(page.contains("You'll sign in with the same email and password."));
@@ -195,11 +215,19 @@ async fn creating_lands_on_home_in_the_new_org_with_a_toast() {
         let alice = alice(&request).await;
         let res = create(&request, &alice, "Lumen Café", "ali").await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(res.headers()["location"], "/dashboard?created=1");
+        assert_eq!(
+            res.headers()["location"],
+            "/o/lumen-caf/dashboard?created=1"
+        );
         let id = created_id(&res);
         let org = organisations::Model::find_by_id(&ctx.db, id).await.unwrap();
         assert_eq!(org.name, "Lumen Café");
-        let home = get(&request, &with_org(&alice, id), "/dashboard?created=1").await;
+        let home = get(
+            &request,
+            &with_org(&ctx, &alice, id).await,
+            "/dashboard?created=1",
+        )
+        .await;
         assert_eq!(page_org_id(&home.text()), Some(id));
         assert_eq!(home.headers()["cache-control"], "no-store");
         assert!(home
@@ -215,7 +243,8 @@ async fn the_created_flag_alone_changes_nothing() {
     request::<App, _, _>(|request, ctx| async move {
         let alice = alice(&request).await;
         let before = org_count(&ctx).await;
-        let res = get(&request, &alice, "/dashboard?created=1").await;
+        let here = with_org(&ctx, &alice, alice.org_id).await;
+        let res = get(&request, &here, "/dashboard?created=1").await;
         assert_eq!(res.status_code(), 200);
         assert_eq!(set_cookie(&res, "current_org"), None);
         assert!(
@@ -233,13 +262,16 @@ async fn creating_over_htmx_sends_hx_redirect_to_home() {
     request::<App, _, _>(|request, _ctx| async move {
         let alice = alice(&request).await;
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
             .await;
         assert_eq!(res.status_code(), 200);
-        assert_eq!(res.headers()["HX-Redirect"], "/dashboard?created=1");
+        assert_eq!(
+            res.headers()["HX-Redirect"],
+            "/o/lumen-caf/dashboard?created=1"
+        );
         assert!(set_cookie(&res, "current_org").is_some());
     })
     .await;
@@ -255,7 +287,7 @@ async fn a_plain_form_post_with_org_creates() {
         // JavaScript, with its server-rendered _org.
         let org_id = alice.org_id.to_string();
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .add_header(alice.0.clone(), alice.1.clone())
             .form(&[
                 ("organisation_name", "Lumen Café"),
@@ -264,12 +296,15 @@ async fn a_plain_form_post_with_org_creates() {
             ])
             .await;
         assert_eq!(res.status_code(), 303, "{}", res.text());
-        assert_eq!(res.headers()["location"], "/dashboard?created=1");
+        assert_eq!(
+            res.headers()["location"],
+            "/o/lumen-caf/dashboard?created=1"
+        );
         assert_eq!(org_count(&ctx).await, before + 1);
 
         // Without the field it fails closed, like any plain form.
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .add_header(alice.0.clone(), alice.1.clone())
             .form(&[("organisation_name", "Northwind Bakery"), ("name", "ali")])
             .await;
@@ -277,7 +312,7 @@ async fn a_plain_form_post_with_org_creates() {
         assert!(res.headers()["location"]
             .to_str()
             .unwrap()
-            .starts_with("/dashboard?from="));
+            .contains("/dashboard?from="));
         assert_eq!(org_count(&ctx).await, before + 1);
     })
     .await;
@@ -289,15 +324,18 @@ async fn a_stale_tab_cannot_create() {
     request::<App, _, _>(|request, ctx| async move {
         let alice = alice(&request).await;
         let before = org_count(&ctx).await;
-        let stale = TestMember::new(alice.cookie.clone(), 999_999);
+        let stale = TestMember::new(alice.cookie.clone(), 999_999, alice.slug.clone());
         let res = request
-            .post("/orgs")
+            .post(&stale.at("/orgs"))
             .as_member(&stale)
             .add_header("HX-Request", "true")
             .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
             .await;
         assert_eq!(res.status_code(), 409);
-        assert_eq!(res.headers()["HX-Redirect"], "/dashboard?from=999999");
+        assert_eq!(
+            res.headers()["HX-Redirect"],
+            "/o/acme-studio/dashboard?from=999999"
+        );
         assert_eq!(org_count(&ctx).await, before);
     })
     .await;
@@ -318,21 +356,22 @@ async fn creating_sets_current_org_and_clears_acting_org() {
 
 #[tokio::test]
 #[serial]
-async fn creating_ends_an_unlock_of_logins() {
+async fn creating_keeps_the_unlock_in_its_own_org() {
     request::<App, _, _>(|request, ctx| async move {
         let alice = alice(&request).await;
         let res = request
-            .post("/documents/logins/unlock")
+            .post(&alice.at("/documents/logins/unlock"))
             .as_member(&alice)
             .form(&[("password", USER_PASSWORD)])
             .await;
         assert_eq!(res.status_code(), 200, "{}", res.text());
         let unlocked = user(&ctx, "alice@example.com").await;
         assert_eq!(unlocked.secrets_unlocked_org_id, Some(alice.org_id));
+        // The Acme tab carries on: creating opens Lumen in this tab only.
         lumen(&request, &alice).await;
         let after = user(&ctx, "alice@example.com").await;
-        assert_eq!(after.secrets_unlocked_until, None);
-        assert_eq!(after.secrets_unlocked_org_id, None);
+        assert!(after.secrets_unlocked_until.is_some());
+        assert_eq!(after.secrets_unlocked_org_id, Some(alice.org_id));
     })
     .await;
 }
@@ -402,9 +441,13 @@ async fn usernames_are_per_org() {
             .unwrap();
         assert_eq!(in_acme.username, "alice");
         assert_eq!(in_lumen.username, "ali");
-        let acme_members = get(&request, &with_org(&alice, alice.org_id), "/members")
-            .await
-            .text();
+        let acme_members = get(
+            &request,
+            &with_org(&ctx, &alice, alice.org_id).await,
+            "/members",
+        )
+        .await
+        .text();
         assert!(acme_members.contains(">alice<") && !acme_members.contains(">ali<"));
         let lumen_members = get(&request, &lumen, "/members").await.text();
         assert!(lumen_members.contains(">ali<") && !lumen_members.contains(">alice<"));
@@ -448,7 +491,7 @@ async fn bad_input_is_422_and_saves_nothing() {
         assert!(page.contains(r#"aria-invalid="true""#));
         // Over HTMX: the form alone, replacing itself.
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&[("organisation_name", "Lumen"), ("name", "everyone")])
@@ -586,7 +629,7 @@ async fn a_pending_only_user_cannot_create() {
         // where the waiting page shows.
         let res = create(&request, &bob, "Bob's Bikes", "bob").await;
         assert_eq!(res.status_code(), 409);
-        assert_eq!(res.headers()["hx-redirect"], "/dashboard");
+        assert_eq!(res.headers()["hx-redirect"], "/o/acme-studio/dashboard");
         assert_eq!(org_count(&ctx).await, before);
     })
     .await;
@@ -606,7 +649,7 @@ async fn acting_can_create_from_a_typed_link_and_acting_ends() {
             .unwrap();
         let admin = super::admin::super_admin_cookie(&request, &ctx).await;
         let raj = user(&ctx, "gurungraj26@gmail.com").await;
-        let acting = acting_in(&admin, acme);
+        let acting = acting_in(&ctx, &admin, acme).await;
         let form = get(&request, &acting, "/orgs/new").await.text();
         assert!(form.contains(
             "You're acting in <strong>Acme Studio</strong>. Creating this ends acting. The new organisation is yours, with you as owner."
@@ -659,7 +702,7 @@ async fn creating_ignores_a_next_parameter() {
     request::<App, _, _>(|request, _ctx| async move {
         let alice = alice(&request).await;
         let res = request
-            .post("/orgs?next=//evil.example")
+            .post(&alice.at("/orgs?next=//evil.example"))
             .as_member(&alice)
             .form(&[
                 ("organisation_name", "Lumen Café"),
@@ -668,7 +711,10 @@ async fn creating_ignores_a_next_parameter() {
             ])
             .await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(res.headers()["location"], "/dashboard?created=1");
+        assert_eq!(
+            res.headers()["location"],
+            "/o/lumen-caf/dashboard?created=1"
+        );
     })
     .await;
 }
@@ -701,7 +747,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
         assert_eq!(get(&request, &bob, "/dashboard").await.status_code(), 200);
         let project = super::tasks::project_in(&ctx, "acme-studio", "Studio website").await;
         let res = request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .form(&super::tasks::task_form(
                 "Send the logo proofs",
@@ -719,7 +765,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
             .unwrap()
             .folder;
         let res = request
-            .post(&format!("/documents/folders/{}/logins", logins_folder.id))
+            .post(&alice.at(&format!("/documents/folders/{}/logins", logins_folder.id)))
             .as_member(&alice)
             .form(&[
                 ("title", "Acme bank"),
@@ -729,7 +775,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
             .await;
         assert_eq!(res.status_code(), 303, "{}", res.text());
         request
-            .post("/documents/folders")
+            .post(&alice.at("/documents/folders"))
             .as_member(&alice)
             .form(&[("name", "Acme contracts")])
             .await;
@@ -768,9 +814,13 @@ async fn the_new_org_is_separate_from_the_old_one() {
         );
         let activity = get(&request, &lumen, "/documents/activity").await.text();
         assert!(!activity.contains("Acme bank"));
-        let acme_activity = get(&request, &with_org(&alice, acme), "/documents/activity")
-            .await
-            .text();
+        let acme_activity = get(
+            &request,
+            &with_org(&ctx, &alice, acme).await,
+            "/documents/activity",
+        )
+        .await
+        .text();
         assert!(acme_activity.contains("Acme bank"), "Acme's own log has it");
         assert_eq!(
             login_events::Entity::find()
@@ -803,10 +853,10 @@ async fn the_new_org_is_separate_from_the_old_one() {
         // A login saved in Lumen gets Lumen's own key.
         let lumen_logins = folders.iter().find(|s| s.folder.name == "Logins").unwrap();
         let res = request
-            .post(&format!(
+            .post(&lumen.at(&format!(
                 "/documents/folders/{}/logins",
                 lumen_logins.folder.id
-            ))
+            )))
             .as_member(&lumen)
             .form(&[
                 ("title", "Lumen supplier"),
@@ -830,7 +880,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
         assert_eq!(lumen_keys.len(), 1, "one key for Lumen");
         assert_ne!(acme_keys[0].wrapped_dek, lumen_keys[0].wrapped_dek);
         // Acme's login still reveals its own password, in Acme.
-        let in_acme = with_org(&alice, acme);
+        let in_acme = with_org(&ctx, &alice, acme).await;
         assert_eq!(unlock(&request, &in_acme).await.status_code(), 200);
         let res = reveal(&request, &in_acme, acme_bank.id).await;
         assert_eq!(res.status_code(), 200, "{}", res.text());
@@ -850,7 +900,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
         );
 
         // Switching back shows Acme's.
-        let back = with_org(&alice, acme);
+        let back = with_org(&ctx, &alice, acme).await;
         let list = get(&request, &back, "/tasks").await.text();
         assert!(list.contains("Send the logo proofs"));
         let docs = get(&request, &back, "/documents").await.text();
@@ -868,7 +918,7 @@ async fn org_names_are_escaped_everywhere() {
         let escaped = "&lt;script&gt;alert(1)&lt;/script&gt;";
         let res = create(&request, &alice, name, "ali").await;
         assert_eq!(res.status_code(), 303, "{}", res.text());
-        let inside = with_org(&alice, created_id(&res));
+        let inside = with_org(&ctx, &alice, created_id(&res)).await;
         let toast = get(&request, &inside, "/dashboard?created=1").await.text();
         let list = htmx_get(&request, &inside, "/orgs").await.text();
         let more = get(&request, &inside, "/more").await.text();
@@ -909,7 +959,7 @@ async fn the_page_form_keeps_its_page_buttons_after_a_422() {
         assert!(!dialog.contains(r#"name="as_page""#));
         // The page's form, sent over HTMX, refused.
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&[
@@ -925,7 +975,7 @@ async fn the_page_form_keeps_its_page_buttons_after_a_422() {
         // At the cap, the same: Back to Home, not a dead Close.
         created_up_to(&ctx, &user(&ctx, "alice@example.com").await, 10).await;
         let res = request
-            .post("/orgs")
+            .post(&alice.at("/orgs"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&[
@@ -948,30 +998,48 @@ async fn an_old_org_link_is_an_app_404_naming_only_the_current_org() {
         let alice = alice(&request).await;
         let project = super::tasks::project_in(&ctx, "acme-studio", "Studio website").await;
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
-            .form(&super::tasks::task_form("Send the logo proofs", project.id, ""))
+            .form(&super::tasks::task_form(
+                "Send the logo proofs",
+                project.id,
+                "",
+            ))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         let lumen = lumen(&request, &alice).await;
-        let path = format!("/tasks/{}", task.id);
+        // A bare old link finds the task's own org first.
+        let bare = format!("/tasks/{}", task.id);
         let res = request
-            .get(&path)
+            .get(&bare)
+            .add_header(lumen.0.clone(), lumen.1.clone())
+            .add_header("Accept", "text/html")
+            .await;
+        assert_eq!(res.headers()["location"], alice.at(&bare).as_str());
+        // Under Lumen's address it is Lumen's in-org 404.
+        let path = lumen.at(&bare);
+        let res = request
+            .get(&lumen.to(&path))
             .add_header(lumen.0.clone(), lumen.1.clone())
             .add_header("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
             .await;
         assert_eq!(res.status_code(), 404);
         let page = res.text();
         assert!(page.contains("<html"), "a page");
-        assert!(page.contains("We couldn't find that in Lumen Café"), "{page}");
-        assert!(page.contains("It may be in another of your organisations. Switch from the menu, then open the link again."));
-        assert!(page.contains(r#"href="/dashboard" class="btn btn-primary btn-tall mt-2">Go to Home</a>"#));
+        assert!(
+            page.contains("We couldn't find that in Lumen Café"),
+            "{page}"
+        );
+        assert!(page.contains("It may have been deleted, or the link may be wrong."));
+        assert!(page.contains(
+            r#"href="/o/lumen-caf/tasks" class="btn btn-primary btn-tall mt-2">Back to Tasks</a>"#
+        ));
         assert!(!page.contains("Acme Studio"), "never names another org");
         assert_eq!(page_org_id(&page), Some(lumen.org_id));
 
         // HTMX and API 404s are left alone.
         let res = request
-            .get(&path)
+            .get(&lumen.to(&path))
             .add_header(lumen.0.clone(), lumen.1.clone())
             .add_header("Accept", "text/html")
             .add_header("HX-Request", "true")
@@ -980,7 +1048,7 @@ async fn an_old_org_link_is_an_app_404_naming_only_the_current_org() {
         assert_eq!(res.status_code(), 404);
         assert!(!res.text().contains("<html"));
         let res = request
-            .get(&path)
+            .get(&lumen.to(&path))
             .add_header(lumen.0.clone(), lumen.1.clone())
             .await;
         assert_eq!(res.status_code(), 404);
@@ -1000,7 +1068,7 @@ async fn an_old_org_link_is_an_app_404_naming_only_the_current_org() {
 
 async fn unlock(request: &TestServer, who: &TestMember) -> axum_test::TestResponse {
     request
-        .post("/documents/logins/unlock")
+        .post(&who.at("/documents/logins/unlock"))
         .as_member(who)
         .form(&[("password", USER_PASSWORD)])
         .await
@@ -1008,7 +1076,7 @@ async fn unlock(request: &TestServer, who: &TestMember) -> axum_test::TestRespon
 
 async fn reveal(request: &TestServer, who: &TestMember, id: i64) -> axum_test::TestResponse {
     request
-        .post(&format!("/documents/logins/{id}/reveal"))
+        .post(&who.at(&format!("/documents/logins/{id}/reveal")))
         .as_member(who)
         .form(&[("field", "password")])
         .await

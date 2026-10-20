@@ -81,7 +81,7 @@ pub async fn new_login_form(
 ) -> Result<serde_json::Value> {
     Ok(data!({
         "form_id": "new-login-form",
-        "action": format!("/documents/folders/{}/logins", folder.id),
+        "action": member.url(&format!("/documents/folders/{}/logins", folder.id)),
         "editing": false,
         "values": { "title": "", "username": "", "url": "", "notes": "" },
         "people": picker(ctx, member, &[]).await?,
@@ -172,7 +172,7 @@ async fn login_data(
         "owners": and_list(&owners),
         "form": {
             "form_id": format!("login-{}-form", login.id),
-            "action": format!("/documents/logins/{}", login.id),
+            "action": member.url(&format!("/documents/logins/{}", login.id)),
             "editing": true,
             "has_recovery": login.has_recovery(),
             "values": {
@@ -271,7 +271,7 @@ async fn create(
     match logins::Model::create(&ctx, &folder, &member, &client, &params).await {
         Ok(login) => Ok(redirect_response(
             &headers,
-            &format!("/documents/logins/{}", login.id),
+            &member.url(&format!("/documents/logins/{}", login.id)),
         )),
         Err(err) => {
             let form = new_login_form(&ctx, &member, &folder).await?;
@@ -297,7 +297,7 @@ async fn edit(
     match login.clone().edit(&ctx, &member, &client, &params).await {
         Ok(login) => Ok(redirect_response(
             &headers,
-            &format!("/documents/logins/{}", login.id),
+            &member.url(&format!("/documents/logins/{}", login.id)),
         )),
         Err(err) => {
             let form = login_data(&ctx, &member, &login).await?["form"].take();
@@ -322,7 +322,7 @@ async fn delete(
     login.delete_login(&ctx.db, &member, &client).await?;
     Ok(redirect_response(
         &headers,
-        &format!("/documents/folders/{folder_id}"),
+        &member.url(&format!("/documents/folders/{folder_id}")),
     ))
 }
 
@@ -555,11 +555,11 @@ async fn reveal(
         .view(
             &v,
             "documents/_secret.html",
-            data!({
+            member.fragment(data!({
                 "secret": secret.expose_secret(),
                 "field": name,
                 "login": { "id": login.id },
-            }),
+            })),
         )?;
     tell_owners(&ctx, &member, &login, name, false).await;
     Ok(response)

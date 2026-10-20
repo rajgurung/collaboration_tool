@@ -1,4 +1,4 @@
-<form id="meeting-form" method="post" action="/meetings" hx-post="/meetings" hx-target="#meeting-list" hx-swap="outerHTML" data-close-on-success class="grid gap-4">
+<form id="meeting-form" method="post" action="{{ org_url(path="/meetings") }}" hx-post="{{ org_url(path="/meetings") }}" hx-target="#meeting-list" hx-swap="outerHTML" data-close-on-success class="grid gap-4">
   <div>
     <h2 class="m-0 text-xl font-semibold">Log a meeting</h2>
     <p class="meta mt-1 mb-0 text-sm">What changed, what was decided and what happens next.</p>

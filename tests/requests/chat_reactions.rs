@@ -36,7 +36,7 @@ async fn react(
     on: bool,
 ) -> axum_test::TestResponse {
     request
-        .post(&react_path(message.conversation_id, message.id))
+        .post(&who.at(&react_path(message.conversation_id, message.id)))
         .as_member(who)
         .add_header("HX-Request", "true")
         .form(&serde_json::json!({ "emoji": emoji, "on": if on { "1" } else { "0" } }))
@@ -114,7 +114,7 @@ async fn people_share_a_chip_and_each_sees_their_own() {
         assert!(res.text().contains(r#"title="React ❤️""#));
 
         let feed = request
-            .get(&format!("/chat/{}/feed", general.id))
+            .get(&bob.at(&format!("/chat/{}/feed", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -132,7 +132,7 @@ async fn only_the_six_reactions_are_accepted() {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
         let message = post(&request, &ctx, &bob, general.id, "Pick one").await;
-        let path = react_path(general.id, message.id);
+        let path = alice.at(&react_path(general.id, message.id));
 
         let refused = [
             serde_json::json!({ "emoji": "😀", "on": "1" }),
@@ -146,7 +146,7 @@ async fn only_the_six_reactions_are_accepted() {
         ];
         for form in &refused {
             let res = request
-                .post(&path)
+                .post(&alice.to(&path))
                 .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(form)
@@ -231,7 +231,7 @@ async fn reactions_need_a_member_of_the_conversation() {
         ];
         for (case, who, conversation_id, message_id, status) in cases {
             let res = request
-                .post(&react_path(conversation_id, message_id))
+                .post(&who.at(&react_path(conversation_id, message_id)))
                 .as_member(who)
                 .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
                 .await;
@@ -240,7 +240,7 @@ async fn reactions_need_a_member_of_the_conversation() {
             assert_eq!(res.status_code(), posted, "POST reactions: {case}");
             assert!(!res.text().contains("Salaries"), "POST reactions: {case}");
             let res = request
-                .get(&actions_path(conversation_id, message_id))
+                .get(&who.at(&actions_path(conversation_id, message_id)))
                 .add_header(who.0.clone(), who.1.clone())
                 .await;
             assert_eq!(res.status_code(), status, "GET actions: {case}");
@@ -257,7 +257,7 @@ async fn reactions_need_a_member_of_the_conversation() {
             200
         );
         let res = request
-            .get(&actions_path(group.id, in_group.id))
+            .get(&alice.at(&actions_path(group.id, in_group.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert_eq!(res.status_code(), 200);
@@ -332,7 +332,7 @@ async fn a_socket_only_gets_reactions_for_its_conversation() {
     });
     let res = reqwest::Client::new()
         .post(format!(
-            "http://{addr}{}",
+            "http://{addr}/o/acme{}",
             react_path(hello.conversation_id, hello.id)
         ))
         .header("cookie", &cookie)
@@ -365,6 +365,9 @@ async fn a_socket_only_gets_reactions_for_its_conversation() {
         html.contains(&format!(r#"id="tools-{}""#, hello.id)),
         "{html}"
     );
+    // The broadcast carries the socket's org in its links.
+    assert!(html.contains(r#"data-url="/o/acme/chat/"#), "{html}");
+    assert!(!html.contains(r#"="/chat/"#), "{html}");
 }
 
 #[tokio::test]
@@ -378,12 +381,12 @@ async fn the_feed_shows_chips_in_the_fixed_order() {
             react(&request, &alice, &message, emoji, true).await;
         }
         let page = request
-            .get(&format!("/chat/{}", general.id))
+            .get(&bob.at(&format!("/chat/{}", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         let feed = request
-            .get(&format!("/chat/{}/feed", general.id))
+            .get(&bob.at(&format!("/chat/{}/feed", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -398,7 +401,7 @@ async fn the_feed_shows_chips_in_the_fixed_order() {
             );
         }
         assert!(page.contains(&format!(
-            r#"data-actions-url="/chat/{}/messages/{}/actions""#,
+            r#"data-actions-url="/o/acme/chat/{}/messages/{}/actions""#,
             general.id, message.id
         )));
     })
@@ -419,7 +422,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
             super::prepare_data::USER_PASSWORD,
         )
         .await;
-        let carol = TestMember::new(carol, acme_id(&ctx).await);
+        let carol = TestMember::new(carol, acme_id(&ctx).await, "acme");
         let message = post(&request, &ctx, &bob, general.id, "VAT is due 7 November").await;
         react(&request, &carol, &message, "👍", true).await;
         react(&request, &bob, &message, "👍", true).await;
@@ -427,7 +430,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
         react(&request, &carol, &message, "✅", true).await;
 
         let sheet = request
-            .get(&actions_path(general.id, message.id))
+            .get(&alice.at(&actions_path(general.id, message.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -454,7 +457,7 @@ async fn the_sheet_lists_you_first_then_others_in_order() {
         // Nobody has reacted: no "Reactions" list.
         let quiet = post(&request, &ctx, &alice, general.id, "Quiet one").await;
         let sheet = request
-            .get(&actions_path(general.id, quiet.id))
+            .get(&alice.at(&actions_path(general.id, quiet.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -477,7 +480,7 @@ async fn emoji_in_a_message_round_trip() {
             assert_eq!(saved.body.as_bytes(), body.as_bytes());
         }
         let page = request
-            .get(&format!("/chat/{}", general.id))
+            .get(&bob.at(&format!("/chat/{}", general.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -487,7 +490,7 @@ async fn emoji_in_a_message_round_trip() {
         // The limit counts characters, not bytes.
         for (body, status) in [("✅".repeat(1000), 200), ("✅".repeat(1001), 422)] {
             let res = request
-                .post(&format!("/chat/{}/messages", general.id))
+                .post(&alice.at(&format!("/chat/{}/messages", general.id)))
                 .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))

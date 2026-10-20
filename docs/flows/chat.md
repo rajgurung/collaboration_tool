@@ -33,7 +33,7 @@ sequenceDiagram
     participant Hub as ChatHub (in memory)
     participant WS2 as other members' sockets
     participant N as notifications::message_sent
-    A->>WS: open /chat/ID/ws
+    A->>WS: open /o/SLUG/chat/ID/ws
     WS->>WS: CurrentMember, member of conversation, Origin (if sent) = APP_URL
     A->>WS: {"body": "hi @sam"}
     WS->>DB: check membership again, insert message (1 to 1,000 chars)
@@ -61,15 +61,19 @@ Rules:
   checks and reloads the feed from `GET /chat/<id>/feed`.
 - A `Close` event closes sockets by scope (`src/data/live.rs`): every org's
   on sign out everywhere, a password reset or a lock (`Account`); only that
-  org's, on every device, on removal (`Org`); only that browser's on a switch
-  or a create (`Browser`, by sign-in id).
-- The socket needs no stale-tab check. Its org is fixed at upgrade, and the
-  upgrade only succeeds for a conversation in the cookie's org, the one the
-  page names. A switch closes the socket and its reconnect is refused. The
+  org's, on every device, on removal (`Org`). Nothing closes a socket on a
+  switch or a create: each tab's socket is under its own `/o/{slug}/`.
+- The socket needs no stale-tab check. Its org is the address's, fixed at
+  upgrade, and the upgrade only succeeds for a conversation in that org. A
+  bare `/chat/ID/ws` upgrade is refused (303), never upgraded. The
   `X-Org-Id` in each message's headers is ignored.
-- When a socket closes, `app.ts` asks `GET /orgs/current`. A tab left on the
-  old org gets the refusal and moves to Home, instead of sitting there with
-  no new messages.
+- The fragments a socket renders for broadcast (messages, reply lines,
+  counts, receipts, reactions) carry its org's links: the socket keeps
+  `org_slug` from the upgrade, and every subscriber to a conversation is in
+  its org.
+- When a socket closes, `app.ts` asks `GET /o/{slug}/orgs/current`. A tab
+  whose org is gone gets the refusal and moves, instead of sitting there
+  with no new messages.
 - HTTP fallback: `POST /chat/<id>/messages` saves, publishes and notifies the
   same way (`src/controllers/chat.rs:664`).
 
@@ -130,7 +134,7 @@ Rules (`receipt`, `src/controllers/chat.rs:288`):
 ```mermaid
 sequenceDiagram
     actor R as Replier
-    participant WS as socket on /chat/ID/ws?thread=PARENT
+    participant WS as socket on /o/SLUG/chat/ID/ws?thread=PARENT
     participant DB as Postgres
     participant Hub as ChatHub
     participant N as notifications::reply_sent

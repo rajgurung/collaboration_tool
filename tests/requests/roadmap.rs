@@ -25,7 +25,7 @@ async fn creating_a_project_shows_it_in_its_lane() {
             .unwrap();
 
         let res = request
-            .post("/roadmap/projects")
+            .post(&owner.at("/roadmap/projects"))
             .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&project_form(
@@ -36,7 +36,7 @@ async fn creating_a_project_shows_it_in_its_lane() {
             .await;
         assert_eq!(res.status_code(), 200);
         let lane = request
-            .get("/roadmap?lane=next")
+            .get(&owner.at("/roadmap?lane=next"))
             .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();
@@ -60,7 +60,7 @@ async fn creating_a_project_shows_it_in_its_lane() {
         // Every lane is on the page (side by side on desktop). Phones see the
         // current lane, "Now" by default, and the switcher counts it under "Next".
         let page = request
-            .get("/roadmap")
+            .get(&owner.at("/roadmap"))
             .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();
@@ -85,7 +85,7 @@ async fn invalid_projects_rerender_the_form_with_errors() {
         form["accent"] = serde_json::json!("red");
 
         let res = request
-            .post("/roadmap/projects")
+            .post(&owner.at("/roadmap/projects"))
             .as_member(&owner)
             .add_header("HX-Request", "true")
             .form(&form)
@@ -121,7 +121,7 @@ async fn owner_must_be_an_approved_member_of_the_same_org() {
 
         for outsider in [gina.id, bob.id] {
             let res = request
-                .post("/roadmap/projects")
+                .post(&owner.at("/roadmap/projects"))
                 .as_member(&owner)
                 .add_header("HX-Request", "true")
                 .form(&project_form("Launch", "now", &outsider.to_string()))
@@ -140,7 +140,7 @@ async fn editing_updates_the_project_and_the_form_is_prefilled() {
     request::<App, _, _>(|request, ctx| async move {
         let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         request
-            .post("/roadmap/projects")
+            .post(&owner.at("/roadmap/projects"))
             .as_member(&owner)
             .form(&project_form("Pricing", "now", ""))
             .await;
@@ -151,14 +151,14 @@ async fn editing_updates_the_project_and_the_form_is_prefilled() {
             .unwrap();
 
         let edit = request
-            .get(&format!("/roadmap/projects/{}/edit", project.id))
+            .get(&owner.at(&format!("/roadmap/projects/{}/edit", project.id)))
             .add_header(owner.0.clone(), owner.1.clone())
             .await;
         assert_eq!(edit.status_code(), 200);
         assert!(edit.text().contains(r#"value="Pricing""#));
 
         let res = request
-            .post(&format!("/roadmap/projects/{}", project.id))
+            .post(&owner.at(&format!("/roadmap/projects/{}", project.id)))
             .as_member(&owner)
             .form(&project_form("Pricing model", "later", ""))
             .await;
@@ -182,7 +182,7 @@ async fn projects_from_other_orgs_are_invisible() {
         let acme = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let globex = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         request
-            .post("/roadmap/projects")
+            .post(&globex.at("/roadmap/projects"))
             .as_member(&globex)
             .form(&project_form("Secret plan", "now", ""))
             .await;
@@ -193,17 +193,17 @@ async fn projects_from_other_orgs_are_invisible() {
             .unwrap();
 
         let page = request
-            .get("/roadmap")
+            .get(&acme.at("/roadmap"))
             .add_header(acme.0.clone(), acme.1.clone())
             .await;
         assert!(!page.text().contains("Secret plan"));
         let edit = request
-            .get(&format!("/roadmap/projects/{}/edit", secret.id))
+            .get(&acme.at(&format!("/roadmap/projects/{}/edit", secret.id)))
             .add_header(acme.0.clone(), acme.1.clone())
             .await;
         assert_eq!(edit.status_code(), 404);
         let update = request
-            .post(&format!("/roadmap/projects/{}", secret.id))
+            .post(&acme.at(&format!("/roadmap/projects/{}", secret.id)))
             .as_member(&acme)
             .form(&project_form("Hijacked", "now", ""))
             .await;
@@ -225,7 +225,7 @@ async fn progress_is_the_share_of_tasks_done() {
         let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         for name in ["Launch", "Someday"] {
             request
-                .post("/roadmap/projects")
+                .post(&owner.at("/roadmap/projects"))
                 .as_member(&owner)
                 .form(&project_form(name, "now", ""))
                 .await;
@@ -243,7 +243,7 @@ async fn progress_is_the_share_of_tasks_done() {
             ("D", "blocked"),
         ] {
             request
-                .post("/tasks")
+                .post(&owner.at("/tasks"))
                 .as_member(&owner)
                 .form(&serde_json::json!({
                     "title": title, "project_id": launch.id.to_string(),
@@ -253,7 +253,7 @@ async fn progress_is_the_share_of_tasks_done() {
         }
 
         let page = request
-            .get("/roadmap")
+            .get(&owner.at("/roadmap"))
             .add_header(owner.0.clone(), owner.1.clone())
             .await
             .text();

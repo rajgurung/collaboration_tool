@@ -78,7 +78,7 @@ async fn react(
     on: &str,
 ) -> (u16, String) {
     let res = request
-        .post(&react_path(note))
+        .post(&who.at(&react_path(note)))
         .as_member(who)
         .add_header("HX-Request", "true")
         .form(&serde_json::json!({ "emoji": emoji, "on": on }))
@@ -188,7 +188,7 @@ async fn only_the_six_reactions_are_allowed() {
         let (alice, _bob, note) = acme_note(&request, &ctx).await;
         for (emoji, on) in [("😀", "1"), ("❤", "1"), ("", "1"), ("👍", "2"), ("👍", "")] {
             let res = request
-                .post(&react_path(&note))
+                .post(&alice.at(&react_path(&note)))
                 .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "emoji": emoji, "on": on }))
@@ -220,7 +220,7 @@ async fn only_members_of_the_notes_organisation_can_react() {
         // A note id from another Acme task, sent with this task's id.
         let other = task_in(&ctx, acme_id(&ctx).await, "Rota").await;
         let res = request
-            .post(&format!("/tasks/{}/notes/{}/reactions", other.id, note.id))
+            .post(&alice.at(&format!("/tasks/{}/notes/{}/reactions", other.id, note.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
@@ -233,7 +233,7 @@ async fn only_members_of_the_notes_organisation_can_react() {
         let admin = super_admin_cookie(&request, &ctx).await;
         let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
         let res = request
-            .post(&react_path(&note))
+            .post(&format!("/o/acme{}", react_path(&note)))
             .add_header("cookie", acting)
             .add_header("x-org-id", acme.id.to_string())
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
@@ -258,7 +258,7 @@ async fn the_sheet_shows_note_reactions() {
         react(&request, &bob, &note, "🎉", "1").await;
 
         let sheet = request
-            .get(&format!("/tasks/{}", task.id))
+            .get(&alice.at(&format!("/tasks/{}", task.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .add_header("HX-Request", "true")
             .await
@@ -280,7 +280,7 @@ async fn the_sheet_shows_note_reactions() {
 
         let empty = task_in(&ctx, note.organisation_id, "Nothing yet").await;
         let sheet = request
-            .get(&format!("/tasks/{}", empty.id))
+            .get(&alice.at(&format!("/tasks/{}", empty.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .add_header("HX-Request", "true")
             .await
@@ -299,7 +299,7 @@ async fn deleting_a_task_removes_its_note_reactions() {
         react(&request, &bob, &note, "👀", "1").await;
         assert_eq!(count(&ctx).await, 2);
         request
-            .post(&format!("/tasks/{}/delete", note.task_id))
+            .post(&alice.at(&format!("/tasks/{}/delete", note.task_id)))
             .as_member(&alice)
             .await;
         assert_eq!(count(&ctx).await, 0);

@@ -1,5 +1,5 @@
 <div id="task-board" class="board"
-     hx-get="/tasks/board?scope={{ board.scope }}&group={{ board.group }}&q={{ board.q }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
+     hx-get="{{ org_url(path="/tasks/board?scope=" ~ (board.scope) ~ "&group=" ~ (board.group) ~ "&q=" ~ (board.q)) }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
   {% include "tasks/_toolbar.html" %}
 
   <div class="board-scroll">
@@ -25,8 +25,8 @@
           {% set column = board.columns[loop.index0] %}
           <div class="cell" data-drop-status="{{ column.key }}" aria-label="{{ column.label }}">
             {% for card in cell %}
-            <a href="/tasks/{{ card.id }}" class="task-card" draggable="true" data-task-id="{{ card.id }}" data-status="{{ card.status }}"
-               hx-get="/tasks/{{ card.id }}" hx-target="#task-sheet-body"
+            <a href="{{ org_url(path="/tasks/" ~ (card.id)) }}" class="task-card" draggable="true" data-task-id="{{ card.id }}" data-status="{{ card.status }}"
+               hx-get="{{ org_url(path="/tasks/" ~ (card.id)) }}" hx-target="#task-sheet-body"
                hx-on::after-request="document.getElementById('task-sheet').showModal()">
               {% if board.group != "project" and card.project %}<span class="task-card-project"><span class="dot" style="--dot: {{ card.accent }}"></span>{{ card.project }}</span>{% endif %}
               <span class="task-card-title">{{ card.title }}</span>
@@ -38,9 +38,9 @@
               </span>
             </a>
             {% endfor %}
-            {% if column.key == "done" and lane.more_done %}<a href="/tasks?filter=done{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}{% if board.q %}&q={{ board.q }}{% endif %}" class="cell-more">All done tasks</a>{% endif %}
+            {% if column.key == "done" and lane.more_done %}<a href="{{ org_url(path="/tasks?filter=done") }}{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}{% if board.q %}&q={{ board.q }}{% endif %}" class="cell-more">All done tasks</a>{% endif %}
             <button type="button" class="cell-add" aria-label="Add a task to {{ column.label }}{% if lane.project_id %} in {{ lane.name }}{% endif %}"
-                    hx-get="/tasks/new?status={{ column.key }}{% if lane.project_id %}&project_id={{ lane.project_id }}{% endif %}" hx-target="#task-dialog-body"
+                    hx-get="{{ org_url(path="/tasks/new?status=" ~ (column.key)) }}{% if lane.project_id %}&project_id={{ lane.project_id }}{% endif %}" hx-target="#task-dialog-body"
                     hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}</button>
           </div>
           {% endfor %}
@@ -48,8 +48,8 @@
       </section>
       {% else %}
       <div class="card empty mt-3">
-        {% if board.q %}No tasks match “{{ board.q }}”. <a href="/tasks?scope={{ board.scope }}&group={{ board.group }}" class="text-link">Clear the search</a>
-        {% elif board.scope == "mine" %}Nothing assigned to you. <a href="/tasks?scope=all&group={{ board.group }}" class="text-link">See everyone's tasks</a>
+        {% if board.q %}No tasks match “{{ board.q }}”. <a href="{{ org_url(path="/tasks?scope=" ~ (board.scope) ~ "&group=" ~ (board.group)) }}" class="text-link">Clear the search</a>
+        {% elif board.scope == "mine" %}Nothing assigned to you. <a href="{{ org_url(path="/tasks?scope=all&group=" ~ (board.group)) }}" class="text-link">See everyone's tasks</a>
         {% else %}No tasks yet. Add the first one with New task.{% endif %}
       </div>
       {% endfor %}

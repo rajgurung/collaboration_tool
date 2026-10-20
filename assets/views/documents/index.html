@@ -2,7 +2,7 @@
 {% block title %}Documents · {{ org.name }}{% endblock title %}
 {% block body_attrs %}hx-history="false"{% endblock body_attrs %}
 {% block topbar %}
-<a href="/more" class="back mobile-only">{{<icon name="chevron-left" class="h-5 w-5"/>}}More</a>
+<a href="{{ org_url(path="/more") }}" class="back mobile-only">{{<icon name="chevron-left" class="h-5 w-5"/>}}More</a>
 <h1 class="desktop-only">Documents</h1>
 <span class="flex-1 mobile-only"></span>
 {% if me.can_manage %}<button type="button" class="btn btn-secondary" data-dialog-open="new-folder-title">{{<icon name="plus" class="h-4 w-4"/>}}New folder</button>{% endif %}
@@ -17,7 +17,7 @@
     <section class="flex flex-col gap-2">
       <h2 class="section-label">Owners only</h2>
       <div class="list">
-        <a class="list-row" href="/documents/activity">{{<icon name="history" class="h-5 w-5"/>}}<span class="min-w-0 flex-1"><span class="block">Login activity</span><span class="meta block">Who saw or copied a password, and when</span></span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+        <a class="list-row" href="{{ org_url(path="/documents/activity") }}">{{<icon name="history" class="h-5 w-5"/>}}<span class="min-w-0 flex-1"><span class="block">Login activity</span><span class="meta block">Who saw or copied a password, and when</span></span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
       </div>
     </section>
     {% endif %}

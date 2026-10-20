@@ -1,4 +1,5 @@
 mod auth;
+pub mod bare_addresses;
 mod page;
 mod prepare_data;
 
@@ -53,7 +54,9 @@ pub mod note_reactions;
 
 pub mod create_org;
 pub mod join_existing;
+pub mod links;
 pub mod multi_org;
+pub mod org_address;
 pub mod org_removal;
 pub mod orgs;
 pub mod stale_tab;

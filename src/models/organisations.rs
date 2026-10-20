@@ -1,6 +1,8 @@
 use loco_rs::prelude::*;
 use serde::Deserialize;
 
+use crate::views::links::SLUG_MAX;
+
 pub use super::_entities::organisations::{ActiveModel, Column, Entity, Model};
 use super::{
     conversations, folders, memberships, projects, tasks,
@@ -329,14 +331,23 @@ fn slugify(name: &str) -> String {
     }
 }
 
+/// The base slug, then `base-2`, `base-3`... The base is cut so the result
+/// stays within [`SLUG_MAX`], whatever the number.
+fn numbered(base: &str, n: u32) -> String {
+    let suffix = if n == 1 {
+        String::new()
+    } else {
+        format!("-{n}")
+    };
+    let room = SLUG_MAX.saturating_sub(suffix.len());
+    let cut: String = base.chars().take(room).collect();
+    format!("{}{suffix}", cut.trim_end_matches('-'))
+}
+
 async fn unique_slug<C: ConnectionTrait>(db: &C, name: &str) -> ModelResult<String> {
     let base = slugify(name);
     for n in 1.. {
-        let candidate = if n == 1 {
-            base.clone()
-        } else {
-            format!("{base}-{n}")
-        };
+        let candidate = numbered(&base, n);
         if Entity::find()
             .filter(Column::Slug.eq(&candidate))
             .one(db)
@@ -351,7 +362,8 @@ async fn unique_slug<C: ConnectionTrait>(db: &C, name: &str) -> ModelResult<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{comparable, slugify};
+    use super::{comparable, numbered, slugify, SLUG_MAX};
+    use crate::views::links::is_slug;
 
     #[test]
     fn comparable_ignores_case_and_spacing() {
@@ -366,5 +378,18 @@ mod tests {
         assert_eq!(slugify("  Acme   Ltd!! "), "acme-ltd");
         assert_eq!(slugify("***"), "org");
         assert_eq!(slugify("Café Été"), "caf-t");
+    }
+
+    #[test]
+    fn numbered_slugs_stay_within_the_limit() {
+        let long = slugify(&"a".repeat(200));
+        assert_eq!(long.len(), 40);
+        assert_eq!(numbered(&long, 1), long);
+        assert_eq!(numbered("acme", 2), "acme-2");
+        let wide = "a".repeat(SLUG_MAX);
+        for n in [1, 2, 99, 12_345, u32::MAX] {
+            let slug = numbered(&wide, n);
+            assert!(slug.len() <= SLUG_MAX && is_slug(&slug), "{slug}");
+        }
     }
 }

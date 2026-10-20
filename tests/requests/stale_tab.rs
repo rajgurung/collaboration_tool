@@ -48,10 +48,11 @@ const EXEMPT: [(&str, &str); 16] = [
     ("POST", "/settings/claude/tokens"),
 ];
 
-/// GET routes without `CurrentMember`. `/oauth/authorize` checks its query
-/// before it looks at the member.
-const EXEMPT_GET: [&str; 14] = [
+/// GET routes without `CurrentMember`. `/oauth/authorize` is
+/// `PinnedMember`, and checks its query before it looks at the member.
+const EXEMPT_GET: [&str; 15] = [
     "/",
+    "/robots.txt",
     "/login",
     "/forgot",
     "/reset/{token}",
@@ -77,7 +78,7 @@ struct Tabs {
 async fn tabs(request: &TestServer, ctx: &AppContext) -> Tabs {
     let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(request, ctx).await;
     Tabs {
-        beta: with_org(&cookie, in_beta.organisation_id),
+        beta: with_org(ctx, &cookie, in_beta.organisation_id).await,
         acme_id: in_acme.organisation_id,
         beta_id: in_beta.organisation_id,
     }
@@ -101,6 +102,20 @@ fn routes(ctx: &AppContext) -> Vec<(Method, String, String)> {
     all
 }
 
+/// A tenant route's path at the member's address; others stay bare.
+fn in_org(member: &TestMember, uri: &str, path: &str) -> String {
+    let first = uri
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    if collab::views::links::TENANT_SECTIONS.contains(&first) {
+        member.at(path)
+    } else {
+        path.to_string()
+    }
+}
+
 fn is_safe(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
@@ -121,7 +136,7 @@ fn assert_sent_home_htmx(res: &axum_test::TestResponse, from: &str, what: &str) 
     assert_eq!(res.status_code(), 409, "{what}: {}", res.text());
     assert_eq!(
         header(res, "HX-Redirect"),
-        format!("/dashboard?from={from}"),
+        format!("/o/beta/dashboard?from={from}"),
         "{what}"
     );
     assert_eq!(header(res, "cache-control"), "no-store", "{what}");
@@ -132,7 +147,7 @@ fn assert_sent_home(res: &axum_test::TestResponse, from: &str, what: &str) {
     assert_eq!(res.status_code(), 303, "{what}: {}", res.text());
     assert_eq!(
         header(res, "location"),
-        format!("/dashboard?from={from}"),
+        format!("/o/beta/dashboard?from={from}"),
         "{what}"
     );
     assert_eq!(header(res, "cache-control"), "no-store", "{what}");
@@ -153,6 +168,7 @@ async fn every_non_get_route_refuses_a_header_from_another_org() {
             if is_safe(&method) || exempt(&method, &uri) {
                 continue;
             }
+            let path = in_org(&t.beta, &uri, &path);
             let res = request
                 .method(method.clone(), &path)
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
@@ -174,6 +190,7 @@ async fn every_non_get_route_refuses_a_form_from_another_org() {
             if is_safe(&method) || exempt(&method, &uri) {
                 continue;
             }
+            let path = in_org(&t.beta, &uri, &path);
             let res = request
                 .method(method.clone(), &path)
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
@@ -194,6 +211,7 @@ async fn every_non_get_route_refuses_a_request_with_no_org() {
             if is_safe(&method) || exempt(&method, &uri) {
                 continue;
             }
+            let path = in_org(&t.beta, &uri, &path);
             let res = request
                 .method(method.clone(), &path)
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
@@ -214,8 +232,9 @@ async fn every_htmx_get_from_another_org_is_sent_home() {
             if method != Method::GET || EXEMPT_GET.contains(&uri.as_str()) {
                 continue;
             }
+            let path = in_org(&t.beta, &uri, &path);
             let res = request
-                .get(&path)
+                .get(&t.beta.to(&path))
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
                 .add_header("HX-Request", "true")
                 .add_header("x-org-id", t.acme_id.to_string())
@@ -243,10 +262,23 @@ async fn the_exempt_lists_match_real_routes() {
                 "GET {uri} is not a route"
             );
         }
-        // The two PinnedMember routes, and only those, skip the check while
-        // taking a member. A third needs a deliberate change here.
+        // PinnedMember's three uses, and only those, skip the check while
+        // taking a member: the Allow page (GET and POST) and the token form.
+        // A fourth needs a deliberate change here.
         let pinned: Vec<_> = EXEMPT[14..].iter().map(|(_, uri)| *uri).collect();
         assert_eq!(pinned, ["/oauth/authorize", "/settings/claude/tokens"]);
+        assert_eq!(EXEMPT_GET.last(), Some(&"/oauth/authorize"));
+        let source = std::fs::read_to_string("src/controllers/oauth.rs").unwrap()
+            + &std::fs::read_to_string("src/controllers/claude.rs").unwrap();
+        assert_eq!(
+            source.matches("Result<PinnedMember, Response>").count(),
+            1,
+            "the Allow page GET"
+        );
+        assert_eq!(
+            source.matches("PinnedMember(member): PinnedMember").count(),
+            2
+        );
     })
     .await;
 }
@@ -262,6 +294,7 @@ async fn exempt_routes_ignore_the_claim() {
                 .map(|part| if part.starts_with('{') { "1" } else { part })
                 .collect::<Vec<_>>()
                 .join("/");
+            let path = in_org(&t.beta, uri, &path);
             let res = request
                 .method(Method::from_bytes(method.as_bytes()).unwrap(), &path)
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
@@ -269,8 +302,8 @@ async fn exempt_routes_ignore_the_claim() {
                 .form(&json!({}))
                 .await;
             let refused = res.status_code() == 409
-                || header(&res, "HX-Redirect").starts_with("/dashboard?from=")
-                || header(&res, "location").starts_with("/dashboard?from=");
+                || header(&res, "HX-Redirect").contains("/dashboard?from=")
+                || header(&res, "location").contains("/dashboard?from=");
             assert!(!refused, "{method} {uri} was refused by the check");
         }
     })
@@ -286,7 +319,7 @@ async fn the_right_org_goes_through_by_header_and_by_field() {
         let t = tabs(&request, &ctx).await;
         let project = project_in(&ctx, "beta", "Beta launch").await;
         let res = request
-            .post("/tasks")
+            .post(&t.beta.at("/tasks"))
             .as_member(&t.beta)
             .add_header("HX-Request", "true")
             .form(&task_form("By header", project.id, ""))
@@ -296,12 +329,12 @@ async fn the_right_org_goes_through_by_header_and_by_field() {
         let mut form = task_form("By field", project.id, "");
         form["_org"] = t.beta_id.to_string().into();
         let res = request
-            .post("/tasks")
+            .post(&t.beta.at("/tasks"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .form(&form)
             .await;
         assert_eq!(res.status_code(), 303, "{}", res.text());
-        assert!(!header(&res, "location").starts_with("/dashboard?from="));
+        assert!(!header(&res, "location").contains("/dashboard?from="));
 
         for title in ["By header", "By field"] {
             let task = tasks::Entity::find()
@@ -324,7 +357,7 @@ async fn an_acme_tab_cannot_post_a_task_into_beta() {
         let t = tabs(&request, &ctx).await;
         let acme_project = project_in(&ctx, "acme", "Acme launch").await;
         let res = request
-            .post("/tasks")
+            .post(&t.beta.at("/tasks"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("HX-Request", "true")
             .add_header("x-org-id", t.acme_id.to_string())
@@ -342,7 +375,7 @@ async fn a_raw_fetch_with_only_the_org_header_gets_hx_redirect() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = request
-            .post("/notifications/read")
+            .post(&t.beta.at("/notifications/read"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", t.acme_id.to_string())
             .form(&json!({}))
@@ -360,7 +393,7 @@ async fn garbage_claims_are_refused() {
         let t = tabs(&request, &ctx).await;
         for bad in ["abc", "", "12.5", "99999999999999999999"] {
             let res = request
-                .post("/notifications/read")
+                .post(&t.beta.at("/notifications/read"))
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
                 .add_header("x-org-id", bad)
                 .form(&json!({}))
@@ -369,7 +402,7 @@ async fn garbage_claims_are_refused() {
         }
         // Two headers, even if one is right.
         let res = request
-            .post("/notifications/read")
+            .post(&t.beta.at("/notifications/read"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", t.beta_id.to_string())
             .add_header("x-org-id", t.beta_id.to_string())
@@ -378,7 +411,7 @@ async fn garbage_claims_are_refused() {
         assert_sent_home_htmx(&res, "", "two X-Org-Id headers");
 
         let res = request
-            .post("/notifications/read")
+            .post(&t.beta.at("/notifications/read"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .form(&json!({ "_org": "abc" }))
             .await;
@@ -393,14 +426,14 @@ async fn the_refusal_never_echoes_the_raw_claim() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = request
-            .post("/notifications/read")
+            .post(&t.beta.at("/notifications/read"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", "//evil.example")
             .form(&json!({}))
             .await;
         assert_sent_home_htmx(&res, "", "X-Org-Id: //evil.example");
         let res = request
-            .post("/notifications/read")
+            .post(&t.beta.at("/notifications/read"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .form(&json!({ "_org": "//evil" }))
             .await;
@@ -415,7 +448,7 @@ async fn the_content_type_is_matched_by_its_base() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = request
-            .post("/notifications/read")
+            .post(&t.beta.at("/notifications/read"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .content_type("Application/X-WWW-Form-Urlencoded; charset=UTF-8")
             .bytes(format!("_org={}", t.acme_id).into())
@@ -440,13 +473,13 @@ async fn a_large_form_is_still_read() {
             t.beta_id
         );
         let res = request
-            .post("/tasks")
+            .post(&t.beta.at("/tasks"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .content_type("application/x-www-form-urlencoded")
             .bytes(body.into())
             .await;
         assert_eq!(res.status_code(), 303, "{}", res.text());
-        assert!(!header(&res, "location").starts_with("/dashboard?from="));
+        assert!(!header(&res, "location").contains("/dashboard?from="));
         assert_eq!(task_count(&ctx).await, 1);
     })
     .await;
@@ -466,7 +499,7 @@ async fn a_post_without_a_session_is_not_buffered() {
             }))
             .await;
         assert_eq!(res.status_code(), 303);
-        assert!(!header(&res, "location").starts_with("/dashboard?from="));
+        assert!(!header(&res, "location").contains("/dashboard?from="));
         assert!(
             header(&res, "set-cookie").starts_with("auth_token="),
             "signed in"
@@ -484,7 +517,7 @@ async fn a_cross_site_post_is_refused_before_the_layer() {
         // means the origin check answered first. (The 413 for a body over the
         // limit is tested in `src/initializers/current_org.rs`.)
         let res = request
-            .post("/tasks")
+            .post(&t.beta.at("/tasks"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("Origin", "https://evil.example")
             .form(&json!({ "_org": t.acme_id.to_string(), "title": "x" }))
@@ -502,7 +535,7 @@ async fn polling_badges_move_a_stale_tab() {
         let t = tabs(&request, &ctx).await;
         for path in ["/notifications/unread", "/chat/unread"] {
             let res = request
-                .get(path)
+                .get(&t.beta.to(path))
                 .add_header(t.beta.0.clone(), t.beta.1.clone())
                 .add_header("HX-Request", "true")
                 .add_header("x-org-id", t.acme_id.to_string())
@@ -519,7 +552,7 @@ async fn an_htmx_get_without_a_claim_still_works() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = request
-            .get("/notifications/unread")
+            .get(&t.beta.at("/notifications/unread"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("HX-Request", "true")
             .await;
@@ -539,7 +572,7 @@ async fn options_is_treated_like_get() {
             .add_header("x-org-id", t.acme_id.to_string())
             .await;
         assert_ne!(res.status_code(), 409);
-        assert!(!header(&res, "location").starts_with("/dashboard?from="));
+        assert!(!header(&res, "location").contains("/dashboard?from="));
     })
     .await;
 }
@@ -550,7 +583,7 @@ async fn a_page_load_ignores_the_claim() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = request
-            .get("/tasks")
+            .get(&t.beta.at("/tasks"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", t.acme_id.to_string())
             .await;
@@ -592,7 +625,10 @@ async fn a_document_upload_from_another_org_is_refused_and_nothing_is_stored() {
         let t = tabs(&request, &ctx).await;
         let folder = beta_company(&ctx, t.beta_id).await;
         let res = request
-            .post(&format!("/documents/folders/{}/files", folder.id))
+            .post(
+                &t.beta
+                    .at(&format!("/documents/folders/{}/files", folder.id)),
+            )
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("HX-Request", "true")
             .add_header("x-org-id", t.acme_id.to_string())
@@ -612,7 +648,10 @@ async fn a_document_upload_with_the_right_org_goes_through() {
         let t = tabs(&request, &ctx).await;
         let folder = beta_company(&ctx, t.beta_id).await;
         let res = request
-            .post(&format!("/documents/folders/{}/files", folder.id))
+            .post(
+                &t.beta
+                    .at(&format!("/documents/folders/{}/files", folder.id)),
+            )
             .as_member(&t.beta)
             .add_header("HX-Request", "true")
             .multipart(a_pdf())
@@ -630,7 +669,10 @@ async fn a_multipart_post_with_no_header_fails_closed() {
         let t = tabs(&request, &ctx).await;
         let folder = beta_company(&ctx, t.beta_id).await;
         let res = request
-            .post(&format!("/documents/folders/{}/files", folder.id))
+            .post(
+                &t.beta
+                    .at(&format!("/documents/folders/{}/files", folder.id)),
+            )
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .multipart(a_pdf())
             .await;
@@ -676,22 +718,22 @@ async fn acting_checks_against_the_acting_org() {
         let t = tabs(&request, &ctx).await;
         let admin = admin_owning_acme(&request, &ctx, t.acme_id).await;
         let acting = acting_in(&admin, t.beta_id);
-        // A tab drawn for their own org, while they are inside Beta.
+        // A page drawn for their own org, posting to Beta's address.
         let res = request
-            .post("/notifications/read")
+            .post("/o/beta/notifications/read")
             .add_header("cookie", acting.clone())
             .add_header("x-org-id", t.acme_id.to_string())
             .form(&json!({}))
             .await;
         assert_sent_home_htmx(&res, &t.acme_id.to_string(), "own org while acting");
         let res = request
-            .post("/notifications/read")
+            .post("/o/beta/notifications/read")
             .add_header("cookie", acting)
             .add_header("x-org-id", t.beta_id.to_string())
             .form(&json!({}))
             .await;
         assert_eq!(res.status_code(), 303);
-        assert!(!header(&res, "location").starts_with("/dashboard?from="));
+        assert!(!header(&res, "location").contains("/dashboard?from="));
     })
     .await;
 }
@@ -711,7 +753,7 @@ async fn the_chat_socket_upgrade_is_not_checked() {
             .await
             .unwrap();
         let res = request
-            .get(&format!("/chat/{}/ws", general.id))
+            .get(&t.beta.at(&format!("/chat/{}/ws", general.id)))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", t.acme_id.to_string())
             .await;
@@ -757,7 +799,7 @@ async fn the_token_form_keeps_its_own_pin() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = request
-            .post("/settings/claude/tokens")
+            .post(&t.beta.at("/settings/claude/tokens"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", t.acme_id.to_string())
             .form(&json!({ "name": "Laptop", "org_id": t.beta_id.to_string() }))
@@ -766,7 +808,7 @@ async fn the_token_form_keeps_its_own_pin() {
         assert!(res.text().contains("collab_pat_"));
 
         let res = request
-            .post("/settings/claude/tokens")
+            .post(&t.beta.at("/settings/claude/tokens"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .add_header("x-org-id", t.beta_id.to_string())
             .form(&json!({ "name": "Typed name", "org_id": t.acme_id.to_string() }))
@@ -787,14 +829,14 @@ async fn the_token_form_keeps_its_own_pin() {
 
 async fn home_from(request: &TestServer, who: &TestMember, from: &str) -> axum_test::TestResponse {
     request
-        .get(&format!("/dashboard?from={from}"))
+        .get(&who.at(&format!("/dashboard?from={from}")))
         .add_header(who.0.clone(), who.1.clone())
         .await
 }
 
 #[tokio::test]
 #[serial]
-async fn home_names_the_org_the_tab_was_showing() {
+async fn home_notice_for_an_active_org_has_no_back_link() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
         let res = home_from(&request, &t.beta, &t.acme_id.to_string()).await;
@@ -803,12 +845,12 @@ async fn home_names_the_org_the_tab_was_showing() {
         let page = res.text();
         let notice = notice(&page);
         assert!(
-            notice.contains("This tab was showing Acme. You're now in Beta."),
+            notice.contains("Your last change wasn't saved."),
             "{notice}"
         );
-        assert!(notice.contains("Nothing was saved."));
-        assert!(notice.contains(&format!(r#"action="/orgs/{}/switch""#, t.acme_id)));
-        assert!(notice.contains("Back to Acme"));
+        assert!(notice.contains("The app was updated while this tab was open"));
+        assert!(!notice.contains("Back to") && !notice.contains("/switch"));
+        assert!(!notice.contains("Acme"), "it needs no org names");
     })
     .await;
 }
@@ -831,7 +873,7 @@ fn notice(page: &str) -> &str {
 fn assert_nameless(page: &str) {
     let notice = notice(page);
     assert!(
-        notice.contains("This tab was showing another organisation."),
+        notice.contains("Your last change wasn't saved."),
         "{notice}"
     );
     assert!(
@@ -904,7 +946,7 @@ async fn home_offers_no_back_after_acting_outside_your_orgs() {
         let admin = admin_owning_acme(&request, &ctx, t.acme_id).await;
         // A tab drawn while acting in Beta, after the admin went back to Acme.
         let page = request
-            .get(&format!("/dashboard?from={}", t.beta_id))
+            .get(&format!("/o/acme/dashboard?from={}", t.beta_id))
             .add_header(admin.0.clone(), admin.1.clone())
             .await
             .text();
@@ -929,15 +971,16 @@ async fn home_with_an_empty_or_garbage_from_shows_the_nameless_notice() {
 
 #[tokio::test]
 #[serial]
-async fn home_from_the_current_org_shows_no_notice() {
+async fn home_from_the_current_org_shows_the_nameless_notice() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
+        // A refused bare write from a Beta tab lands here with `?from=`.
         let page = home_from(&request, &t.beta, &t.beta_id.to_string())
             .await
             .text();
-        assert!(!page.contains("data-stale-notice"));
+        assert_nameless(&page);
         let page = request
-            .get("/dashboard")
+            .get(&t.beta.at("/dashboard"))
             .add_header(t.beta.0.clone(), t.beta.1.clone())
             .await
             .text();

@@ -83,7 +83,7 @@ erDiagram
     organisations {
         bigint id PK
         string name
-        string slug UK "used in the join link"
+        string slug UK "used in the join link and every app address"
         string timezone "IANA, default Europe/London"
         bigint created_by_id FK "nullable, SET NULL"
     }
@@ -347,7 +347,7 @@ erDiagram
         bigint actor_id FK "nullable, SET NULL"
         string kind "mention, assigned, note, owner, project, reply"
         text body "headline, newline, excerpt"
-        string link "path inside the app"
+        string link "path inside its organisation"
         timestamptz read_at "nullable"
         timestamptz emailed_at "nullable"
     }

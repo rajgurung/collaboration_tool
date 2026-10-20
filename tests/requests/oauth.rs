@@ -71,7 +71,7 @@ fn authorize_fields<'a>(client_id: &'a str, redirect: &'a str) -> Vec<(&'a str, 
     ]
 }
 
-fn authorize_url(client_id: &str, redirect: &str) -> String {
+pub(super) fn authorize_url(client_id: &str, redirect: &str) -> String {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .extend_pairs(authorize_fields(client_id, redirect))
         .finish();
@@ -396,7 +396,7 @@ async fn bad_clients_and_redirects_get_a_page_not_a_redirect() {
         let wrong_resource = authorize_url(&client_id, CLAUDE)
             .replace("localhost%3A5150%2Fmcp", "elsewhere.example%2Fmcp");
         let res = request
-            .get(&wrong_resource)
+            .get(&alice.to(&wrong_resource))
             .add_header(alice.0.clone(), alice.1.clone())
             .await;
         assert_eq!(res.status_code(), 302);
@@ -732,7 +732,7 @@ async fn revoking_a_connector_ends_every_token_in_it() {
         assert!(works(&request, access).await);
 
         let page = request
-            .get("/settings/claude")
+            .get(&alice.at("/settings/claude"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -750,7 +750,7 @@ async fn revoking_a_connector_ends_every_token_in_it() {
             .unwrap()
             .grant_id;
         let res = request
-            .post(&format!("/settings/claude/grants/{grant}/revoke"))
+            .post(&alice.at(&format!("/settings/claude/grants/{grant}/revoke")))
             .as_member(&alice)
             .await;
         assert_eq!(res.status_code(), 303);
@@ -819,7 +819,7 @@ async fn the_allow_page_pins_the_org() {
             shown_org_id(&request, &cookie, &client_id).await,
             in_acme.organisation_id.to_string()
         );
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         assert_eq!(
             shown_org_id(&request, &in_beta_cookie, &client_id).await,
             in_beta.organisation_id.to_string()
@@ -838,7 +838,7 @@ async fn allow_after_a_switch_is_refused() {
         assert_eq!(shown, in_acme.organisation_id.to_string());
 
         // Another tab switched this browser to Beta.
-        let in_beta_cookie = with_org(&cookie, in_beta.organisation_id);
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         let res = post_decision(
             &request,
             &in_beta_cookie,

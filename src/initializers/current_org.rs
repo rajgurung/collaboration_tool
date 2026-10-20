@@ -1,10 +1,11 @@
 //! Two jobs for the organisation a request works in.
 //!
-//! **Clears a stale `current_org` cookie.** `CurrentMember` decides whether the
-//! cookie still points at an organisation the person is active in, but an
-//! extractor cannot set cookies. So this layer puts a [`StaleCurrentOrg`] flag
-//! in every request, and when `CurrentMember` raises it, adds a clearing
-//! `Set-Cookie` to the response, whatever it is.
+//! **Sets the `current_org` cookie.** The cookie remembers the last
+//! organisation, for bare addresses and sign-in. `CurrentMember` decides
+//! when it should be cleared (it names an org the person isn't active in) or
+//! moved (a page load at `/o/{slug}/`), but an extractor cannot set cookies.
+//! So this layer puts an [`OrgCookie`] slot in every request, and adds the
+//! matching `Set-Cookie` to the response, whatever it is.
 //!
 //! **Reads the tab's org claim.** Every app page says which organisation it
 //! was drawn for, and sends that back as an `X-Org-Id` header (HTMX and the
@@ -12,10 +13,7 @@
 //! can't read a form body without consuming it, so this layer lifts the claim
 //! into an [`OrgClaim`] extension, and puts the body back for `Form` to read.
 //! `CurrentMember` compares it with the org it resolved.
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use axum::{
@@ -37,7 +35,7 @@ use loco_rs::{
 
 use crate::extractors::{
     current_member::{ORG_FIELD, ORG_HEADER},
-    session::{cleared_current_org_cookie, SESSION_COOKIE},
+    session::{cleared_current_org_cookie, current_org_cookie, SESSION_COOKIE},
 };
 
 /// The largest form body the layer reads. The same as Loco's default payload
@@ -45,18 +43,38 @@ use crate::extractors::{
 /// accepts or refuses a body differently from `Form`.
 pub const FORM_BODY_LIMIT: usize = 2_000_000;
 
-/// Raised by `CurrentMember` when the request's `current_org` cookie did not
-/// lead to an active membership.
+/// What the response does to the `current_org` cookie. Filled in by
+/// `CurrentMember`; nothing unless it says so.
 #[derive(Clone, Default)]
-pub struct StaleCurrentOrg(Arc<AtomicBool>);
+pub struct OrgCookie(Arc<Mutex<CookieChange>>);
 
-impl StaleCurrentOrg {
-    pub fn raise(&self) {
-        self.0.store(true, Ordering::Relaxed);
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CookieChange {
+    #[default]
+    Nothing,
+    Clear,
+    Remember(i64),
+}
+
+impl OrgCookie {
+    /// The cookie named an org the person isn't active in.
+    pub fn clear(&self) {
+        self.set(CookieChange::Clear);
     }
 
-    fn is_raised(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+    /// Remember `org_id` as the last organisation.
+    pub fn remember(&self, org_id: i64) {
+        self.set(CookieChange::Remember(org_id));
+    }
+
+    fn set(&self, change: CookieChange) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = change;
+        }
+    }
+
+    fn take(&self) -> CookieChange {
+        self.0.lock().map(|slot| *slot).unwrap_or_default()
     }
 }
 
@@ -81,20 +99,29 @@ impl Initializer for CurrentOrgInitializer {
     async fn after_routes(&self, router: AxumRouter, ctx: &AppContext) -> Result<AxumRouter> {
         let clear = HeaderValue::from_str(&cleared_current_org_cookie(ctx)?.to_string())
             .map_err(|_| Error::string("invalid cookie header"))?;
+        let ctx = ctx.clone();
         Ok(
             router.layer(middleware::from_fn(move |req: Request, next: Next| {
                 let clear = clear.clone();
+                let ctx = ctx.clone();
                 async move {
                     let (mut req, claim) = match read_claim(req).await {
                         Ok(read) => read,
                         Err(status) => return status.into_response(),
                     };
-                    let stale = StaleCurrentOrg::default();
-                    req.extensions_mut().insert(stale.clone());
+                    let slot = OrgCookie::default();
+                    req.extensions_mut().insert(slot.clone());
                     req.extensions_mut().insert(claim);
                     let mut response = next.run(req).await;
-                    if stale.is_raised() {
-                        response.headers_mut().append(SET_COOKIE, clear);
+                    let set = match slot.take() {
+                        CookieChange::Nothing => None,
+                        CookieChange::Clear => Some(clear),
+                        CookieChange::Remember(id) => current_org_cookie(&ctx, id)
+                            .ok()
+                            .and_then(|c| HeaderValue::from_str(&c.to_string()).ok()),
+                    };
+                    if let Some(set) = set {
+                        response.headers_mut().append(SET_COOKIE, set);
                     }
                     response
                 }

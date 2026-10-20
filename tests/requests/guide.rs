@@ -24,7 +24,7 @@ async fn the_owners_checklist_ticks_itself() {
             async move {
                 compact(
                     &request
-                        .get("/dashboard")
+                        .get(&cookie.at("/dashboard"))
                         .add_header(cookie.0.clone(), cookie.1.clone())
                         .await
                         .text(),
@@ -41,7 +41,7 @@ async fn the_owners_checklist_ticks_itself() {
         approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .form(&task_form("Book the venue", project.id, ""))
             .await;
@@ -52,7 +52,7 @@ async fn the_owners_checklist_ticks_itself() {
             .await
             .unwrap();
         request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "Hello team, welcome @bob" }))
             .await;
@@ -72,7 +72,7 @@ async fn people_who_join_get_their_own_steps() {
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         let page = compact(
             &request
-                .get("/dashboard")
+                .get(&bob.at("/dashboard"))
                 .add_header(bob.0.clone(), bob.1.clone())
                 .await
                 .text(),
@@ -95,7 +95,7 @@ async fn closing_the_guide_is_remembered_until_brought_back() {
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
 
         let res = request
-            .post("/guide/dismiss")
+            .post(&alice.at("/guide/dismiss"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .await;
@@ -110,22 +110,25 @@ async fn closing_the_guide_is_remembered_until_brought_back() {
             .contains("Guide closed"));
 
         let home = request
-            .get("/dashboard")
+            .get(&alice.at("/dashboard"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(!home.contains(r#"id="guide""#), "stays closed");
         let bobs = request
-            .get("/dashboard")
+            .get(&bob.at("/dashboard"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(bobs.contains(r#"id="guide""#), "closing is per person");
 
-        let res = request.post("/guide/show").as_member(&alice).await;
+        let res = request
+            .post(&alice.at("/guide/show"))
+            .as_member(&alice)
+            .await;
         assert_eq!(res.status_code(), 303);
         let home = request
-            .get("/dashboard")
+            .get(&alice.at("/dashboard"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -140,20 +143,20 @@ async fn the_welcome_shows_once() {
     request::<App, _, _>(|request, _ctx| async move {
         let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let first = request
-            .get("/dashboard")
+            .get(&alice.at("/dashboard"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(first.contains("data-welcome") && first.contains("Welcome to Acme"));
 
         let res = request
-            .post("/guide/welcomed")
+            .post(&alice.at("/guide/welcomed"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
         let again = request
-            .get("/dashboard")
+            .get(&alice.at("/dashboard"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();

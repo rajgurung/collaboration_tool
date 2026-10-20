@@ -108,7 +108,7 @@ async fn add(
         form.push((key, value.clone()));
     }
     request
-        .post(&format!("/documents/folders/{folder_id}/logins"))
+        .post(&cookie.at(&format!("/documents/folders/{folder_id}/logins")))
         .as_member(cookie)
         .form(&form)
         .await
@@ -126,7 +126,11 @@ async fn post(
     path: &str,
     form: &[(&str, &str)],
 ) -> axum_test::TestResponse {
-    request.post(path).as_member(cookie).form(&form).await
+    request
+        .post(&cookie.to(path))
+        .as_member(cookie)
+        .form(&form)
+        .await
 }
 
 async fn unlock(
@@ -191,7 +195,9 @@ async fn owners_add_logins_and_the_database_holds_no_plaintext() {
         let login = only_login(&ctx).await;
         assert_eq!(
             res.headers()["location"],
-            format!("/documents/logins/{}", login.id).as_str()
+            acme.alice
+                .at(&format!("/documents/logins/{}", login.id))
+                .as_str()
         );
         assert_eq!(
             login.url,
@@ -222,7 +228,11 @@ async fn owners_add_logins_and_the_database_holds_no_plaintext() {
 
         // The folder lists it as a login, with its username and never the password.
         let page = request
-            .get(&format!("/documents/folders/{}", acme.folder.id))
+            .get(
+                &acme
+                    .bob
+                    .at(&format!("/documents/folders/{}", acme.folder.id)),
+            )
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
             .await
             .text();
@@ -231,7 +241,7 @@ async fn owners_add_logins_and_the_database_holds_no_plaintext() {
         assert!(page.contains("1 login"));
         assert!(!page.contains(SECRET));
         let list = request
-            .get("/documents")
+            .get(&acme.bob.at("/documents"))
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
             .await
             .text();
@@ -407,7 +417,7 @@ async fn showing_a_password_needs_an_unlock_from_the_same_session() {
 
         // Another sign-in of the same person is not unlocked.
         let other = login(&request, "alice@example.com", USER_PASSWORD).await;
-        let other = TestMember::new(other, acme.alice.org_id);
+        let other = TestMember::new(other, acme.alice.org_id, acme.alice.slug.clone());
         assert_eq!(reveal(&request, &other, id).await.status_code(), 423);
 
         // The unlock runs out.
@@ -432,6 +442,7 @@ async fn showing_a_password_needs_an_unlock_from_the_same_session() {
         let fresh = TestMember::new(
             super::prepare_data::cookie_from(&res.headers().clone()),
             acme.alice.org_id,
+            acme.alice.slug.clone(),
         );
         assert_eq!(reveal(&request, &fresh, id).await.status_code(), 423);
         assert_eq!(events(&ctx, "sign_out_everywhere").await.len(), 1);
@@ -450,7 +461,7 @@ async fn only_owners_admins_and_named_members_can_see_secrets() {
 
         // bob is not named: he sees the entry, not the password.
         let page = request
-            .get(&format!("/documents/logins/{id}"))
+            .get(&acme.bob.at(&format!("/documents/logins/{id}")))
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
             .await
             .text();
@@ -552,7 +563,7 @@ async fn the_log_cannot_be_changed_or_cleared() {
 
         // The activity page is for owners only.
         let page = request
-            .get("/documents/activity")
+            .get(&acme.alice.at("/documents/activity"))
             .add_header(acme.alice.0.clone(), acme.alice.1.clone())
             .await;
         assert_eq!(page.status_code(), 200);
@@ -564,7 +575,7 @@ async fn the_log_cannot_be_changed_or_cleared() {
         assert!(page.contains("<strong>carol</strong> deleted <strong>Companies House</strong>"));
         for cookie in [&acme.carol, &acme.bob] {
             let res = request
-                .get("/documents/activity")
+                .get(&cookie.at("/documents/activity"))
                 .add_header(cookie.0.clone(), cookie.1.clone())
                 .await;
             assert_eq!(res.status_code(), 403);
@@ -597,7 +608,7 @@ async fn five_wrong_app_passwords_lock_the_account_until_a_reset() {
         assert!(carol.is_locked());
 
         // Her sessions ended, the right password no longer helps, and the owner was told once.
-        let res = request.get("/documents").add_header(acme.carol.0.clone(), acme.carol.1.clone()).await;
+        let res = request.get(&acme.carol.at("/documents")).add_header(acme.carol.0.clone(), acme.carol.1.clone()).await;
         assert_eq!(res.status_code(), 303);
         assert_eq!(unlock(&request, &acme.carol, USER_PASSWORD).await.status_code(), 303);
         let res = request
@@ -623,6 +634,7 @@ async fn five_wrong_app_passwords_lock_the_account_until_a_reset() {
         let carol = TestMember::new(
             login(&request, "carol@example.com", "new-password-1").await,
             acme.carol.org_id,
+            acme.carol.slug.clone(),
         );
         assert_eq!(unlock(&request, &carol, "new-password-1").await.status_code(), 200);
         assert_eq!(reveal(&request, &carol, id).await.status_code(), 200);
@@ -739,9 +751,9 @@ async fn removing_someone_lists_the_logins_to_change() {
         )
         .await;
         let to = format!("/members/{}/rotate?removed=1", dave_m.id);
-        assert_eq!(res.headers()["location"], to.as_str());
+        assert_eq!(res.headers()["location"], acme.carol.at(&to).as_str());
         let page = request
-            .get(&to)
+            .get(&acme.carol.to(&to))
             .add_header(acme.carol.0.clone(), acme.carol.1.clone())
             .await
             .text();
@@ -757,12 +769,12 @@ async fn removing_someone_lists_the_logins_to_change() {
         // Owners see it too; other members do not.
         let path = format!("/members/{}/rotate", dave_m.id);
         let res = request
-            .get(&path)
+            .get(&acme.alice.to(&path))
             .add_header(acme.alice.0.clone(), acme.alice.1.clone())
             .await;
         assert_eq!(res.status_code(), 200);
         let res = request
-            .get(&path)
+            .get(&acme.bob.to(&path))
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
             .await;
         assert_eq!(res.status_code(), 403);
@@ -781,7 +793,7 @@ async fn removing_someone_lists_the_logins_to_change() {
         )
         .await;
         let page = request
-            .get(&format!("/members/{}/rotate", carol_m.id))
+            .get(&acme.alice.at(&format!("/members/{}/rotate", carol_m.id)))
             .add_header(acme.alice.0.clone(), acme.alice.1.clone())
             .await
             .text();
@@ -803,7 +815,7 @@ async fn removing_someone_lists_the_logins_to_change() {
         )
         .await;
         let page = request
-            .get(&format!("/members/{}/rotate", bob_m.id))
+            .get(&acme.alice.at(&format!("/members/{}/rotate", bob_m.id)))
             .add_header(acme.alice.0.clone(), acme.alice.1.clone())
             .await
             .text();
@@ -858,7 +870,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
             "/documents/activity".to_string(),
         ] {
             let res = request
-                .get(&path)
+                .get(&gina.to(&path))
                 .add_header(gina.0.clone(), gina.1.clone())
                 .await;
             if path.contains("/logins/") {
@@ -871,7 +883,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
             let res = request.get(&path).await;
             assert_eq!(res.status_code(), 303, "logged out GET {path}");
             let res = request
-                .get(&path)
+                .get(&format!("/o/acme{path}"))
                 .add_header("cookie", acting.clone())
                 .await;
             assert_eq!(res.status_code(), 403, "acting GET {path}");
@@ -891,7 +903,11 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
             ("field", "password"),
         ];
         for path in &posts {
-            let res = request.post(path).as_member(&gina).form(&form).await;
+            let res = request
+                .post(&gina.to(path))
+                .as_member(&gina)
+                .form(&form)
+                .await;
             if !path.ends_with("/unlock") {
                 assert_eq!(res.status_code(), 404, "other org POST {path}");
             }
@@ -902,7 +918,7 @@ async fn login_routes_need_your_own_membership_of_the_organisation() {
                 "logged out POST {path}"
             );
             let res = request
-                .post(path)
+                .post(&format!("/o/acme{path}"))
                 .add_header("cookie", acting.clone())
                 .add_header("x-org-id", acme.org.id.to_string())
                 .form(&form)
@@ -923,7 +939,11 @@ async fn the_logins_folder_takes_no_files() {
     request::<App, _, _>(|request, ctx| async move {
         let acme = acme(&request, &ctx).await;
         let res = request
-            .post(&format!("/documents/folders/{}/files", acme.folder.id))
+            .post(
+                &acme
+                    .alice
+                    .at(&format!("/documents/folders/{}/files", acme.folder.id)),
+            )
             .as_member(&acme.alice)
             .multipart(
                 axum_test::multipart::MultipartForm::new().add_part(
@@ -945,7 +965,11 @@ async fn the_logins_folder_takes_no_files() {
 
         // No picker, drop zone or hint; owners are offered a login, members are told who adds them.
         let page = request
-            .get(&format!("/documents/folders/{}", acme.folder.id))
+            .get(
+                &acme
+                    .alice
+                    .at(&format!("/documents/folders/{}", acme.folder.id)),
+            )
             .add_header(acme.alice.0.clone(), acme.alice.1.clone())
             .await
             .text();
@@ -955,7 +979,11 @@ async fn the_logins_folder_takes_no_files() {
         assert!(!page.contains("data-pick"));
         assert!(page.contains("Add a login"));
         let page = request
-            .get(&format!("/documents/folders/{}", acme.folder.id))
+            .get(
+                &acme
+                    .bob
+                    .at(&format!("/documents/folders/{}", acme.folder.id)),
+            )
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
             .await
             .text();
@@ -1018,6 +1046,7 @@ async fn an_old_cookie_without_a_sign_in_id_gets_one_when_it_unlocks() {
                 axum::http::HeaderValue::from_str(&format!("auth_token={old}")).unwrap(),
             ),
             acme.alice.org_id,
+            acme.alice.slug.clone(),
         );
         assert_eq!(reveal(&request, &old, id).await.status_code(), 423);
         let res = unlock(&request, &old, USER_PASSWORD).await;
@@ -1025,6 +1054,7 @@ async fn an_old_cookie_without_a_sign_in_id_gets_one_when_it_unlocks() {
         let new = TestMember::new(
             super::prepare_data::cookie_from(&res.headers().clone()),
             acme.alice.org_id,
+            acme.alice.slug.clone(),
         );
         let alice = users::Model::find_by_email(&ctx.db, "alice@example.com")
             .await
@@ -1084,7 +1114,7 @@ async fn editing_a_login_keeps_what_removed_people_could_see() {
             .unwrap();
         assert_eq!(named, vec![dave_id]);
         let page = request
-            .get(&format!("/members/{}/rotate", dave_m.id))
+            .get(&acme.alice.at(&format!("/members/{}/rotate", dave_m.id)))
             .add_header(acme.alice.0.clone(), acme.alice.1.clone())
             .await
             .text();
@@ -1114,14 +1144,17 @@ async fn the_rotate_list_stays_inside_its_organisation() {
         let path = format!("/members/{}/rotate", dave_m.id);
         let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
         let res = request
-            .get(&path)
+            .get(&gina.to(&path))
             .add_header(gina.0.clone(), gina.1.clone())
             .await;
         assert_eq!(res.status_code(), 404);
         assert!(!res.text().contains("dave"));
         let admin = super::admin::super_admin_cookie(&request, &ctx).await;
         let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.org.id);
-        let res = request.get(&path).add_header("cookie", acting).await;
+        let res = request
+            .get(&format!("/o/acme{path}"))
+            .add_header("cookie", acting)
+            .await;
         assert_eq!(res.status_code(), 403);
         assert_eq!(request.get(&path).await.status_code(), 303, "logged out");
     })
@@ -1271,7 +1304,7 @@ async fn a_creator_resetting_their_password_gets_no_owner_notice_from_their_own_
         add(&request, &acme.alice, acme.folder.id, &[]).await;
 
         let res = request
-            .post("/orgs")
+            .post(&acme.alice.at("/orgs"))
             .as_member(&acme.alice)
             .form(&[("organisation_name", "Lumen Café"), ("name", "ali")])
             .await;
@@ -1286,7 +1319,7 @@ async fn a_creator_resetting_their_password_gets_no_owner_notice_from_their_own_
             .find(|s| s.folder.name == "Logins")
             .unwrap()
             .folder;
-        let in_lumen = super::multi_org::with_org(&acme.alice, lumen.id);
+        let in_lumen = super::multi_org::with_org(&ctx, &acme.alice, lumen.id).await;
         assert_eq!(
             add(&request, &in_lumen, lumen_logins.id, &[]).await.status_code(),
             303

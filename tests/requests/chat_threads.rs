@@ -35,10 +35,10 @@ pub(super) async fn reply(
     body: &str,
 ) -> axum_test::TestResponse {
     request
-        .post(&format!(
+        .post(&who.at(&format!(
             "{}/replies",
             thread_path(conversation_id, parent_id)
-        ))
+        )))
         .as_member(who)
         .form(&serde_json::json!({ "body": body }))
         .await
@@ -55,7 +55,7 @@ async fn find(ctx: &AppContext, body: &str) -> messages::Model {
 
 async fn get(request: &TestServer, who: &TestMember, path: &str) -> axum_test::TestResponse {
     request
-        .get(path)
+        .get(&who.to(path))
         .add_header(who.0.clone(), who.1.clone())
         .await
 }
@@ -82,7 +82,7 @@ async fn replies_stay_out_of_the_main_feed() {
         assert_eq!(res.status_code(), 303);
         assert_eq!(
             res.headers()["location"],
-            thread_path(general.id, parent.id).as_str()
+            bob.at(&thread_path(general.id, parent.id)).as_str()
         );
         let saved = find(&ctx, "Bowls are up 8%").await;
         assert_eq!(saved.parent_id, Some(parent.id));
@@ -107,7 +107,7 @@ async fn replies_stay_out_of_the_main_feed() {
             assert!(html.contains("<b>1 reply</b>"), "{html}");
             assert!(
                 html.contains(&format!(
-                    r#"href="/chat/{}/threads/{}""#,
+                    r#"href="/o/acme/chat/{}/threads/{}""#,
                     general.id, parent.id
                 )),
                 "{html}"
@@ -115,7 +115,7 @@ async fn replies_stay_out_of_the_main_feed() {
         }
         // Reply in thread on the toolbar of a main-feed message.
         assert!(page.contains(&format!(
-            r#"href="/chat/{}/threads/{}?reply=1""#,
+            r#"href="/o/acme/chat/{}/threads/{}?reply=1""#,
             general.id, parent.id
         )));
     })
@@ -200,19 +200,19 @@ async fn the_thread_page_shows_the_parent_and_replies_in_order() {
         assert!(at(">2 replies<") < at("fitters&#39; invoice"));
         assert!(at("fitters&#39; invoice") < at("Not yet"));
         assert!(page.contains(&format!(
-            r#"action="/chat/{}/threads/{}/replies""#,
+            r#"action="/o/acme/chat/{}/threads/{}/replies""#,
             general.id, parent.id
         )));
         assert!(page.contains(&format!(
-            r#"ws-connect="/chat/{}/ws?thread={}""#,
+            r#"ws-connect="/o/acme/chat/{}/ws?thread={}""#,
             general.id, parent.id
         )));
         assert!(page.contains(&format!(
-            r#"data-chat-feed-url="/chat/{}/threads/{}/feed""#,
+            r#"data-chat-feed-url="/o/acme/chat/{}/threads/{}/feed""#,
             general.id, parent.id
         )));
         assert!(page.contains(&format!(
-            r#"href="/chat/{}#message-{}" class="icon-btn" data-thread-back aria-label="Back to #general""#,
+            r#"href="/o/acme/chat/{}#message-{}" class="icon-btn" data-thread-back aria-label="Back to #general""#,
             general.id, parent.id
         )));
         assert!(page.contains("# general"));
@@ -223,7 +223,7 @@ async fn the_thread_page_shows_the_parent_and_replies_in_order() {
         assert!(!page.contains("Reply in thread</a>"), "{page}");
         // Sheets opened here leave out Reply in thread.
         assert!(page.contains(&format!(
-            r#"data-actions-url="/chat/{}/messages/{}/actions?thread=1""#,
+            r#"data-actions-url="/o/acme/chat/{}/messages/{}/actions?thread=1""#,
             general.id, parent.id
         )));
 
@@ -254,7 +254,7 @@ async fn the_sheet_offers_reply_in_thread_on_top_level_messages_only() {
             |id: i64, query: &str| format!("/chat/{}/messages/{id}/actions{query}", general.id);
         let sheet = get(&request, &alice, &actions(parent.id, "")).await.text();
         assert!(sheet.contains(&format!(
-            r#"href="/chat/{}/threads/{}?reply=1""#,
+            r#"href="/o/acme/chat/{}/threads/{}?reply=1""#,
             general.id, parent.id
         )));
         assert!(!sheet.contains("1 reply"));
@@ -351,7 +351,7 @@ async fn threads_need_a_member_and_a_top_level_message_in_the_conversation() {
             let posted = if case == "pending" { 409 } else { status };
             assert_eq!(res.status_code(), posted, "POST reply: {case}");
             let res = request
-                .get(&format!("/chat/{conversation_id}/ws?thread={parent_id}"))
+                .get(&who.at(&format!("/chat/{conversation_id}/ws?thread={parent_id}")))
                 .add_header(who.0.clone(), who.1.clone())
                 .add_header("Origin", "http://localhost:5150")
                 .await;
@@ -368,7 +368,7 @@ async fn threads_need_a_member_and_a_top_level_message_in_the_conversation() {
             200
         );
         let socket = request
-            .get(&format!("/chat/{}/ws?thread={}", group.id, in_group.id))
+            .get(&alice.at(&format!("/chat/{}/ws?thread={}", group.id, in_group.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .add_header("Origin", "http://localhost:5150")
             .await;
@@ -404,7 +404,7 @@ async fn a_missing_thread_and_a_private_one_get_the_same_page() {
             assert!(res.text().contains(MISSING), "{}", res.text());
             assert!(res
                 .text()
-                .contains(r#"href="/chat" class="btn btn-secondary">Go to Chat"#));
+                .contains(r#"href="/o/acme/chat" class="btn btn-secondary">Go to Chat"#));
             assert!(!res.text().contains("Salaries"));
             assert!(!res.text().contains("composer"));
         }
@@ -483,7 +483,7 @@ async fn empty_and_overlong_replies_are_rejected() {
         let parent = post(&request, &ctx, &alice, general.id, "Top").await;
         for body in ["   ".to_string(), "x".repeat(1001)] {
             let res = request
-                .post(&format!("{}/replies", thread_path(general.id, parent.id)))
+                .post(&alice.at(&format!("{}/replies", thread_path(general.id, parent.id))))
                 .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))
@@ -498,7 +498,7 @@ async fn empty_and_overlong_replies_are_rejected() {
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
         for body in ["Done ✅🎉", family] {
             let res = request
-                .post(&format!("{}/replies", thread_path(general.id, parent.id)))
+                .post(&alice.at(&format!("{}/replies", thread_path(general.id, parent.id))))
                 .as_member(&alice)
                 .add_header("HX-Request", "true")
                 .form(&serde_json::json!({ "body": body }))
@@ -552,10 +552,10 @@ async fn http_replies_publish_a_reply_event_and_no_message() {
         // Reactions on a reply carry its parent, so they stay in the thread.
         let child = find(&ctx, "Live reply").await;
         request
-            .post(&format!(
+            .post(&alice.at(&format!(
                 "/chat/{}/messages/{}/reactions",
                 general.id, child.id
-            ))
+            )))
             .as_member(&alice)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
@@ -577,10 +577,10 @@ async fn deleting_the_parents_author_removes_the_thread() {
         reply(&request, &alice, general.id, parent.id, "Alice's reply").await;
         let child = find(&ctx, "Alice's reply").await;
         request
-            .post(&format!(
+            .post(&alice.at(&format!(
                 "/chat/{}/messages/{}/reactions",
                 general.id, child.id
-            ))
+            )))
             .as_member(&alice)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
@@ -613,7 +613,7 @@ async fn sockets_get_reply_lines_and_replies() {
         .unwrap()
         .unwrap();
     let mut request = format!(
-        "ws://{addr}/chat/{}/ws?thread={}",
+        "ws://{addr}/o/acme/chat/{}/ws?thread={}",
         hello.conversation_id, hello.id
     )
     .into_client_request()
@@ -691,6 +691,13 @@ async fn sockets_get_reply_lines_and_replies() {
     );
     assert!(line.contains("<b>1 reply</b>"), "{line}");
     assert!(!line.contains("From the thread"), "{line}");
+    assert!(
+        line.contains(&format!(
+            r#"href="/o/acme/chat/{}/threads/{}""#,
+            hello.conversation_id, hello.id
+        )),
+        "the broadcast reply line links inside the socket's org: {line}"
+    );
     let saved = messages::Entity::find()
         .filter(messages::Column::Body.eq("From the thread"))
         .one(&ctx.db)

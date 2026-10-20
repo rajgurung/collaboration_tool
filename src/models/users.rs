@@ -4,7 +4,7 @@ use loco_rs::{auth::jwt, hash, prelude::*};
 use sea_orm::{sea_query::ExprTrait, TransactionSession};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 pub use super::_entities::users::{self, ActiveModel, Entity, Model};
@@ -497,20 +497,6 @@ impl Model {
         Self::end_unlock_where(db, user_id, only).await
     }
 
-    /// Ends an unlock of logins only if this sign-in made it, so a switch in
-    /// one browser leaves an unlock in another alone. One `UPDATE`.
-    ///
-    /// # Errors
-    /// On database errors.
-    pub async fn end_unlock_for_session<C: ConnectionTrait>(
-        db: &C,
-        user_id: i64,
-        session_id: &str,
-    ) -> ModelResult<()> {
-        let only = Condition::all().add(users::Column::SecretsUnlockedSid.eq(session_id));
-        Self::end_unlock_where(db, user_id, only).await
-    }
-
     async fn end_unlock_where<C: ConnectionTrait>(
         db: &C,
         user_id: i64,
@@ -652,20 +638,6 @@ impl Model {
     /// organisation, on every device: a removal.
     pub fn close_in_org(ctx: &AppContext, org_id: i64, user_id: i64) {
         Self::close(ctx, CloseScope::Org { org_id, user_id });
-    }
-
-    /// Closes the chat sockets and notification streams of one browser's
-    /// sign-in: a switch or a create. With no sign-in id (a cookie from
-    /// before sign-in ids) it closes all of them, as before.
-    pub fn close_in_browser(ctx: &AppContext, user_id: i64, session_id: Option<&str>) {
-        let scope = match session_id {
-            Some(sid) => CloseScope::Browser {
-                user_id,
-                session_id: Arc::from(sid),
-            },
-            None => CloseScope::Account { user_id },
-        };
-        Self::close(ctx, scope);
     }
 
     fn close(ctx: &AppContext, scope: CloseScope) {

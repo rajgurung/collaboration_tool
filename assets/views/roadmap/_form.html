@@ -1,6 +1,7 @@
+{% set action = org_url(path="/roadmap/projects/" ~ project_id) if project_id else org_url(path="/roadmap/projects") %}
 <form id="project-form" method="post" data-close-on-success
-      action="{% if project_id %}/roadmap/projects/{{ project_id }}{% else %}/roadmap/projects{% endif %}"
-      hx-post="{% if project_id %}/roadmap/projects/{{ project_id }}{% else %}/roadmap/projects{% endif %}"
+      action="{{ action }}"
+      hx-post="{{ action }}"
       class="grid gap-4">
   <div>
     <h2 class="m-0 text-xl font-semibold">{% if project_id %}Edit project{% else %}New project{% endif %}</h2>

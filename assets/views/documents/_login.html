@@ -6,7 +6,7 @@
       <p class="meta m-0">Login · Added by {{ login.added_by }}, {{ login.added_on }}</p>
     </div>
     {% if sheet %}
-    {% if me.can_manage %}<a class="icon-btn" href="/documents/logins/{{ login.id }}?edit=1" aria-label="Edit {{ login.title }}">{{<icon name="pencil" class="h-5 w-5"/>}}</a>{% endif %}
+    {% if me.can_manage %}<a class="icon-btn" href="{{ org_url(path="/documents/logins/" ~ (login.id) ~ "?edit=1") }}" aria-label="Edit {{ login.title }}">{{<icon name="pencil" class="h-5 w-5"/>}}</a>{% endif %}
     <button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button>
     {% endif %}
   </div>

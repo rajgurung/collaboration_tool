@@ -7,49 +7,35 @@ use loco_rs::prelude::*;
 use crate::{
     extractors::{
         current_member::{CurrentMember, CURRENT_ORG_COOKIE},
-        current_user::{CurrentUser, SessionId},
+        current_user::CurrentUser,
         session::{
             append_cookie, cleared_acting_org_cookie, current_org_cookie, redirect_response,
         },
     },
+    initializers::org_path::PathOrg,
     models::{
         memberships,
         organisations::{self, NewOrgParams, AT_CAP, MAX_ORGS_CREATED},
-        users,
     },
-    views::forms::{field_errors, invalid_form, FieldErrors},
+    views::{
+        forms::{field_errors, invalid_form, FieldErrors},
+        links::{org_path, section_path},
+    },
 };
 
-/// Where a switch lands. A constant: the switch never follows a `next`.
-const AFTER_SWITCH: &str = "/dashboard?switched=1";
-
-/// Where a create lands. A constant too.
-const AFTER_CREATE: &str = "/dashboard?created=1";
-
-/// Moves this browser into `org_id`, the same way for a switch and a
-/// create: ends this sign-in's unlock of logins, sets `current_org`, clears
-/// `acting_org`, and closes this browser's chat sockets and notification
-/// streams so they reconnect in the new org. The person's other browsers
-/// keep their own org, so they are left alone. `session_id` is the request's
-/// sign-in id; without one (a cookie from before sign-in ids) every unlock
-/// ends and every socket closes, as before.
-async fn enter_org(
+/// Opens `org` in this tab, the same way for the old switch and a create:
+/// remembers it in `current_org`, clears `acting_org`, and goes to `path`
+/// there. Other tabs keep their own address, so nothing else is closed or
+/// ended.
+fn enter_org(
     ctx: &AppContext,
     headers: &HeaderMap,
-    user_id: i64,
-    session_id: Option<&str>,
-    org_id: i64,
-    target: &str,
+    org: &organisations::Model,
+    path: &str,
 ) -> Result<Response> {
-    // The unlock is already tied to its org. This is a backstop.
-    match session_id {
-        Some(sid) => users::Model::end_unlock_for_session(&ctx.db, user_id, sid).await?,
-        None => users::Model::end_unlock(&ctx.db, user_id).await?,
-    }
-    let mut response = redirect_response(headers, target);
-    append_cookie(&mut response, &current_org_cookie(ctx, org_id)?)?;
+    let mut response = redirect_response(headers, &org_path(&org.slug, path));
+    append_cookie(&mut response, &current_org_cookie(ctx, org.id)?)?;
     append_cookie(&mut response, &cleared_acting_org_cookie(ctx)?)?;
-    users::Model::close_in_browser(ctx, user_id, session_id);
     Ok(response)
 }
 
@@ -61,20 +47,22 @@ fn from_org(headers: &HeaderMap) -> Option<i64> {
         .and_then(|c| c.value().parse::<i64>().ok())
 }
 
-/// Makes this browser work in another organisation where the user is an
-/// active member. `CurrentUser`, not `CurrentMember`, so someone on a waiting
-/// page can still switch to an org that has approved them, and a stale tab
-/// may switch. Only ever a POST: a link or redirect must never be able to
-/// switch someone.
+/// The old switch, kept for one release for tabs drawn before the switcher
+/// became links (and the old stale banner's "Back"). It opens Home in an org
+/// where the user is active. `CurrentUser`, not `CurrentMember`, and only
+/// ever a POST. Removed in PR 3.
 #[debug_handler]
 async fn switch(
+    // First, so `/o/{slug}/orgs/{id}/switch` is a 404 before anything else.
+    path_org: Option<Extension<PathOrg>>,
     CurrentUser(user): CurrentUser,
-    // After `CurrentUser`, which sets it.
-    session_id: Option<Extension<SessionId>>,
     State(ctx): State<AppContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response> {
+    if path_org.is_some() {
+        return Err(Error::NotFound);
+    }
     // A 404 for every refusal, so it does not reveal whether the org exists.
     if memberships::Model::active_in(&ctx.db, id, user.id)
         .await?
@@ -82,10 +70,8 @@ async fn switch(
     {
         return Err(Error::NotFound);
     }
-    let sid = session_id
-        .as_ref()
-        .map(|Extension(SessionId(sid))| sid.as_str());
-    let response = enter_org(&ctx, &headers, user.id, sid, id, AFTER_SWITCH).await?;
+    let org = organisations::Model::find_by_id(&ctx.db, id).await?;
+    let response = enter_org(&ctx, &headers, &org, "/dashboard")?;
     tracing::info!(
         user_id = user.id,
         from_org = from_org(&headers),
@@ -160,8 +146,8 @@ async fn new(
     Ok(no_store(format::render().view(&v, template, data)?))
 }
 
-/// Creates an organisation with the person as its owner, then moves the
-/// browser into it as a switch does. It reads only `member.user` and the
+/// Creates an organisation with the person as its owner, then opens it in
+/// this tab. It reads only `member.user` and the
 /// current org's time zone, which it copies unless acting: the acting org
 /// is someone else's. `CurrentMember`, so a stale tab is refused like any
 /// other write.
@@ -176,15 +162,7 @@ async fn create(
     let timezone = (!member.acting).then_some(member.org.timezone.as_str());
     match organisations::Model::create_for_user(&ctx.db, &member.user, &params, timezone).await {
         Ok(org) => {
-            let response = enter_org(
-                &ctx,
-                &headers,
-                member.user.id,
-                member.session_id.as_deref(),
-                org.id,
-                AFTER_CREATE,
-            )
-            .await?;
+            let response = enter_org(&ctx, &headers, &org, "/dashboard?created=1")?;
             tracing::info!(
                 user_id = member.user.id,
                 org_id = org.id,
@@ -209,17 +187,26 @@ async fn create(
     }
 }
 
+/// Which list the switcher's rows open in the other org: the page's
+/// `active` key, mapped through [`section_path`], so a hand-made value only
+/// ever gives Home.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ListQuery {
+    section: Option<String>,
+}
+
 /// Your organisations. Over HTMX it is the list the switcher menu and sheet
 /// load when they first open; otherwise a page, for browsers without
-/// JavaScript. `CurrentMember`, so a stale tab opening the menu is moved
-/// first.
+/// JavaScript. Each other org is a link to the same section there.
 #[debug_handler]
 async fn index(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     headers: HeaderMap,
+    Query(query): Query<ListQuery>,
 ) -> Result<Response> {
+    let section = section_path(query.section.as_deref().unwrap_or_default());
     let (active, pending): (Vec<_>, Vec<_>) =
         memberships::Model::for_user_with_orgs(&ctx.db, member.user.id)
             .await?
@@ -229,6 +216,7 @@ async fn index(
         serde_json::json!({
             "id": org.id,
             "name": org.name,
+            "url": org_path(&org.slug, section),
             "role": m.role,
             // While acting, the acting org has its own row at the top.
             "current": !member.acting && org.id == member.org.id,

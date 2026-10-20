@@ -292,7 +292,7 @@ async fn create_folder(
     match folders::Model::create(&ctx.db, member.org.id, member.user.id, &params).await {
         Ok(folder) => Ok(redirect_response(
             &headers,
-            &format!("/documents/folders/{}", folder.id),
+            &member.url(&format!("/documents/folders/{}", folder.id)),
         )),
         Err(err) => folder_form_error(&v, &member, None, &params, err),
     }
@@ -314,7 +314,7 @@ async fn edit_folder(
     match folder.edit(&ctx.db, &params).await {
         Ok(folder) => Ok(redirect_response(
             &headers,
-            &format!("/documents/folders/{}", folder.id),
+            &member.url(&format!("/documents/folders/{}", folder.id)),
         )),
         Err(err) => folder_form_error(&v, &member, Some(id), &params, err),
     }
@@ -333,8 +333,8 @@ fn folder_form_error(
         |id| format!("folder-{id}-form"),
     );
     let action = id.map_or_else(
-        || "/documents/folders".to_string(),
-        |id| format!("/documents/folders/{id}"),
+        || member.url("/documents/folders"),
+        |id| member.url(&format!("/documents/folders/{id}")),
     );
     invalid_form(
         v,
@@ -365,7 +365,7 @@ async fn delete_folder(
     member.require_manager()?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     match folder.delete_if_empty(&ctx.db).await {
-        Ok(()) => Ok(redirect_response(&headers, "/documents")),
+        Ok(()) => Ok(redirect_response(&headers, &member.url("/documents"))),
         Err(ModelError::Message(message)) => refuse(&message),
         Err(err) => Err(err.into()),
     }
@@ -433,7 +433,7 @@ async fn upload(
         .view(
             &v,
             "documents/_upload_error.html",
-            data!({ "name": name, "message": refusal }),
+            member.fragment(data!({ "name": name, "message": refusal })),
         )
 }
 

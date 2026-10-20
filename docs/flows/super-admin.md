@@ -33,9 +33,9 @@ sequenceDiagram
     S->>Ad: GET /admin
     Ad-->>S: every organisation with counts, every user
     S->>Ad: POST /admin/orgs/ID/enter
-    Ad-->>S: acting_org cookie = ID, redirect /dashboard
-    S->>CM: any app page
-    CM->>CM: is_super_admin and acting_org points to a real org
+    Ad-->>S: acting_org cookie = ID, redirect /o/{slug}/dashboard
+    S->>CM: any page under /o/{slug}/
+    CM->>CM: is_super_admin, and acting_org is the org with that slug
     CM-->>S: member of ID, role owner, acting = true
     S->>Ad: POST /admin/leave
     Ad-->>S: cookie cleared, redirect /admin
@@ -55,11 +55,19 @@ Rules:
 - Signing out (`POST /logout`) clears the cookie too.
 - Signing in also clears it, so a new sign-in ends acting. `acting_org` has
   no `Max-Age`, so it already ended when the browser closed.
-- `acting_org` wins over `current_org`. While acting, `current_org` is
-  ignored and left alone, so leaving returns to it if it is still valid.
-- Switching organisation (`POST /orgs/{id}/switch`) clears `acting_org`. A
-  super admin can only switch to orgs they belong to. Entering any other org
-  stays on `/admin/orgs/{id}/enter`.
+- Acting is per address. It applies only to `/o/{acting slug}/...`, where it
+  wins over any membership of their own there. Their own organisations work
+  normally in other tabs, and the acting banner shows only on the acting
+  org's pages. The address never starts acting: `/o/x/...` without
+  `acting_org` for X is the plain not-found page, the same as a made-up slug.
+- Acting is never remembered in `current_org`. For bare addresses
+  `acting_org` still comes first, then `current_org`, then the default.
+- After `POST /admin/leave`, an open tab for the acting org gets the plain
+  not-found on its next page load, and its HTMX calls the 409 to
+  `/dashboard`.
+- The old switch (`POST /orgs/{id}/switch`, kept for one release) clears
+  `acting_org`. A super admin can only switch to orgs they belong to.
+  Entering any other org stays on `/admin/orgs/{id}/enter`.
 - A super admin with no active membership and no acting cookie is sent to
   `/admin`, even if they have a waiting request somewhere. A stray
   `current_org` is cleared on the way.
@@ -69,27 +77,24 @@ Rules:
   clears `acting_org`. An acting super admin approves other people's
   requests as an owner would, but never their own: the approval's update
   refuses a row whose user is the approver.
-- The stale-tab check compares against the acting org (see
-  [accounts.md](accounts.md), "Stale tabs"). A tab drawn for the admin's own
-  org is stale while they are inside another, and goes to Home. Home offers
-  "Back" only to orgs they are an active member of, so a tab drawn while
-  acting gets no Back; they enter again from `/admin`.
+- The stale-tab check compares the claim with the address's org (see
+  [accounts.md](accounts.md), "Stale tabs"), the acting org on its pages.
 - The switcher shows while acting only if they have a membership of their
   own. It reads "Acting in" with the acting org, ticked, as "Platform admin",
-  then "Your organisations", then "Switching ends acting in Acme Studio."
-  Leave stays in the banner. With no membership of their own the name is
-  plain text.
+  then "Your organisations", each a link to that org. Acting carries on in
+  the acting org's tabs. Leave stays in the banner. With no membership of
+  their own the name is plain text.
 - There is no "New organisation" row while acting, in the menu, the sheet or
   More: that menu is about where they are acting and the way back. A typed
-  `/orgs/new` still works. The form first says "You're acting in Acme
+  `/o/{slug}/orgs/new` still works. The form first says "You're acting in Acme
   Studio. Creating this ends acting. The new organisation is yours, with you
   as owner." Creating clears `acting_org`, makes the admin the owner of the
   new org, and copies nothing from the acting org: it keeps `Europe/London`.
   The log line names the acting org as `acting_org`.
 
-The decision happens in `resolve_org`
-(`src/extractors/current_member.rs:219`), which both `CurrentMember` and
-`PinnedMember` run.
+The decision happens in `resolve_org` (`src/extractors/current_member.rs`):
+`in_address_org` for `/o/{slug}/`, `last_org` for the bare addresses that
+keep it. Both `CurrentMember` and `PinnedMember` run it.
 
 ## What acting allows and blocks
 

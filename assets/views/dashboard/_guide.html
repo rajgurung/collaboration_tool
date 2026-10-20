@@ -1,6 +1,6 @@
 <section class="guide" id="guide" aria-labelledby="guide-title">
   <button type="button" class="icon-btn guide-close text-muted" aria-label="Close the getting started guide"
-          hx-post="/guide/dismiss" hx-target="#guide" hx-swap="outerHTML">{{<icon name="x" class="h-[18px] w-[18px]"/>}}</button>
+          hx-post="{{ org_url(path="/guide/dismiss") }}" hx-target="#guide" hx-swap="outerHTML">{{<icon name="x" class="h-[18px] w-[18px]"/>}}</button>
   <div class="guide-top">
     <span class="guide-ring" style="--pct: {{ guide.pct }}" role="img" aria-label="{{ guide.done }} of {{ guide.total }} done"><span>{{ guide.done }}/{{ guide.total }}</span></span>
     <div class="min-w-0">
@@ -16,14 +16,14 @@
         <strong class="text-[15px]">{{ step.title }}{% if step.done %}<span class="sr-only"> (done)</span>{% endif %}</strong>
         <span class="meta guide-how text-[13px]">{{ step.how }}</span>
       </span>
-      {% if not step.done %}<a href="{{ step.href }}" class="btn {% if loop.first %}btn-primary{% else %}btn-secondary{% endif %} guide-go">{{ step.action }}</a>{% endif %}
+      {% if not step.done %}<a href="{{ org_url(path=step.href) }}" class="btn {% if loop.first %}btn-primary{% else %}btn-secondary{% endif %} guide-go">{{ step.action }}</a>{% endif %}
     </li>
     {% endfor %}
   </ul>
   {% if guide.done == guide.total %}
   <div class="guide-finish">
     <span class="flex items-center gap-2 font-bold text-done">{{<icon name="check" class="h-4 w-4"/>}}You're all set.</span>
-    <button type="button" class="btn btn-secondary" hx-post="/guide/dismiss" hx-target="#guide" hx-swap="outerHTML">Hide guide</button>
+    <button type="button" class="btn btn-secondary" hx-post="{{ org_url(path="/guide/dismiss") }}" hx-target="#guide" hx-swap="outerHTML">Hide guide</button>
   </div>
   {% endif %}
 </section>

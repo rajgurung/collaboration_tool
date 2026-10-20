@@ -115,6 +115,39 @@ async fn add_with_status(ctx: &AppContext, org_id: i64, user_id: i64, status: &s
 
 #[tokio::test]
 #[serial]
+async fn in_org_by_slug_finds_only_your_own_row_in_any_status() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, acme) = sign_up(ctx, "Acme", "alice").await;
+    let (bob, beta) = sign_up(ctx, "Beta", "bob").await;
+    add_with_status(ctx, beta, alice, memberships::status::PENDING).await;
+
+    let (m, org) = memberships::Model::in_org_by_slug(&ctx.db, "acme", alice)
+        .await
+        .unwrap()
+        .expect("her own org");
+    assert_eq!((m.user_id, m.organisation_id, org.id), (alice, acme, acme));
+    assert!(m.is_active());
+
+    let (m, org) = memberships::Model::in_org_by_slug(&ctx.db, "beta", alice)
+        .await
+        .unwrap()
+        .expect("pending counts");
+    assert_eq!((org.id, m.is_pending()), (beta, true));
+
+    for (slug, user) in [("acme", bob), ("made-up", alice), ("beta", 999_999)] {
+        assert!(
+            memberships::Model::in_org_by_slug(&ctx.db, slug, user)
+                .await
+                .unwrap()
+                .is_none(),
+            "{slug} {user}"
+        );
+    }
+}
+
+#[tokio::test]
+#[serial]
 async fn switcher_counts_counts_active_and_pending_only() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;

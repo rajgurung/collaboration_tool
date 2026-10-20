@@ -1,10 +1,11 @@
 <div class="topbar">
+  {% include "layouts/_org_line.html" %}
   <h1>Chat</h1>
   <button type="button" class="icon-btn" aria-label="New group" title="New group"
-          hx-get="/chat/groups/new" hx-target="#chat-dialog-body"
+          hx-get="{{ org_url(path="/chat/groups/new") }}" hx-target="#chat-dialog-body"
           hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="users" class="h-5 w-5"/>}}</button>
   <button type="button" class="icon-btn" aria-label="New direct message" title="New direct message"
-          hx-get="/chat/dms/new" hx-target="#chat-dialog-body"
+          hx-get="{{ org_url(path="/chat/dms/new") }}" hx-target="#chat-dialog-body"
           hx-on::after-request="document.getElementById('chat-dialog').showModal()">{{<icon name="square-pen" class="h-5 w-5"/>}}</button>
 </div>
 <div class="px-4 pb-3">
@@ -15,7 +16,7 @@
 </div>
 <div id="conversation-list" class="pb-28 min-[900px]:pb-4">
   {% for item in items %}
-  <a href="/chat/{{ item.id }}" data-filter-text="{{ item.label }}" class="flex min-h-16 items-center gap-3 px-4 py-2.5 hover:bg-chip {% if conversation and conversation.id == item.id %}bg-active{% endif %}" {% if conversation and conversation.id == item.id %}aria-current="page"{% endif %}>
+  <a href="{{ org_url(path="/chat/" ~ (item.id)) }}" data-filter-text="{{ item.label }}" class="flex min-h-16 items-center gap-3 px-4 py-2.5 hover:bg-chip {% if conversation and conversation.id == item.id %}bg-active{% endif %}" {% if conversation and conversation.id == item.id %}aria-current="page"{% endif %}>
     {% if item.kind == "dm" %}
     {{<avatar name={item.label} color={item.color} size="lg"/>}}
     {% else %}

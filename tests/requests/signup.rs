@@ -49,7 +49,7 @@ async fn signup_creates_owner_org_and_general_channel() {
         assert_eq!(general.kind, "channel");
 
         let dashboard = request
-            .get("/dashboard")
+            .get(&cookie.at("/dashboard"))
             .add_header(cookie.0.clone(), cookie.1.clone())
             .await;
         assert_eq!(dashboard.status_code(), 200);

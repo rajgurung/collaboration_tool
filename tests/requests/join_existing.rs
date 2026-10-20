@@ -15,7 +15,8 @@ use serial_test::serial;
 use super::{
     multi_org::{alice_in_two_orgs, clears, org_heading, set_cookie, with_org},
     prepare_data::{
-        create_user, join, login, sign_up_member, AsMember, Cookie, TestMember, USER_PASSWORD,
+        create_user, join, login, open_page, sign_up_member, AsMember, Cookie, TestMember,
+        USER_PASSWORD,
     },
 };
 
@@ -48,11 +49,18 @@ async fn user_id(ctx: &AppContext, email: &str) -> i64 {
         .id
 }
 
+/// A page load. A bare app address is followed into the org it redirects
+/// to, as a browser follows it.
 async fn get(request: &TestServer, who: Option<&Cookie>, path: &str) -> axum_test::TestResponse {
-    let req = request.get(path);
     match who {
-        Some(cookie) => req.add_header(cookie.0.clone(), cookie.1.clone()).await,
-        None => req.await,
+        Some(cookie) if !path.starts_with("/join/") => open_page(request, cookie, path).await.0,
+        Some(cookie) => {
+            request
+                .get(path)
+                .add_header(cookie.0.clone(), cookie.1.clone())
+                .await
+        }
+        None => request.get(path).await,
     }
 }
 
@@ -105,7 +113,7 @@ async fn manage(
     id: i64,
 ) -> axum_test::TestResponse {
     request
-        .post(&format!("/members/{id}/{action}"))
+        .post(&who.at(&format!("/members/{id}/{action}")))
         .as_member(who)
         .add_header("HX-Request", "true")
         .await
@@ -182,7 +190,7 @@ async fn signed_in_join_page_asks_only_for_a_username() {
         );
         assert!(html.contains("Nothing from Acme is shared with Beta."));
 
-        let in_gamma = with_org(&w.alice, gamma.id);
+        let in_gamma = with_org(&ctx, &w.alice, gamma.id).await;
         let html = get(&request, Some(&in_gamma), "/join/beta").await.text();
         assert!(
             html.contains(r#"name="name" value="ally""#),
@@ -244,17 +252,17 @@ async fn signed_in_join_page_says_already_a_member() {
         let html = get(&request, Some(&alice), "/join/beta").await.text();
         assert!(html.contains("You're already in Beta"));
         assert!(html.contains("You're a member there as alice."));
-        assert!(html.contains(&format!(
-            r#"action="/orgs/{}/switch""#,
-            in_beta.organisation_id
-        )));
+        assert!(html
+            .contains(r#"href="/o/beta/dashboard" class="btn btn-primary btn-lg">Open Beta</a>"#));
+        assert!(!html.contains("/switch"));
+        let _ = in_beta.organisation_id;
         assert!(!html.contains(r#"action="/join/beta/request""#));
 
         // Already in Beta here: straight to Home.
-        let in_beta_tab = with_org(&alice, in_beta.organisation_id);
+        let in_beta_tab = with_org(&ctx, &alice, in_beta.organisation_id).await;
         let res = get(&request, Some(&in_beta_tab), "/join/beta").await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(header(&res, "location"), "/dashboard");
+        assert_eq!(header(&res, "location"), "/o/beta/dashboard");
 
         // Asking changes nothing and comes back here.
         let res = ask(&request, &alice, "beta", "alicia").await;
@@ -286,7 +294,7 @@ async fn signed_in_join_page_says_already_waiting() {
         assert_eq!(res.status_code(), 303);
         assert_eq!(
             header(&res, "location"),
-            format!("/dashboard?requested={}", w.beta)
+            format!("/o/acme/dashboard?requested={}", w.beta)
         );
         assert_eq!(
             row(&ctx, w.beta, w.alice_id).await.unwrap().username,
@@ -347,7 +355,7 @@ async fn a_cross_origin_join_request_is_refused() {
 async fn joining_while_signed_in_keeps_the_current_org() {
     request::<App, _, _>(|request, ctx| async move {
         let w = world(&request, &ctx).await;
-        let in_acme = with_org(&w.alice, w.acme);
+        let in_acme = with_org(&ctx, &w.alice, w.acme).await;
         let res = ask(&request, &in_acme, "beta", "alice").await;
         assert_eq!(res.status_code(), 303);
         assert_eq!(set_cookie(&res, "current_org"), None);
@@ -372,7 +380,7 @@ async fn joining_lands_on_home_with_the_request_notice() {
         let res = ask(&request, &w.alice, "beta", "alice").await;
         assert_eq!(res.status_code(), 303);
         let to = header(&res, "location");
-        assert_eq!(to, format!("/dashboard?requested={}", w.beta));
+        assert_eq!(to, format!("/o/acme/dashboard?requested={}", w.beta));
 
         let home = get(&request, Some(&w.alice), &to).await;
         assert_eq!(home.status_code(), 200);
@@ -566,7 +574,7 @@ async fn the_switcher_shows_the_request_as_waiting() {
         let w = world(&request, &ctx).await;
         ask(&request, &w.alice, "beta", "alice").await;
         let res = request
-            .get("/orgs")
+            .get(&w.alice.at("/orgs"))
             .as_member(&w.alice)
             .add_header("HX-Request", "true")
             .await;
@@ -601,8 +609,8 @@ async fn after_approval_alice_switches_to_beta_without_signing_in() {
         alice_joins_beta(&request, &ctx, &w).await;
         let res = switch(w.alice.clone()).await;
         assert_eq!(res.status_code(), 303);
-        assert_eq!(header(&res, "location"), "/dashboard?switched=1");
-        let in_beta = with_org(&w.alice, w.beta);
+        assert_eq!(header(&res, "location"), "/o/beta/dashboard");
+        let in_beta = with_org(&ctx, &w.alice, w.beta).await;
         let home = get(&request, Some(&in_beta), "/dashboard").await;
         assert_eq!(org_heading(&home.text()), "Beta");
         let after = users::Model::find_by_id(&ctx.db, w.alice_id).await.unwrap();
@@ -649,7 +657,7 @@ async fn rejoin_after_removal_waits_for_approval() {
         let again = row(&ctx, w.beta, w.alice_id).await.unwrap();
         assert_eq!(again.id, joined.id);
         assert_eq!(again.status, "pending");
-        let in_beta = with_org(&w.alice, w.beta);
+        let in_beta = with_org(&ctx, &w.alice, w.beta).await;
         let home = get(&request, Some(&in_beta), "/dashboard").await;
         assert_eq!(org_heading(&home.text()), "Acme", "Beta stays closed");
 
@@ -751,9 +759,9 @@ async fn a_tab_for_an_org_you_are_pending_in_gets_the_gone_header() {
         ask(&request, &w.alice, "beta", "alice").await;
 
         // A tab still drawn for Beta.
-        let tab = with_org(&w.alice, w.beta);
+        let tab = with_org(&ctx, &w.alice, w.beta).await;
         let res = request
-            .get("/orgs/current")
+            .get(&tab.at("/orgs/current"))
             .as_member(&tab)
             .add_header("HX-Request", "true")
             .await;
@@ -1090,7 +1098,7 @@ async fn an_acting_super_admin_approves_others_but_not_themselves() {
         let raj = user_id(&ctx, "gurungraj26@gmail.com").await;
         ask(&request, &admin, "beta", "raj").await;
         ask(&request, &w.alice, "beta", "alice").await;
-        let acting = TestMember::new(acting_in(&admin, w.beta), w.beta);
+        let acting = TestMember::new(acting_in(&admin, w.beta), w.beta, "beta");
 
         let own = row(&ctx, w.beta, raj).await.unwrap();
         let res = manage(&request, &acting, "approve", own.id).await;
@@ -1181,7 +1189,7 @@ async fn a_waiting_row_that_was_removed_links_to_the_rotate_page() {
         ask(&request, &carol, "beta", "carol").await;
 
         let html = get(&request, Some(&w.bob), "/members").await.text();
-        let link = format!(r#"href="/members/{}/rotate""#, joined.id);
+        let link = format!(r#"href="/o/beta/members/{}/rotate""#, joined.id);
         assert!(html.contains(&link), "{html}");
         assert!(html.contains("Change these at the source"));
         assert!(!html.contains(&format!("/members/{}/rotate", carol_row.id)));
@@ -1230,16 +1238,21 @@ async fn a_waiting_former_admin_has_no_access() {
         ask(&request, &w.alice, "beta", "alice").await;
         assert_eq!(row(&ctx, w.beta, w.alice_id).await.unwrap().role, "admin");
 
-        let in_beta = TestMember::new(with_org(&w.alice, w.beta).cookie, w.beta);
+        let in_beta = TestMember::new(
+            with_org(&ctx, &w.alice, w.beta).await.cookie,
+            w.beta,
+            "beta",
+        );
         let res = request
-            .get("/dashboard")
+            .get(&in_beta.at("/dashboard"))
             .add_header(in_beta.0.clone(), in_beta.1.clone())
             .await;
-        assert_eq!(org_heading(&res.text()), "Acme");
+        assert_eq!(res.status_code(), 403);
+        assert!(res.text().contains("Waiting for approval · Beta"));
         let bob_id = user_id(&ctx, "bob@example.com").await;
         let bob_row = row(&ctx, w.beta, bob_id).await.unwrap();
         request
-            .post(&format!("/members/{}/remove", bob_row.id))
+            .post(&in_beta.at(&format!("/members/{}/remove", bob_row.id)))
             .as_member(&in_beta)
             .await;
         assert_eq!(

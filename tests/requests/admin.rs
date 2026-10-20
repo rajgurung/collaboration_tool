@@ -5,7 +5,7 @@ use serial_test::serial;
 
 use super::{
     multi_org::{clears, set_cookie},
-    prepare_data::{login, sign_up_member, AsMember},
+    prepare_data::{login, open_page, sign_up_member, AsMember},
 };
 
 #[tokio::test]
@@ -45,10 +45,7 @@ async fn super_admin_reaches_admin_and_their_own_org() {
             .await;
         assert_eq!(res.status_code(), 200);
 
-        let res = request
-            .get("/dashboard")
-            .add_header(cookie.0.clone(), cookie.1.clone())
-            .await;
+        let (res, _) = open_page(&request, &cookie, "/dashboard").await;
         assert_eq!(res.status_code(), 200);
         assert!(res.text().contains("Himalayan Ritual"));
         assert!(
@@ -127,8 +124,9 @@ async fn super_admin_can_enter_and_leave_another_org() {
         assert!(acting.contains("HttpOnly"));
 
         let both = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
+        assert_eq!(enter.headers()["location"], "/o/acme/dashboard");
         let page = request
-            .get("/dashboard")
+            .get("/o/acme/dashboard")
             .add_header("cookie", both.clone())
             .await;
         assert_eq!(page.status_code(), 200);
@@ -138,7 +136,7 @@ async fn super_admin_can_enter_and_leave_another_org() {
 
         // Acting as owner: the admin can see Acme's members page.
         let members = request
-            .get("/members")
+            .get("/o/acme/members")
             .add_header("cookie", both.clone())
             .await;
         assert!(members.text().contains("alice@example.com"));
@@ -174,16 +172,24 @@ async fn the_acting_cookie_means_nothing_to_normal_users() {
             .unwrap();
 
         let forged = format!("{}; acting_org={}", alice.1.to_str().unwrap(), globex.id);
-        let page = request.get("/dashboard").add_header("cookie", forged).await;
+        let page = request
+            .get("/o/acme/dashboard")
+            .add_header("cookie", forged.clone())
+            .await;
         assert_eq!(page.status_code(), 200);
         assert!(page.text().contains("Acme"));
         assert!(!page.text().contains("Globex"));
+        let page = request
+            .get("/o/globex/dashboard")
+            .add_header("cookie", forged)
+            .await;
+        assert_eq!(page.status_code(), 404);
 
         for path in [
             format!("/admin/orgs/{}/enter", globex.id),
             "/admin/leave".to_string(),
         ] {
-            let res = request.post(&path).as_member(&alice).await;
+            let res = request.post(&alice.to(&path)).as_member(&alice).await;
             assert_eq!(res.status_code(), 404, "{path}");
         }
     })
@@ -211,7 +217,10 @@ async fn acting_wins_over_current_org() {
             "{}; current_org={own}; acting_org={acme}",
             admin.1.to_str().unwrap()
         );
-        let page = request.get("/dashboard").add_header("cookie", both).await;
+        let page = request
+            .get("/o/acme/dashboard")
+            .add_header("cookie", both)
+            .await;
         assert_eq!(page.status_code(), 200);
         let body = page.text();
         assert!(body.contains("as platform admin"));
@@ -234,7 +243,10 @@ async fn acting_with_a_stale_current_org_sends_no_clearing_cookie() {
             "{}; current_org={globex}; acting_org={acme}",
             admin.1.to_str().unwrap()
         );
-        let page = request.get("/dashboard").add_header("cookie", both).await;
+        let page = request
+            .get("/o/acme/dashboard")
+            .add_header("cookie", both)
+            .await;
         assert_eq!(page.status_code(), 200);
         assert!(page.text().contains("as platform admin"));
         assert!(set_cookie(&page, "current_org").is_none());
@@ -299,6 +311,27 @@ async fn a_super_admin_without_a_membership_gets_the_clearing_cookie_on_the_htmx
         assert_eq!(res.status_code(), 200);
         assert_eq!(res.headers()["HX-Redirect"], "/admin");
         assert!(clears(&res, "current_org"));
+    })
+    .await;
+}
+
+/// The admin page belongs to no org: no badge polls a bare address, and no
+/// notification stream opens, so nothing bounces the admin to Home.
+#[tokio::test]
+#[serial]
+async fn the_admin_page_polls_no_bare_badges() {
+    request::<App, _, _>(|request, ctx| async move {
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let page = request
+            .get("/admin")
+            .add_header(admin.0.clone(), admin.1.clone())
+            .await;
+        assert_eq!(page.status_code(), 200);
+        let html = page.text();
+        assert!(!html.contains("/notifications/unread"), "{html}");
+        assert!(!html.contains("/chat/unread"), "{html}");
+        // app.ts opens the stream only on a page with an org and a badge.
+        assert!(!html.contains("data-org-id="), "{html}");
     })
     .await;
 }

@@ -44,8 +44,12 @@ Rules:
 - The Allow page is never framed or cached. Unknown clients and bad redirect
   URIs get an error page, never a redirect.
 - The Allow form is checked again on POST (`src/controllers/oauth.rs:352`).
-- The Allow form carries the organisation it was shown for. If the browser
-  switched organisation since, Allow is refused and no code is issued. Deny
+- The Allow page stays bare (`/oauth/authorize`, not under `/o/`) and binds
+  the token to the last organisation: `acting_org`, then a `current_org`
+  you're active in, then your default. PR 3 adds a picker. Both its GET and
+  its POST take `PinnedMember`, the only bare routes that resolve an org.
+- The Allow form carries the organisation it was shown for. If the last org
+  changed since, Allow is refused and no code is issued. Deny
   still goes through. The handler takes `PinnedMember`, so it skips the
   generic stale-tab check (see [accounts.md](accounts.md), "Stale tabs"),
   which would answer first and lose the `access_denied` to Claude.
@@ -62,15 +66,17 @@ Rules:
 
 ## Personal tokens
 
-- Made at More, Connect Claude (`POST /settings/claude/tokens`,
-  `src/controllers/claude.rs:98`). Shown once, prefixed `collab_pat_`.
-- The form carries the organisation it was shown for. After a switch it is
-  refused with a 409 and no token is made. It keeps the typed name and shows
+- Made at More, Connect Claude (`/o/{slug}/settings/claude`, posting to
+  `/o/{slug}/settings/claude/tokens`, `src/controllers/claude.rs`). Shown
+  once, prefixed `collab_pat_`. The content is unchanged in PR 1; PR 3 makes
+  it list that org's connections only.
+- The form carries the organisation it was shown for, checked against the
+  address's org. A mismatch is refused with a 409 and no token is made. It keeps the typed name and shows
   its own message: it takes `PinnedMember`, which skips the generic
   stale-tab check.
 - They do not expire. At most 10 live ones per person.
 - Not available while a super admin is acting in another organisation.
-- Revoke at `POST /settings/claude/grants/<grant_id>/revoke`. Revoking ends
+- Revoke at `POST /o/{slug}/settings/claude/grants/<grant_id>/revoke`. Revoking ends
   every token in that grant.
 
 ## Every MCP call
@@ -135,3 +141,6 @@ Limits:
   a removal, a reset and a lock use, so they never deadlock.
 - Every call checks membership and the lock, so a token stops working at
   once even before revocation.
+
+`/mcp` and the connector URL don't change: tokens already name their
+organisation, and moving `/mcp` would end every connection.

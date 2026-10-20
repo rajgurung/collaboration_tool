@@ -20,6 +20,7 @@ use crate::{
     views::{
         forms::{field_errors, FieldErrors},
         headers::guarded,
+        links::org_path,
         time,
     },
 };
@@ -115,8 +116,16 @@ async fn request(
     match memberships::Model::request_to_join(&ctx.db, &org, user.id, &params).await {
         Ok(JoinOutcome::Requested(_) | JoinOutcome::AlreadyPending(_)) => {
             tracing::info!(user_id = user.id, org_id = org.id, "requested to join");
-            let mut response =
-                redirect_response(&headers, &format!("/dashboard?requested={}", org.id));
+            // Home in the org this browser was last in. With none active,
+            // the bare address shows the waiting page.
+            let home = format!("/dashboard?requested={}", org.id);
+            let to = match last_active(&ctx, &headers, user.id).await? {
+                Some(m) => organisations::Model::find_by_id(&ctx.db, m.organisation_id)
+                    .await
+                    .map_or(home.clone(), |last| org_path(&last.slug, &home)),
+                None => home,
+            };
+            let mut response = redirect_response(&headers, &to);
             if cookie(&headers, ACTING_ORG_COOKIE).is_some() {
                 append_cookie(&mut response, &cleared_acting_org_cookie(&ctx)?)?;
             }
@@ -147,6 +156,24 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(|c| c.value().to_string())
 }
 
+/// The person's last active membership: the `current_org` cookie's, else
+/// their default one, as bare addresses pick it (acting aside).
+async fn last_active(
+    ctx: &AppContext,
+    headers: &HeaderMap,
+    user_id: i64,
+) -> Result<Option<memberships::Model>> {
+    let chosen = cookie(headers, CURRENT_ORG_COOKIE).and_then(|v| v.parse().ok());
+    if let Some(org_id) = chosen {
+        if let Some(m) = memberships::Model::active_in(&ctx.db, org_id, user_id).await? {
+            return Ok(Some(m));
+        }
+    }
+    Ok(memberships::Model::default_for_user(&ctx.db, user_id)
+        .await?
+        .filter(memberships::Model::is_active))
+}
+
 /// The signed-in join page for `user`, who is always the signed-in person.
 struct Page<'a> {
     ctx: &'a AppContext,
@@ -161,16 +188,7 @@ impl Page<'_> {
     /// the `current_org` cookie, else their default membership, as
     /// `CurrentMember` picks it (acting aside).
     async fn browser_org(&self) -> Result<Option<memberships::Model>> {
-        let db = &self.ctx.db;
-        let chosen = cookie(self.headers, CURRENT_ORG_COOKIE).and_then(|v| v.parse().ok());
-        if let Some(org_id) = chosen {
-            if let Some(m) = memberships::Model::active_in(db, org_id, self.user.id).await? {
-                return Ok(Some(m));
-            }
-        }
-        Ok(memberships::Model::default_for_user(db, self.user.id)
-            .await?
-            .filter(memberships::Model::is_active))
+        last_active(self.ctx, self.headers, self.user.id).await
     }
 
     async fn org_name(&self, id: i64) -> Option<String> {
@@ -190,7 +208,8 @@ impl Page<'_> {
         let state = match &mine {
             Some(m) if m.is_active() => {
                 if here.as_ref().is_some_and(|h| h.organisation_id == org.id) {
-                    return Ok(guarded(redirect_response(self.headers, "/dashboard")));
+                    let home = org_path(&org.slug, "/dashboard");
+                    return Ok(guarded(redirect_response(self.headers, &home)));
                 }
                 "active"
             }
@@ -244,6 +263,7 @@ impl Page<'_> {
             "join/existing.html",
             data!({
                 "org": { "id": org.id, "name": org.name, "slug": org.slug },
+                "open_url": org_path(&org.slug, "/dashboard"),
                 "state": state,
                 "account": { "email": user.email, "name": user.name },
                 // A pending row's last change is the ask itself.

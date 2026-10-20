@@ -9,7 +9,7 @@
   {% if role_form or row.can_remove %}
   <div class="member-actions">
     {% if role_form %}
-    <form method="post" action="/members/{{ row.id }}/role" hx-post="/members/{{ row.id }}/role" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
+    <form method="post" action="{{ org_url(path="/members/" ~ (row.id) ~ "/role") }}" hx-post="{{ org_url(path="/members/" ~ (row.id) ~ "/role") }}" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="flex items-center gap-2">
       <select name="role" class="input min-h-11 w-auto py-1 text-sm" aria-label="Role for {{ row.username }}">
         <option value="member" {% if row.role == "member" %}selected{% endif %}>Member</option>
         <option value="admin" {% if row.role == "admin" %}selected{% endif %}>Admin</option>
@@ -34,7 +34,7 @@
           <li>Next, you'll see the logins they could see, so you can change those passwords.</li>
           <li>If you think their account was taken over, ask them to reset their password.</li>
         </ul>
-        <form method="post" action="/members/{{ row.id }}/remove" hx-post="/members/{{ row.id }}/remove" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-2">
+        <form method="post" action="{{ org_url(path="/members/" ~ (row.id) ~ "/remove") }}" hx-post="{{ org_url(path="/members/" ~ (row.id) ~ "/remove") }}" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-2">
           <button type="submit" class="btn btn-lg btn-danger-solid w-full">Remove {{ row.username }}</button>
           <button type="button" class="btn btn-lg btn-secondary w-full" data-dialog-close>Cancel</button>
         </form>

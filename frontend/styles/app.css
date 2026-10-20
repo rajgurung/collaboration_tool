@@ -790,6 +790,13 @@
   .org-menu .org-scroll { max-height: 404px; overflow-y: auto; }
   .org-logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
   .org-logo-lg { width: 36px; height: 36px; border-radius: 11px; font-size: 15px; }
+  .org-logo-xs { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; box-shadow: none; }
+  /* The org on phones and in the task sheet, for people in two or more orgs. */
+  .org-line { flex-basis: 100%; order: -1; margin-top: 6px; color: var(--muted); font-size: 13px; font-weight: 600; line-height: 1.2; }
+  .topbar:has(> .org-line) { flex-wrap: wrap; row-gap: 0; }
+  .sheet-org { display: none; align-items: center; gap: 6px; margin: 0 0 6px; }
+  .sheet-org strong { color: var(--text); font-weight: 600; }
+  body[data-multi-org] .sheet-org { display: flex; }
   .org-logo-wait { background: var(--chip); color: var(--muted); box-shadow: none; }
   .org-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 10px; box-sizing: border-box; border: 0; border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
   .org-row:hover:not([aria-disabled="true"]) { background: var(--chip); }
@@ -843,6 +850,8 @@
   .signed-as { display: flex; flex-direction: column; align-items: flex-start; margin-top: 20px; padding: 10px 12px 0; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; }
   .signed-as > span { overflow-wrap: anywhere; }
   .signed-as .link-btn { padding: 0; }
+  .signed-as-row { flex-direction: row; align-items: center; gap: 10px; padding: 6px 12px; }
+  .signed-as-row > span:not(.avatar) { flex: 1; min-width: 0; }
   .link-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; border: 0; background: none; color: var(--link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   .join-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; }
   .join-note svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }
@@ -851,6 +860,11 @@
   .state-tile { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 12px; border-radius: 14px; background: var(--chip); color: var(--muted); }
   .state-ok { background: color-mix(in srgb, var(--done) 14%, transparent); color: var(--done); }
   .state-wait { background: var(--active-bg); color: var(--link); }
+  /* Waiting, removed and declined pages: the ways to another org. */
+  .btn-col { display: grid; gap: 12px; margin-top: 28px; }
+  .auth-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 22px; color: var(--muted); font-size: 14px; }
+  .other-orgs { margin-top: 28px; }
+  .other-orgs .org-row { min-height: 60px; padding: 8px 14px; border-radius: 0; }
   .join-buttons { display: grid; gap: 12px; margin-top: 28px; }
   .join-sign-in { color: var(--link); font-weight: 600; }
   /* Members: a waiting row's last decision. */

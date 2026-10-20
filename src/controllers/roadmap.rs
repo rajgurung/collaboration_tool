@@ -123,7 +123,7 @@ async fn list_partial(
 ) -> Result<Response> {
     let lane = lane_or_default(query.lane.as_deref());
     let data = lane_data(&ctx, member.org.id, lane).await?;
-    format::render().view(&v, "roadmap/_lane.html", data)
+    format::render().view(&v, "roadmap/_lane.html", member.fragment(data))
 }
 
 /// The values a form starts with, or shows back after a failed submit.
@@ -182,7 +182,7 @@ async fn new(
         &Default::default(),
     )
     .await?;
-    format::render().view(&v, "roadmap/_form.html", data)
+    format::render().view(&v, "roadmap/_form.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -195,7 +195,7 @@ async fn edit(
     let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let values = form_values(None, Some(&project));
     let data = form_data(&ctx, &member, Some(id), values, &Default::default()).await?;
-    format::render().view(&v, "roadmap/_form.html", data)
+    format::render().view(&v, "roadmap/_form.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -265,7 +265,9 @@ async fn saved(
     message: &str,
 ) -> Result<Response> {
     match result {
-        Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(headers, "/roadmap")),
+        Ok(_) if !headers.contains_key("hx-request") => {
+            Ok(redirect_response(headers, &member.url("/roadmap")))
+        }
         Ok(_) => {
             let trigger = serde_json::json!({ "toast": { "kind": "success", "message": message }, "roadmap-changed": true });
             format::render()
@@ -283,7 +285,7 @@ async fn saved(
                 &errors,
             )
             .await?;
-            invalid_form(v, "roadmap/_form.html", FORM_ID, data)
+            invalid_form(v, "roadmap/_form.html", FORM_ID, member.fragment(data))
         }
     }
 }

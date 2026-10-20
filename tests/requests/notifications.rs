@@ -51,7 +51,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
             .unwrap();
 
         let res = request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "Can @bob and @Carol look? cc @alice @nobody" }))
@@ -75,7 +75,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
             "tagging yourself is a reminder"
         );
         let own = request
-            .get("/notifications")
+            .get(&alice.at("/notifications"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -83,7 +83,7 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
 
         // A group bob is not in: mentioning him there tells him nothing.
         request
-            .post("/chat/groups")
+            .post(&alice.at("/chat/groups"))
             .as_member(&alice)
             .form(&serde_json::json!({ "name": "leads" }))
             .await;
@@ -94,20 +94,20 @@ async fn chat_mentions_notify_people_who_can_see_the_conversation() {
             .unwrap()
             .unwrap();
         request
-            .post(&format!("/chat/{}/messages", group.id))
+            .post(&alice.at(&format!("/chat/{}/messages", group.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "secret plan for @bob" }))
             .await;
         assert_eq!(inbox(&ctx, bob_id).await.len(), 1);
 
         let page = request
-            .get("/notifications")
+            .get(&bob.at("/notifications"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(page.contains("mentioned you in #general"));
         let badge = request
-            .get("/notifications/unread")
+            .get(&bob.at("/notifications/unread"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -160,7 +160,7 @@ async fn everyone_tells_each_active_member_once() {
             .is_some());
 
         let page = request
-            .get(&format!("/chat/{}", general.id))
+            .get(&alice.at(&format!("/chat/{}", general.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
@@ -174,7 +174,7 @@ async fn everyone_tells_each_active_member_once() {
         );
 
         let res = request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "body": "@everyone launch at 3, @bob runs it" }))
@@ -204,7 +204,7 @@ async fn everyone_tells_each_active_member_once() {
 
         // Tagging yourself alongside everyone is still one reminder.
         request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "@everyone @alice check the doc" }))
             .await;
@@ -230,7 +230,7 @@ async fn everyone_stays_inside_groups_and_dms() {
             approved_member(&request, &ctx, &alice, "carol", "carol@example.com").await;
 
         request
-            .post("/chat/groups")
+            .post(&alice.at("/chat/groups"))
             .as_member(&alice)
             .content_type("application/x-www-form-urlencoded")
             .bytes(format!("name=leads&member_ids={bob_id}").into())
@@ -242,7 +242,7 @@ async fn everyone_stays_inside_groups_and_dms() {
             .unwrap()
             .unwrap();
         request
-            .post(&format!("/chat/{}/messages", group.id))
+            .post(&alice.at(&format!("/chat/{}/messages", group.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "@everyone standup moved" }))
             .await;
@@ -260,7 +260,7 @@ async fn everyone_stays_inside_groups_and_dms() {
 
         // In a DM it reaches the one other person; the picker doesn't offer it.
         request
-            .post("/chat/dms")
+            .post(&alice.at("/chat/dms"))
             .as_member(&alice)
             .form(&serde_json::json!({ "user_id": carol_id }))
             .await;
@@ -271,14 +271,14 @@ async fn everyone_stays_inside_groups_and_dms() {
             .unwrap()
             .unwrap();
         let page = request
-            .get(&format!("/chat/{}", dm.id))
+            .get(&alice.at(&format!("/chat/{}", dm.id)))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(page.contains("data-mentions=\"carol,alice\""), "{page}");
         assert!(!page.contains("data-everyone-hint"), "no @everyone in a DM");
         request
-            .post(&format!("/chat/{}/messages", dm.id))
+            .post(&alice.at(&format!("/chat/{}/messages", dm.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "@everyone hi" }))
             .await;
@@ -306,7 +306,7 @@ async fn assignments_and_notes_notify_the_right_people() {
         let project = project_in(&ctx, "acme", "Launch").await;
 
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
@@ -332,7 +332,7 @@ async fn assignments_and_notes_notify_the_right_people() {
 
         // Adding carol tells carol only; bob was already on it.
         request
-            .post(&format!("/tasks/{}", task.id))
+            .post(&alice.at(&format!("/tasks/{}", task.id)))
             .as_member(&alice)
             .content_type("application/x-www-form-urlencoded")
             .bytes(form_body(&[
@@ -350,7 +350,7 @@ async fn assignments_and_notes_notify_the_right_people() {
 
         // Carol's note mentions alice: alice gets the mention, bob the note, carol nothing new.
         request
-            .post(&format!("/tasks/{}/notes", task.id))
+            .post(&carol.at(&format!("/tasks/{}/notes", task.id)))
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "Draft is up, @alice please review" }))
             .await;
@@ -365,7 +365,7 @@ async fn assignments_and_notes_notify_the_right_people() {
         assert_eq!(inbox(&ctx, carol_id).await.len(), 1);
 
         let sheet = request
-            .get(&format!("/tasks/{}", task.id))
+            .get(&carol.at(&format!("/tasks/{}", task.id)))
             .add_header(carol.0.clone(), carol.1.clone())
             .await
             .text();
@@ -377,12 +377,12 @@ async fn assignments_and_notes_notify_the_right_people() {
 
         // Tagging yourself in a note reads as a reminder to you.
         request
-            .post(&format!("/tasks/{}/notes", task.id))
+            .post(&carol.at(&format!("/tasks/{}/notes", task.id)))
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "Note to self @carol" }))
             .await;
         let own = request
-            .get("/notifications")
+            .get(&carol.at("/notifications"))
             .add_header(carol.0.clone(), carol.1.clone())
             .await
             .text();
@@ -398,7 +398,7 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
         let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob_id) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
         request
-            .post("/roadmap/projects")
+            .post(&alice.at("/roadmap/projects"))
             .as_member(&alice)
             .form(&serde_json::json!({
                 "name": "Launch", "lane": "now", "status": "In progress", "progress": "40",
@@ -416,14 +416,14 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
             .unwrap();
 
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .form(&task_form("Book the venue", project.id, ""))
             .await;
         let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
         for _ in 0..2 {
             request
-                .post(&format!("/tasks/{}/status", task.id))
+                .post(&alice.at(&format!("/tasks/{}/status", task.id)))
                 .as_member(&alice)
                 .form(&serde_json::json!({ "status": "blocked" }))
                 .await;
@@ -441,7 +441,7 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
 
         // An owner who is also assigned gets one notification, not two.
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .form(&task_form("Print badges", project.id, &bob_id.to_string()))
             .await;
@@ -462,7 +462,7 @@ async fn opening_marks_read_and_stays_private() {
         let project = project_in(&ctx, "acme", "Launch").await;
         for title in ["One", "Two"] {
             request
-                .post("/tasks")
+                .post(&alice.at("/tasks"))
                 .as_member(&alice)
                 .form(&task_form(title, project.id, &bob_id.to_string()))
                 .await;
@@ -483,12 +483,12 @@ async fn opening_marks_read_and_stays_private() {
         // Not yours, or another organisation's: not found, and still unread.
         for cookie in [&alice, &gina] {
             let res = request
-                .post(&format!("/notifications/{}/open", first.id))
+                .post(&cookie.at(&format!("/notifications/{}/open", first.id)))
                 .as_member(cookie)
                 .await;
             assert_eq!(res.status_code(), 404);
             let page = request
-                .get("/notifications")
+                .get(&cookie.at("/notifications"))
                 .add_header(cookie.0.clone(), cookie.1.clone())
                 .await
                 .text();
@@ -496,21 +496,21 @@ async fn opening_marks_read_and_stays_private() {
         }
 
         let res = request
-            .post(&format!("/notifications/{}/open", first.id))
+            .post(&bob.at(&format!("/notifications/{}/open", first.id)))
             .as_member(&bob)
             .await;
         assert_eq!(res.status_code(), 303);
         assert_eq!(
             res.headers().get("location").unwrap(),
-            &format!("/tasks?open={}", task.id)
+            &bob.at(&format!("/tasks?open={}", task.id))
         );
         let opened = request
-            .get(&format!("/tasks?open={}", task.id))
+            .get(&bob.at(&format!("/tasks?open={}", task.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(opened.contains(&format!(
-            r##"hx-get="/tasks/{}" hx-target="#task-sheet-body" hx-trigger="load""##,
+            r##"hx-get="/o/acme/tasks/{}" hx-target="#task-sheet-body" hx-trigger="load""##,
             task.id
         )));
 
@@ -518,14 +518,17 @@ async fn opening_marks_read_and_stays_private() {
             let request = &request;
             async move {
                 request
-                    .get("/notifications/unread")
+                    .get(&cookie.at("/notifications/unread"))
                     .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
         };
         assert!(badge(bob.clone()).await.contains(">1<"));
-        request.post("/notifications/read").as_member(&bob).await;
+        request
+            .post(&bob.at("/notifications/read"))
+            .as_member(&bob)
+            .await;
         assert_eq!(badge(bob).await, "");
     })
     .await;
@@ -561,14 +564,14 @@ async fn unseen_mentions_are_emailed_once() {
         let project = project_in(&ctx, "acme", "Launch").await;
         for body in ["Can @bob and @carol look?", "@everyone one more thing"] {
             request
-                .post(&format!("/chat/{}/messages", general.id))
+                .post(&alice.at(&format!("/chat/{}/messages", general.id)))
                 .as_member(&alice)
                 .form(&serde_json::json!({ "body": body }))
                 .await;
         }
         // An assignment is not a mention, so it is never emailed.
         request
-            .post("/tasks")
+            .post(&alice.at("/tasks"))
             .as_member(&alice)
             .form(&task_form(
                 "Book the venue",
@@ -581,7 +584,10 @@ async fn unseen_mentions_are_emailed_once() {
         assert_eq!(collab::mailers::mentions::send_due(&ctx).await.unwrap(), 0);
 
         // Bob reads his mentions; carol hasn't opened either of hers.
-        request.post("/notifications/read").as_member(&bob).await;
+        request
+            .post(&bob.at("/notifications/read"))
+            .as_member(&bob)
+            .await;
         age_notifications(&ctx, 20).await;
         // Bob and Carol's approval emails went out already.
         let before = ctx.mailer.as_ref().unwrap().deliveries().count;
@@ -689,7 +695,7 @@ async fn replies_tell_the_parents_author_and_earlier_repliers_once() {
 
         // The bell shows the green reply icon and opens the thread.
         let page = request
-            .get("/notifications")
+            .get(&shusma_c.at("/notifications"))
             .add_header(shusma_c.0.clone(), shusma_c.1.clone())
             .await
             .text();
@@ -702,12 +708,14 @@ async fn replies_tell_the_parents_author_and_earlier_repliers_once() {
             .unwrap()
             .unwrap();
         let open = request
-            .post(&format!("/notifications/{}/open", notice.id))
+            .post(&shusma_c.at(&format!("/notifications/{}/open", notice.id)))
             .as_member(&shusma_c)
             .await;
         assert_eq!(
             open.headers()["location"],
-            format!("/chat/{}/threads/{}", general.id, parent.id).as_str()
+            shusma_c
+                .at(&format!("/chat/{}/threads/{}", general.id, parent.id))
+                .as_str()
         );
     })
     .await;
@@ -827,7 +835,7 @@ async fn mentioning_yourself_in_a_reply_is_a_reminder_only() {
             )]
         );
         let page = request
-            .get("/notifications")
+            .get(&shusma_c.at("/notifications"))
             .add_header(shusma_c.0.clone(), shusma_c.1.clone())
             .await
             .text();
@@ -849,7 +857,7 @@ async fn reply_notices_stay_inside_groups_and_dms() {
             people.try_into().unwrap();
         // A group of raj, shusma and samir. Samir starts a thread, then is removed.
         request
-            .post("/chat/groups")
+            .post(&raj_c.at("/chat/groups"))
             .as_member(&raj_c)
             .content_type("application/x-www-form-urlencoded")
             .bytes(format!("name=shop&member_ids={shusma}&member_ids={samir}").into())
@@ -869,7 +877,7 @@ async fn reply_notices_stay_inside_groups_and_dms() {
             .unwrap()
             .unwrap();
         request
-            .post(&format!("/members/{}/remove", samir_m.id))
+            .post(&raj_c.at(&format!("/members/{}/remove", samir_m.id)))
             .as_member(&raj_c)
             .await;
 
@@ -880,7 +888,7 @@ async fn reply_notices_stay_inside_groups_and_dms() {
 
         // A DM has no place in the wording.
         request
-            .post("/chat/dms")
+            .post(&raj_c.at("/chat/dms"))
             .as_member(&raj_c)
             .form(&serde_json::json!({ "user_id": shusma }))
             .await;
@@ -940,7 +948,7 @@ async fn add_note(
     body: &str,
 ) {
     let res = request
-        .post(&format!("/tasks/{}/notes", task.id))
+        .post(&who.at(&format!("/tasks/{}/notes", task.id)))
         .as_member(who)
         .add_header("HX-Request", "true")
         .form(&serde_json::json!({ "body": body }))
@@ -1066,7 +1074,7 @@ async fn an_acting_super_admin_cannot_notify_everyone() {
         let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
 
         let res = request
-            .post(&format!("/tasks/{}/notes", task.id))
+            .post(&format!("/o/acme/tasks/{}/notes", task.id))
             .add_header("cookie", acting)
             .add_header("x-org-id", acme.id.to_string())
             .add_header("HX-Request", "true")
@@ -1098,7 +1106,7 @@ async fn the_note_box_offers_everyone_first() {
         add_note(&request, &samir_c, &task, "@everyone stock count Friday").await;
 
         let sheet = request
-            .get(&format!("/tasks/{}", task.id))
+            .get(&samir_c.at(&format!("/tasks/{}", task.id)))
             .add_header(samir_c.0.clone(), samir_c.1.clone())
             .await
             .text();

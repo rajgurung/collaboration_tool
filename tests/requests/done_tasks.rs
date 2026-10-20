@@ -39,7 +39,11 @@ async fn done_task(
 ) {
     let mut form = task_form(title, project_id, assignee);
     form["status"] = "done".into();
-    request.post("/tasks").as_member(owner).form(&form).await;
+    request
+        .post(&owner.at("/tasks"))
+        .as_member(owner)
+        .form(&form)
+        .await;
     let mut task: tasks::ActiveModel = task_named(ctx, title).await.into();
     task.done_at = Set(Some(done_at));
     task.update(&ctx.db).await.unwrap();
@@ -75,11 +79,15 @@ async fn done_at_follows_the_status_on_every_route() {
         // Added straight into Done.
         let mut form = task_form("Born done", project.id, "");
         form["status"] = "done".into();
-        request.post("/tasks").as_member(&owner).form(&form).await;
+        request
+            .post(&owner.at("/tasks"))
+            .as_member(&owner)
+            .form(&form)
+            .await;
         assert!(done_at("Born done").await.is_some());
 
         request
-            .post("/tasks")
+            .post(&owner.at("/tasks"))
             .as_member(&owner)
             .form(&task_form("Ship it", project.id, ""))
             .await;
@@ -92,7 +100,7 @@ async fn done_at_follows_the_status_on_every_route() {
             let cookie = owner.clone();
             async move {
                 request
-                    .post(&format!("/tasks/{id}/status"))
+                    .post(&cookie.at(&format!("/tasks/{id}/status")))
                     .as_member(&cookie)
                     .form(&serde_json::json!({ "status": value }))
                     .await;
@@ -118,7 +126,7 @@ async fn done_at_follows_the_status_on_every_route() {
             form["status"] = value.into();
             async move {
                 request
-                    .post(&format!("/tasks/{id}"))
+                    .post(&cookie.at(&format!("/tasks/{id}")))
                     .as_member(&cookie)
                     .form(&form)
                     .await;
@@ -171,7 +179,7 @@ async fn the_board_shows_the_latest_five_done_per_lane() {
             .await;
         }
         request
-            .post("/tasks")
+            .post(&owner.at("/tasks"))
             .as_member(&owner)
             .form(&task_form("Launch still open", launch.id, ""))
             .await;
@@ -181,14 +189,14 @@ async fn the_board_shows_the_latest_five_done_per_lane() {
             let cookie = owner.clone();
             async move {
                 request
-                    .get(url)
+                    .get(&cookie.to(url))
                     .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
             }
         };
-        let launch_link = format!(r#"href="/tasks?filter=done&project={}""#, launch.id);
-        let mobile_link = format!(r#"href="/tasks?filter=done&project={}""#, mobile.id);
+        let launch_link = format!(r#"href="/o/acme/tasks?filter=done&project={}""#, launch.id);
+        let mobile_link = format!(r#"href="/o/acme/tasks?filter=done&project={}""#, mobile.id);
         for (url, layout) in [
             ("/tasks/board?group=project", "board"),
             ("/tasks/board?group=project&view=list", "list"),
@@ -218,13 +226,16 @@ async fn the_board_shows_the_latest_five_done_per_lane() {
         // A search on the board carries through to the Done view.
         let searched = get("/tasks/board?group=project&q=launch").await;
         assert!(searched.contains(&format!(
-            r#"href="/tasks?filter=done&project={}&q=launch""#,
+            r#"href="/o/acme/tasks?filter=done&project={}&q=launch""#,
             launch.id
         )));
 
         // A person's lane links to that person's done tasks.
         let by_person = get("/tasks/board?group=person").await;
-        assert!(by_person.contains(&format!(r#"href="/tasks?filter=done&person={}""#, alice.id)));
+        assert!(by_person.contains(&format!(
+            r#"href="/o/acme/tasks?filter=done&person={}""#,
+            alice.id
+        )));
     })
     .await;
 }
@@ -275,7 +286,7 @@ async fn the_done_view_groups_by_week_and_month_in_the_orgs_zone() {
             let cookie = owner.clone();
             async move {
                 request
-                    .get(&url)
+                    .get(&cookie.to(&url))
                     .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
@@ -354,7 +365,7 @@ async fn the_done_view_ignores_another_orgs_project_or_person() {
             format!("person={}", gina_user.id),
         ] {
             let body = request
-                .get(&format!("/tasks/list?filter=done&{query}"))
+                .get(&owner.at(&format!("/tasks/list?filter=done&{query}")))
                 .add_header(owner.0.clone(), owner.1.clone())
                 .await
                 .text();
@@ -385,7 +396,7 @@ async fn the_migration_backfills_done_at_from_updated_at() {
         )
         .await;
         request
-            .post("/tasks")
+            .post(&owner.at("/tasks"))
             .as_member(&owner)
             .form(&task_form("Open", launch.id, ""))
             .await;

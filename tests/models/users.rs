@@ -486,35 +486,6 @@ async fn end_unlock_in_clears_only_that_org() {
 
 #[tokio::test]
 #[serial]
-async fn end_unlock_for_session_clears_only_that_sign_in() {
-    let boot = boot_test::<App>().await.unwrap();
-    let ctx = &boot.app_context;
-    let orgs = alice_in_two_orgs(ctx).await;
-    assert!(
-        Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.acme)
-            .await
-            .unwrap()
-    );
-
-    Model::end_unlock_for_session(&ctx.db, orgs.alice, "sid-2")
-        .await
-        .unwrap();
-    let alice = Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
-    assert!(
-        alice.secrets_unlocked(Some("sid-1"), orgs.acme),
-        "another sign-in"
-    );
-
-    Model::end_unlock_for_session(&ctx.db, orgs.alice, "sid-1")
-        .await
-        .unwrap();
-    let alice = Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
-    assert!(!alice.secrets_unlocked(Some("sid-1"), orgs.acme));
-    assert_eq!(alice.secrets_unlocked_sid, None);
-}
-
-#[tokio::test]
-#[serial]
 async fn a_password_reset_revokes_tokens_in_every_org() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;

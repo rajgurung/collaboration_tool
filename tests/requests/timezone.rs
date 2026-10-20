@@ -26,7 +26,7 @@ async fn organisations_read_times_in_their_own_zone() {
             .await
             .unwrap();
         request
-            .post(&format!("/chat/{}/messages", general.id))
+            .post(&alice.at(&format!("/chat/{}/messages", general.id)))
             .as_member(&alice)
             .form(&serde_json::json!({ "body": "Stand-up notes are in" }))
             .await;
@@ -45,7 +45,7 @@ async fn organisations_read_times_in_their_own_zone() {
             let path = format!("/chat/{}", general.id);
             async move {
                 request
-                    .get(&path)
+                    .get(&cookie.to(&path))
                     .add_header(cookie.0.clone(), cookie.1.clone())
                     .await
                     .text()
@@ -54,7 +54,7 @@ async fn organisations_read_times_in_their_own_zone() {
         assert!(chat(alice.clone()).await.contains("18:00"), "BST is UTC+1");
 
         let res = request
-            .post("/members/timezone")
+            .post(&alice.at("/members/timezone"))
             .as_member(&alice)
             .form(&serde_json::json!({ "timezone": "America/New_York" }))
             .await;
@@ -86,13 +86,13 @@ async fn only_owners_and_admins_change_the_zone() {
         let (bob, _) = approved_member(&request, &ctx, &alice, "bob", "bob@example.com").await;
 
         let page = request
-            .get("/members")
+            .get(&alice.at("/members"))
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
         assert!(page.contains("Time zone") && page.contains(r#"value="Europe/London" selected"#));
         let bobs = request
-            .get("/members")
+            .get(&bob.at("/members"))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
@@ -102,14 +102,14 @@ async fn only_owners_and_admins_change_the_zone() {
         );
 
         let res = request
-            .post("/members/timezone")
+            .post(&bob.at("/members/timezone"))
             .as_member(&bob)
             .form(&serde_json::json!({ "timezone": "Asia/Kathmandu" }))
             .await;
         assert_eq!(res.status_code(), 403);
 
         let res = request
-            .post("/members/timezone")
+            .post(&alice.at("/members/timezone"))
             .as_member(&alice)
             .add_header("HX-Request", "true")
             .form(&serde_json::json!({ "timezone": "Mars/Olympus" }))

@@ -1,0 +1,25 @@
+{# The ways off a waiting, removed or declined page (§3), when the person has another active org. One other: "Open {org}" first. Two or more: "Your other organisations", the last used first. `check_again` only on the waiting page. #}
+{% if others | length == 1 %}
+<div class="btn-col">
+  <a href="{{ others[0].url }}" class="btn btn-primary btn-lg">Open {{ others[0].name }}</a>
+  {% if check_again %}<a href="{{ check_again }}" class="btn btn-secondary btn-lg">Check again</a>{% endif %}
+</div>
+{% else %}
+<div class="other-orgs">
+  <h3 class="section-label mx-1 mb-2 mt-0">Your other organisations</h3>
+  <div class="list">
+    {% for o in others %}
+    <a href="{{ o.url }}" class="org-row">
+      <span class="org-logo org-logo-lg">{{ o.name | truncate(length=1, end="") | upper }}</span>
+      <span class="org-text"><span class="org-name truncate-1">{{ o.name }}</span><span class="meta"><span class="capitalize">{{ o.role }}</span>{% if o.last %} · Last used{% endif %}</span></span>
+      {{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% if check_again %}<div class="btn-col mt-5"><a href="{{ check_again }}" class="btn btn-secondary btn-lg">Check again</a></div>{% endif %}
+{% endif %}
+<div class="auth-foot">
+  <span class="inline-flex items-center">Signed in as {{ username }}</span>
+  <form method="post" action="/logout"><button type="submit" class="link-btn">Sign out</button></form>
+</div>

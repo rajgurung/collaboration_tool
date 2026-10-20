@@ -53,6 +53,8 @@ async fn index(
         data!({
             "active": "admin",
             "org": { "name": "Platform admin" },
+            // No org: the sidebar's links stay bare and open the last org.
+            "org_base": "",
             "me": { "username": user.name, "color": avatar_color(&user.name), "is_super_admin": true },
             "orgs": orgs,
             "people": people,
@@ -75,7 +77,8 @@ async fn enter(
         org = org.slug,
         "super admin entered organisation"
     );
-    let mut response = redirect_response(&headers, "/dashboard");
+    let home = crate::views::links::org_path(&org.slug, "/dashboard");
+    let mut response = redirect_response(&headers, &home);
     append_cookie(&mut response, &acting_org_cookie(&ctx, org.id)?)?;
     Ok(response)
 }

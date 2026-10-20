@@ -16,11 +16,11 @@
     <h2 class="section-label">Organisation</h2>
     <div class="list">
       {% if can_switch %}
-      <a href="/orgs" class="list-row min-h-[60px]" role="button" aria-haspopup="dialog" data-org-sheet><span class="org-logo org-logo-lg">{{ org.name | truncate(length=1, end="") | upper }}</span><span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-base font-semibold">{{ org.name }}</span><span class="meta {% if not me.acting %}capitalize{% endif %}">{% if me.acting %}Platform admin{% else %}{{ me.role }}{% endif %}</span></span><span class="text-[15px] font-semibold text-link">Switch</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      <a href="{{ org_url(path="/orgs") }}" class="list-row min-h-[60px]" role="button" aria-haspopup="dialog" data-org-sheet><span class="org-logo org-logo-lg">{{ org.name | truncate(length=1, end="") | upper }}</span><span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-base font-semibold">{{ org.name }}</span><span class="meta {% if not me.acting %}capitalize{% endif %}">{% if me.acting %}Platform admin{% else %}{{ me.role }}{% endif %}</span></span><span class="text-[15px] font-semibold text-link">Switch</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
       {% else %}
       <div class="list-row min-h-[60px]"><span class="org-logo org-logo-lg">{{ org.name | truncate(length=1, end="") | upper }}</span><span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-base font-semibold">{{ org.name }}</span><span class="meta {% if not me.acting %}capitalize{% endif %}">{% if me.acting %}Platform admin{% else %}{{ me.role }}{% endif %}</span></span></div>
       {% endif %}
-      {% if not me.acting %}<a href="/orgs/new" class="list-row org-new min-h-14" aria-haspopup="dialog" data-org-new><span class="org-logo-new org-logo-new-lg">{{<icon name="plus" class="h-[18px] w-[18px]"/>}}</span><span class="flex-1 text-base font-semibold">New organisation</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>{% endif %}
+      {% if not me.acting %}<a href="{{ org_url(path="/orgs/new") }}" class="list-row org-new min-h-14" aria-haspopup="dialog" data-org-new><span class="org-logo-new org-logo-new-lg">{{<icon name="plus" class="h-[18px] w-[18px]"/>}}</span><span class="flex-1 text-base font-semibold">New organisation</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>{% endif %}
     </div>
   </section>
   {% endif %}
@@ -28,11 +28,11 @@
   <section class="flex flex-col gap-2">
     <h2 class="section-label">Workspace</h2>
     <div class="list">
-      <a href="/roadmap" class="list-row">{{<icon name="map" class="h-5 w-5"/>}}<span class="flex-1 text-base">Roadmap</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
-      <a href="/meetings" class="list-row">{{<icon name="message-square-text" class="h-5 w-5"/>}}<span class="flex-1 text-base">Meetings</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
-      {% if not me.acting %}<a href="/documents" class="list-row">{{<icon name="folder" class="h-5 w-5"/>}}<span class="flex-1 text-base">Documents</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>{% endif %}
-      <a href="/members" class="list-row">{{<icon name="users" class="h-5 w-5"/>}}<span class="flex-1 text-base">Members</span>{% if waiting > 0 %}<span class="pill bg-active">{{ waiting }} waiting</span>{% endif %}{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
-      <form action="/guide/show" method="post"><button type="submit" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit">{{<icon name="sparkles" class="h-5 w-5"/>}}<span class="flex-1">Getting started guide</span><span class="meta text-[15px]">Show on Home</span></button></form>
+      <a href="{{ org_url(path="/roadmap") }}" class="list-row">{{<icon name="map" class="h-5 w-5"/>}}<span class="flex-1 text-base">Roadmap</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      <a href="{{ org_url(path="/meetings") }}" class="list-row">{{<icon name="message-square-text" class="h-5 w-5"/>}}<span class="flex-1 text-base">Meetings</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      {% if not me.acting %}<a href="{{ org_url(path="/documents") }}" class="list-row">{{<icon name="folder" class="h-5 w-5"/>}}<span class="flex-1 text-base">Documents</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>{% endif %}
+      <a href="{{ org_url(path="/members") }}" class="list-row">{{<icon name="users" class="h-5 w-5"/>}}<span class="flex-1 text-base">Members</span>{% if waiting > 0 %}<span class="pill bg-active">{{ waiting }} waiting</span>{% endif %}{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      <form action="{{ org_url(path="/guide/show") }}" method="post"><button type="submit" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit">{{<icon name="sparkles" class="h-5 w-5"/>}}<span class="flex-1">Getting started guide</span><span class="meta text-[15px]">Show on Home</span></button></form>
     </div>
   </section>
 
@@ -53,7 +53,7 @@
           <button type="button" data-theme-choice="system">System</button><button type="button" data-theme-choice="light">Light</button><button type="button" data-theme-choice="dark">Dark</button>
         </span>
       </div>
-      <a href="/settings/claude" class="list-row">{{<icon name="plug" class="h-5 w-5"/>}}<span class="flex-1 text-base">Connect Claude</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
+      <a href="{{ org_url(path="/settings/claude") }}" class="list-row">{{<icon name="plug" class="h-5 w-5"/>}}<span class="flex-1 text-base">Connect Claude</span>{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a>
       <form action="/account/sign-out-everywhere" method="post"><button type="submit" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit">{{<icon name="monitor-smartphone" class="h-5 w-5"/>}}<span class="flex-1">Sign out everywhere</span></button></form>
       <form action="/logout" method="post"><button type="submit" class="list-row w-full border-0 bg-transparent text-left text-base text-danger">{{<icon name="log-out" class="h-5 w-5"/>}}Sign out</button></form>
     </div>
