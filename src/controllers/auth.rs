@@ -76,18 +76,13 @@ pub fn safe_next(next: &str) -> Option<&str> {
     (next.starts_with("/oauth/authorize?") && !sneaky).then_some(next)
 }
 
-/// The slug when `next` is exactly `/join/` and 1 to 60 of `a`-`z`, `0`-`9`
-/// or `-`, and nothing else. Checked byte by byte on the raw value: no
-/// decoding and no lowercasing, so nothing can follow the slug and anything
-/// outside ASCII fails.
+/// The slug when `next` is exactly `/join/` and a slug
+/// ([`crate::views::links::is_slug`]), and nothing else, so nothing can
+/// follow the slug.
 #[must_use]
 pub fn join_page(next: &str) -> Option<&str> {
     let slug = next.strip_prefix("/join/")?;
-    let ok = (1..=60).contains(&slug.len())
-        && slug
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-    ok.then_some(slug)
+    crate::views::links::is_slug(slug).then_some(slug)
 }
 
 /// `next` percent-encoded for a query string, for links that carry it on.
