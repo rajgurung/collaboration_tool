@@ -432,16 +432,27 @@ impl Model {
     }
 
     /// Unlocks logins for [`UNLOCK_MINUTES`], for one sign-in and one
-    /// organisation only.
+    /// organisation only. Returns false, and unlocks nothing, unless the user
+    /// is an active member there. The membership is read `FOR SHARE`, so a
+    /// removal committing at the same time either runs first (and this is
+    /// refused) or after (and its `end_unlock_in` clears this).
     ///
     /// # Errors
     /// On database errors.
-    pub async fn unlock_secrets<C: ConnectionTrait>(
-        db: &C,
+    pub async fn unlock_secrets(
+        db: &DatabaseConnection,
         user_id: i64,
         session_id: &str,
         org_id: i64,
-    ) -> ModelResult<()> {
+    ) -> ModelResult<bool> {
+        let txn = db.begin().await?;
+        if super::memberships::Model::active_in_for_share(&txn, org_id, user_id)
+            .await?
+            .is_none()
+        {
+            txn.rollback().await?;
+            return Ok(false);
+        }
         let until = chrono::Utc::now() + Duration::minutes(UNLOCK_MINUTES);
         users::Entity::update_many()
             .col_expr(
@@ -457,9 +468,10 @@ impl Model {
                 Expr::value(Some(org_id)),
             )
             .filter(users::Column::Id.eq(user_id))
-            .exec(db)
+            .exec(&txn)
             .await?;
-        Ok(())
+        txn.commit().await?;
+        Ok(true)
     }
 
     /// Ends any unlock of logins, without ending sessions.

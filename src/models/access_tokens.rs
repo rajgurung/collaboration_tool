@@ -11,7 +11,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 pub use super::_entities::access_tokens::{ActiveModel, Column, Entity, Model};
-use super::{field_error, memberships, oauth_clients, oauth_codes};
+use super::{field_error, memberships, oauth_clients, oauth_codes, users};
 
 pub type AccessTokens = Entity;
 
@@ -133,10 +133,13 @@ impl Model {
     }
 
     /// Makes a personal access token. Returns the row and the plain token,
-    /// which is never stored.
+    /// which is never stored. Refused unless the person is an active member;
+    /// the membership is read `FOR SHARE`, so a removal committing meanwhile
+    /// is seen.
     ///
     /// # Errors
-    /// Validation errors (including the 10-token limit), or database errors.
+    /// Validation errors (including the 10-token limit and not being an
+    /// active member), or database errors.
     pub async fn create_personal(
         db: &DatabaseConnection,
         org_id: i64,
@@ -147,6 +150,15 @@ impl Model {
         let name = params.name.trim().to_string();
         ValidatorTrait::validate(&PersonalParams { name: name.clone() })?;
         let txn = db.begin().await?;
+        if memberships::Model::active_in_for_share(&txn, org_id, user_id)
+            .await?
+            .is_none()
+        {
+            return Err(field_error(
+                "name",
+                "You no longer have access to this organisation.",
+            ));
+        }
         let active = Entity::find()
             .filter(Column::OrganisationId.eq(org_id))
             .filter(Column::UserId.eq(user_id))
@@ -187,6 +199,11 @@ impl Model {
     /// request for the same code waits on the row lock until the tokens
     /// exist, so revoking the grant on reuse always catches them.
     ///
+    /// The membership is read `FOR SHARE` before the code is spent, so a
+    /// removal committing meanwhile is seen. Before, not after: a removal
+    /// locks the membership and then spends the person's codes, so the other
+    /// order could deadlock.
+    ///
     /// # Errors
     /// On database errors.
     pub async fn exchange_code(
@@ -194,16 +211,23 @@ impl Model {
         exchange: &CodeExchange<'_>,
     ) -> ModelResult<Option<Issued>> {
         let txn = db.begin().await?;
+        let active = match oauth_codes::Model::owner(&txn, exchange.code).await? {
+            Some((org_id, user_id)) => {
+                memberships::Model::active_in_for_share(&txn, org_id, user_id)
+                    .await?
+                    .is_some()
+            }
+            None => false,
+        };
         let Some(code) = oauth_codes::Model::redeem(&txn, exchange.code).await? else {
             txn.commit().await?;
             return Ok(None);
         };
-        let matches = code.oauth_client_id == exchange.client.id
+        let matches = active
+            && code.oauth_client_id == exchange.client.id
             && code.redirect_uri == exchange.redirect_uri
             && code.resource == exchange.resource
-            && code.verifier_matches(exchange.code_verifier)
-            && memberships::Model::is_active_member(&txn, code.organisation_id, code.user_id)
-                .await?;
+            && code.verifier_matches(exchange.code_verifier);
         if !matches {
             txn.commit().await?;
             return Ok(None);
@@ -230,6 +254,11 @@ impl Model {
     /// resource, or the person is no longer an active member. Using a token
     /// that was already swapped revokes the whole grant.
     ///
+    /// The membership, then the user row, are read `FOR SHARE` before the
+    /// token is touched, so a refresh waits for a removal, a password reset
+    /// or a lock that is committing, then sees the token revoked. Those lock
+    /// in the same order (membership, user, tokens), so they never deadlock.
+    ///
     /// # Errors
     /// On database errors.
     pub async fn refresh(
@@ -239,8 +268,27 @@ impl Model {
         resource: &str,
     ) -> ModelResult<Option<Issued>> {
         let hashed = hash(refresh_token);
-        let now = chrono::Utc::now();
         let txn = db.begin().await?;
+        let owner = Entity::find()
+            .select_only()
+            .column(Column::OrganisationId)
+            .column(Column::UserId)
+            .filter(Column::RefreshHash.eq(&hashed))
+            .into_tuple::<(i64, i64)>()
+            .one(&txn)
+            .await?;
+        let mut active = false;
+        if let Some((org_id, user_id)) = owner {
+            active = memberships::Model::active_in_for_share(&txn, org_id, user_id)
+                .await?
+                .is_some();
+            users::Entity::find_by_id(user_id)
+                .lock_shared()
+                .one(&txn)
+                .await?;
+        }
+        // After the waits, so a token revoked meanwhile is not rotated.
+        let now = chrono::Utc::now();
         let mut rotated = Entity::update_many()
             .col_expr(Column::RevokedAt, Expr::value(now))
             .col_expr(Column::UpdatedAt, Expr::value(now))
@@ -264,7 +312,7 @@ impl Model {
             }
             return Ok(None);
         };
-        if !memberships::Model::is_active_member(&txn, old.organisation_id, old.user_id).await? {
+        if !active {
             txn.commit().await?;
             Self::revoke_grant(db, old.grant_id).await?;
             return Ok(None);

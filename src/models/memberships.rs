@@ -414,6 +414,13 @@ impl Model {
         membership.removed_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
         membership.removed_by_id = ActiveValue::Set(Some(remover_id));
         let membership = membership.update(&txn).await?;
+        // The account row before the tokens, the order a password reset, a
+        // lock and a token refresh use, so they wait for each other instead
+        // of deadlocking.
+        users::Entity::find_by_id(user_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?;
         users::Model::end_unlock_in(&txn, user_id, org_id).await?;
         access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
         conversation_members::Model::remove_everywhere(&txn, org_id, user_id).await?;
@@ -505,6 +512,29 @@ impl Model {
             .filter(Column::Status.eq(status::ACTIVE))
             .one(db)
             .await?)
+    }
+
+    /// [`Self::active_in`], reading the row `FOR SHARE`: it waits for a
+    /// removal of this membership that is committing, then sees `removed`.
+    /// Other readers never wait. For minting tokens and unlocking logins,
+    /// inside their transaction.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn active_in_for_share<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<Option<Self>> {
+        // Locks the row whatever its status, then checks it, so a removal
+        // that commits while this waits is seen.
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::UserId.eq(user_id))
+            .lock_shared()
+            .one(db)
+            .await?
+            .filter(Self::is_active))
     }
 
     /// This user's membership in the organisation in any status, for naming

@@ -441,7 +441,13 @@ async fn unlock(
             (sid, Some(cookie))
         }
     };
-    users::Model::unlock_secrets(&ctx.db, user.id, &session_id, member.org.id).await?;
+    // Refused only when a removal committed after this request was let in.
+    if !users::Model::unlock_secrets(&ctx.db, user.id, &session_id, member.org.id).await? {
+        return plain(
+            StatusCode::FORBIDDEN,
+            "You no longer have access to this organisation.",
+        );
+    }
     login_events::Model::record(&ctx.db, &client, entry(action::UNLOCK, None)).await?;
     let mut response = plain(StatusCode::OK, "Unlocked")?;
     if let Some(cookie) = cookie {
