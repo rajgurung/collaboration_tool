@@ -129,8 +129,9 @@ Limits:
 - The person resets their password: tokens are revoked in every
   organisation, and the email says how to connect Claude again.
 - Minting a token (`create_personal`, `exchange_code`, `refresh`) reads the
-  membership `FOR SHARE`, so one racing a removal waits and is refused. A
-  refresh also reads the user row `FOR SHARE`, so it waits for a reset or a
-  lock.
+  membership, then the user row, `FOR SHARE`. One racing a removal waits and
+  is refused. One racing a reset or a lock either waits for it, or is
+  revoked by it. Locks are always taken membership, user, tokens, the order
+  a removal, a reset and a lock use, so they never deadlock.
 - Every call checks membership and the lock, so a token stops working at
   once even before revocation.
