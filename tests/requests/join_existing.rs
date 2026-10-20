@@ -446,6 +446,46 @@ async fn a_taken_username_redraws_the_form() {
 
 #[tokio::test]
 #[serial]
+async fn the_pending_cap_shows_above_the_form() {
+    request::<App, _, _>(|request, ctx| async move {
+        let w = world(&request, &ctx).await;
+        for n in 1..=5 {
+            let owner = format!("owner{n}");
+            sign_up_member(
+                &request,
+                &format!("Org {n}"),
+                &owner,
+                &format!("{owner}@example.com"),
+            )
+            .await;
+            assert_eq!(
+                ask(&request, &w.alice, &format!("org-{n}"), "alice")
+                    .await
+                    .status_code(),
+                303
+            );
+        }
+        let res = ask(&request, &w.alice, "beta", "alice").await;
+        assert_eq!(res.status_code(), 422);
+        let html = res.text();
+        let alert = html
+            .find(r#"class="alert alert-error m-0 mt-6""#)
+            .expect("a page alert");
+        let form = html.find(r#"action="/join/beta/request""#).unwrap();
+        assert!(alert < form, "above the form");
+        assert!(html[alert..form].contains("already asked to join 5 organisations."));
+        assert!(
+            !html.contains("aria-invalid"),
+            "the username field stays normal"
+        );
+        assert!(html.contains(r#"data-busy-label="Asking…""#));
+        assert!(row(&ctx, w.beta, w.alice_id).await.is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn joining_needs_a_session() {
     request::<App, _, _>(|request, ctx| async move {
         world(&request, &ctx).await;

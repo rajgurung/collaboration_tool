@@ -224,6 +224,25 @@ window.addEventListener("pageshow", (event) => {
     history.replaceState(history.state, "", `${here.pathname}${here.search}${here.hash}`);
   }
 }
+// A plain form whose button has data-busy-label ("Ask to join") says so
+// while it sends, and can't be sent twice. A page restored from the
+// back-forward cache gets its button back.
+document.addEventListener("submit", (event) => {
+  if (event.defaultPrevented) return;
+  const button = (event.target as HTMLFormElement).querySelector<HTMLButtonElement>("button[data-busy-label]");
+  if (!button) return;
+  button.dataset.idleLabel = button.textContent ?? "";
+  button.textContent = button.dataset.busyLabel ?? "";
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+});
+window.addEventListener("pageshow", () => {
+  document.querySelectorAll<HTMLButtonElement>("button[data-busy-label][disabled]").forEach((button) => {
+    button.textContent = button.dataset.idleLabel ?? button.textContent;
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+  });
+});
 document.addEventListener("click", (event) => {
   (event.target as Element | null)?.closest("[data-dismiss-notice]")?.closest("[data-stale-notice], [data-requested-notice]")?.remove();
 });
