@@ -1,6 +1,6 @@
 # Multi-org 5: org-scoped removal
 
-Status: Reviewed; waiting on Raj (staff: approve with changes, applied; security: approve with changes, applied) · PR 5 of 7 · Owner: Raj · 20 October 2026
+Status: Approved by Raj 20 October 2026 (all 8 decisions as recommended); reviewed (staff: approve with changes, applied; security: approve with changes, applied) · PR 5 of 7 · Owner: Raj · 20 October 2026
 
 ## Summary
 
