@@ -43,7 +43,7 @@ async fn create(
         name: &params.name,
         email: &params.email,
     };
-    match memberships::Model::join(&ctx.db, &org, &params).await {
+    match memberships::Model::join_new_account(&ctx.db, &org, &params).await {
         Ok((user, _membership)) => format::render()
             .cookies(&signed_in_cookies(&ctx, &user)?)?
             .redirect("/dashboard"),

@@ -612,3 +612,474 @@ async fn removals_the_other_way_round_do_not_deadlock() {
     assert!(ours.is_ok(), "{ours:?}");
     assert!(theirs.is_ok(), "{theirs:?}");
 }
+
+// Asking to join with an existing account.
+
+async fn org(ctx: &AppContext, id: i64) -> organisations::Model {
+    organisations::Model::find_by_id(&ctx.db, id).await.unwrap()
+}
+
+fn ask(name: &str) -> memberships::JoinParams {
+    memberships::JoinParams {
+        name: name.to_string(),
+    }
+}
+
+/// Alice owns Acme; Bob owns Beta. Alice is not in Beta.
+async fn alice_and_beta(ctx: &AppContext) -> (i64, i64, i64, organisations::Model) {
+    let (alice, acme) = sign_up(ctx, "Acme", "alice").await;
+    let (bob, beta) = sign_up(ctx, "Beta", "bob").await;
+    (alice, acme, bob, org(ctx, beta).await)
+}
+
+async fn request(
+    db: &sea_orm::DatabaseConnection,
+    org: &organisations::Model,
+    user_id: i64,
+    name: &str,
+) -> memberships::JoinOutcome {
+    memberships::Model::request_to_join(db, org, user_id, &ask(name))
+        .await
+        .unwrap()
+}
+
+fn requested(outcome: memberships::JoinOutcome) -> memberships::Model {
+    match outcome {
+        memberships::JoinOutcome::Requested(m) => m,
+        other => panic!("expected Requested, got {other:?}"),
+    }
+}
+
+async fn rows_for(ctx: &AppContext, org_id: i64, user_id: i64) -> Vec<memberships::Model> {
+    memberships::Entity::find()
+        .filter(memberships::Column::OrganisationId.eq(org_id))
+        .filter(memberships::Column::UserId.eq(user_id))
+        .all(&ctx.db)
+        .await
+        .unwrap()
+}
+
+fn name_error(err: &loco_rs::model::ModelError) -> String {
+    collab::views::forms::field_errors(err)
+        .and_then(|e| e.get("name").cloned())
+        .unwrap_or_else(|| format!("not a name error: {err:?}"))
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_adds_a_pending_member_row() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+
+    let row = requested(request(&ctx.db, &beta, alice, "alice2").await);
+    assert_eq!(row.status, "pending");
+    assert_eq!(row.role, "member");
+    assert_eq!(row.username, "alice2");
+    assert_eq!(row.organisation_id, beta.id);
+    assert_eq!(rows_for(ctx, beta.id, alice).await.len(), 1);
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_marks_a_new_row_welcomed() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, bob, beta) = alice_and_beta(ctx).await;
+
+    let row = requested(request(&ctx.db, &beta, alice, "alice").await);
+    assert!(row.welcomed_at.is_some(), "a new row is already welcomed");
+
+    // A rejoined row keeps its own value, here none.
+    let (carol, _) = sign_up(ctx, "Gamma", "carol").await;
+    let carol_in_beta = add_member(ctx, beta.id, carol, "carol").await.unwrap();
+    assert!(carol_in_beta.welcomed_at.is_none());
+    memberships::Model::remove(ctx, beta.id, bob, carol_in_beta.id, &client())
+        .await
+        .unwrap();
+    let again = requested(request(&ctx.db, &beta, carol, "carol").await);
+    assert_eq!(again.id, carol_in_beta.id);
+    assert!(again.welcomed_at.is_none());
+
+    // A brand-new account still gets the welcome pop-up.
+    let (_, fresh) = memberships::Model::join_new_account(
+        &ctx.db,
+        &beta,
+        &users::RegisterParams {
+            email: "dan@example.com".to_string(),
+            password: "correct-horse".to_string(),
+            name: "dan".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(fresh.welcomed_at.is_none());
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_when_pending_changes_nothing() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+    let first = requested(request(&ctx.db, &beta, alice, "alice").await);
+
+    match request(&ctx.db, &beta, alice, "alicia").await {
+        memberships::JoinOutcome::AlreadyPending(m) => assert_eq!(m.id, first.id),
+        other => panic!("{other:?}"),
+    }
+    let rows = rows_for(ctx, beta.id, alice).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].username, "alice", "the username stays");
+    assert_eq!(rows[0].updated_at, first.updated_at);
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_when_active_says_already_a_member() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let beta = org(ctx, orgs.beta).await;
+
+    match request(&ctx.db, &beta, orgs.alice, "alicia").await {
+        memberships::JoinOutcome::AlreadyMember(m) => assert_eq!(m.id, orgs.in_beta.id),
+        other => panic!("{other:?}"),
+    }
+    let rows = rows_for(ctx, orgs.beta, orgs.alice).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].username, "alice");
+    assert_eq!(rows[0].status, "active");
+}
+
+#[tokio::test]
+#[serial]
+async fn a_double_submit_returns_already_pending() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+    let other = second_connection(ctx).await;
+
+    let (one, two) = tokio::join!(
+        request(&ctx.db, &beta, alice, "alice"),
+        request(&other, &beta, alice, "alice"),
+    );
+    let outcomes = [one, two];
+    let made = outcomes
+        .iter()
+        .filter(|o| matches!(o, memberships::JoinOutcome::Requested(_)))
+        .count();
+    let waiting = outcomes
+        .iter()
+        .filter(|o| matches!(o, memberships::JoinOutcome::AlreadyPending(_)))
+        .count();
+    assert_eq!((made, waiting), (1, 1), "{outcomes:?}");
+    assert_eq!(rows_for(ctx, beta.id, alice).await.len(), 1);
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_refuses_a_locked_account() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+    users::Model::lock_account(ctx, alice).await.unwrap();
+
+    let err = memberships::Model::request_to_join(&ctx.db, &beta, alice, &ask("alice"))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        name_error(&err),
+        "Your account is locked. Reset your password to unlock it."
+    );
+    assert!(rows_for(ctx, beta.id, alice).await.is_empty());
+}
+
+#[tokio::test]
+#[serial]
+async fn rejoin_after_removal_updates_the_same_row() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let mut admin = orgs.in_beta.clone().into_active_model();
+    admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+    admin.approved_by_id = ActiveValue::Set(Some(orgs.bob));
+    admin.update(&ctx.db).await.unwrap();
+    remove_alice_from_beta(ctx, &orgs).await;
+    let removed = rows_for(ctx, orgs.beta, orgs.alice).await.remove(0);
+
+    let beta = org(ctx, orgs.beta).await;
+    let row = requested(request(&ctx.db, &beta, orgs.alice, "alicia").await);
+
+    assert_eq!(rows_for(ctx, orgs.beta, orgs.alice).await.len(), 1);
+    assert_eq!(row.id, removed.id);
+    assert_eq!(row.status, "pending");
+    assert_eq!(row.username, "alicia");
+    assert_eq!(row.role, "admin", "the role is history until approval");
+    assert_eq!(row.removed_at, removed.removed_at);
+    assert_eq!(row.removed_by_id, removed.removed_by_id);
+    assert_eq!(row.approved_by_id, removed.approved_by_id);
+    assert_eq!(row.approved_at, removed.approved_at);
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_never_writes_active() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+    for start in [
+        None,
+        Some(memberships::status::PENDING),
+        Some(memberships::status::REJECTED),
+        Some(memberships::status::REMOVED),
+    ] {
+        memberships::Entity::delete_many()
+            .filter(memberships::Column::OrganisationId.eq(beta.id))
+            .filter(memberships::Column::UserId.eq(alice))
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        if let Some(status) = start {
+            add_with_status(ctx, beta.id, alice, status).await;
+        }
+        request(&ctx.db, &beta, alice, "alice").await;
+        let rows = rows_for(ctx, beta.id, alice).await;
+        assert_eq!(rows.len(), 1, "{start:?}");
+        assert_eq!(rows[0].status, "pending", "{start:?}");
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_checks_the_username_in_that_org_only() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+
+    // "bob" is taken in Beta, in any case.
+    let err = memberships::Model::request_to_join(&ctx.db, &beta, alice, &ask("BOB"))
+        .await
+        .unwrap_err();
+    assert_eq!(name_error(&err), "That username is already used in Beta.");
+    assert!(rows_for(ctx, beta.id, alice).await.is_empty());
+
+    // "alice" is hers in Acme, which doesn't count in Beta.
+    requested(request(&ctx.db, &beta, alice, "alice").await);
+}
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_refuses_a_bad_or_reserved_username() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+    for (name, message) in [
+        (
+            "1abc",
+            "Start with a letter and use 3 to 30 letters or numbers.",
+        ),
+        (
+            "ab",
+            "Start with a letter and use 3 to 30 letters or numbers.",
+        ),
+        ("Everyone", "That name is reserved."),
+    ] {
+        let err = memberships::Model::request_to_join(&ctx.db, &beta, alice, &ask(name))
+            .await
+            .unwrap_err();
+        assert_eq!(name_error(&err), message, "{name}");
+    }
+    assert!(rows_for(ctx, beta.id, alice).await.is_empty());
+}
+
+/// `n` organisations owned by others, named "Org 1" and up.
+async fn other_orgs(ctx: &AppContext, n: usize) -> Vec<organisations::Model> {
+    let mut orgs = Vec::new();
+    for i in 1..=n {
+        let (_, id) = sign_up(ctx, &format!("Org {i}"), &format!("owner{i}")).await;
+        orgs.push(org(ctx, id).await);
+    }
+    orgs
+}
+
+const CAP_MESSAGE: &str = "You're waiting to hear from 5 organisations already. Ask again once one of them lets you in or declines.";
+
+#[tokio::test]
+#[serial]
+async fn request_to_join_stops_at_five_pending_requests() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _) = sign_up(ctx, "Acme", "alice").await;
+    let orgs = other_orgs(ctx, 6).await;
+    for org in &orgs[..5] {
+        requested(request(&ctx.db, org, alice, "alice").await);
+    }
+    let err = memberships::Model::request_to_join(&ctx.db, &orgs[5], alice, &ask("alice"))
+        .await
+        .unwrap_err();
+    assert_eq!(name_error(&err), CAP_MESSAGE);
+    assert!(rows_for(ctx, orgs[5].id, alice).await.is_empty());
+}
+
+#[tokio::test]
+#[serial]
+async fn two_requests_at_once_do_not_pass_the_pending_cap() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _) = sign_up(ctx, "Acme", "alice").await;
+    let orgs = other_orgs(ctx, 6).await;
+    for org in &orgs[..4] {
+        requested(request(&ctx.db, org, alice, "alice").await);
+    }
+    let other = second_connection(ctx).await;
+
+    let params = ask("alice");
+    let (one, two) = tokio::join!(
+        memberships::Model::request_to_join(&ctx.db, &orgs[4], alice, &params),
+        memberships::Model::request_to_join(&other, &orgs[5], alice, &params),
+    );
+    assert_eq!(
+        [&one, &two].iter().filter(|r| r.is_ok()).count(),
+        1,
+        "{one:?} {two:?}"
+    );
+    let waiting = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(alice))
+        .filter(memberships::Column::Status.eq(memberships::status::PENDING))
+        .count(&ctx.db)
+        .await
+        .unwrap();
+    assert_eq!(waiting, memberships::MAX_PENDING_REQUESTS);
+}
+
+#[tokio::test]
+#[serial]
+async fn the_org_cap_does_not_apply_to_joining() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, _, beta) = alice_and_beta(ctx).await;
+    let owner = users::Model::find_by_id(&ctx.db, alice).await.unwrap();
+    for n in 2..=organisations::MAX_ORGS_CREATED {
+        let txn = ctx.db.begin().await.unwrap();
+        organisations::Model::create_with_owner(&txn, &format!("Mine {n}"), &owner, "alice")
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+    }
+    assert_eq!(
+        organisations::Model::created_count(&ctx.db, alice)
+            .await
+            .unwrap(),
+        organisations::MAX_ORGS_CREATED
+    );
+    requested(request(&ctx.db, &beta, alice, "alice").await);
+}
+
+#[tokio::test]
+#[serial]
+async fn default_for_user_prefers_pending_over_removed() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (dan, _) = sign_up(ctx, "Dan Co", "dan").await;
+    let (_, gamma) = sign_up(ctx, "Gamma", "gail").await;
+    let (_, delta) = sign_up(ctx, "Delta", "dina").await;
+    let (_, epsilon) = sign_up(ctx, "Epsilon", "eve").await;
+    // Dan's only active org goes; older removed and declined rows, then a
+    // newer pending one.
+    let own = memberships::Model::default_for_user(&ctx.db, dan)
+        .await
+        .unwrap()
+        .unwrap();
+    add_with_status(ctx, gamma, dan, memberships::status::REMOVED).await;
+    add_with_status(ctx, delta, dan, memberships::status::REJECTED).await;
+    add_with_status(ctx, epsilon, dan, memberships::status::PENDING).await;
+    let mut own = own.into_active_model();
+    own.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
+    own.update(&ctx.db).await.unwrap();
+
+    let default = memberships::Model::default_for_user(&ctx.db, dan)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(default.organisation_id, epsilon);
+    let by_user = memberships::Model::default_by_user(&ctx.db).await.unwrap();
+    assert_eq!(by_user[&dan].organisation_id, epsilon);
+}
+
+#[test]
+fn history_lines() {
+    use chrono::TimeZone;
+    let tz = chrono_tz::Pacific::Auckland;
+    let at = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap();
+    let year = chrono::Utc::now().format("%Y").to_string();
+    // 11pm UTC on 2 October is 3 October in Auckland.
+    let removed = at(&format!("{year}-10-02T23:00:00Z"));
+    let declined = at(&format!("{year}-10-14T01:00:00Z"));
+    let approved = at(&format!("{year}-09-01T09:00:00Z"));
+    let base = memberships::Model {
+        created_at: approved,
+        updated_at: approved,
+        id: 1,
+        username: "lena".to_string(),
+        role: "member".to_string(),
+        status: "pending".to_string(),
+        approved_at: None,
+        organisation_id: 1,
+        user_id: 2,
+        approved_by_id: None,
+        guide_dismissed_at: None,
+        welcomed_at: None,
+        removed_at: None,
+        removed_by_id: None,
+    };
+    let line = |m: &memberships::Model| m.history().map(|h| h.line(tz));
+
+    // A first request: none.
+    assert_eq!(line(&base), None);
+    // Removed, then asked again.
+    let was_removed = memberships::Model {
+        approved_at: Some(approved),
+        approved_by_id: Some(3),
+        removed_at: Some(removed),
+        removed_by_id: Some(3),
+        ..base.clone()
+    };
+    assert_eq!(line(&was_removed).as_deref(), Some("Removed on 3 October"));
+    // Declined.
+    let was_declined = memberships::Model {
+        approved_at: Some(declined),
+        approved_by_id: Some(3),
+        status: "rejected".to_string(),
+        ..base.clone()
+    };
+    assert_eq!(
+        line(&was_declined).as_deref(),
+        Some("Declined on 14 October")
+    );
+    // Declined after a removal: the later date.
+    let both = memberships::Model {
+        approved_at: Some(declined),
+        ..was_removed.clone()
+    };
+    assert_eq!(line(&both).as_deref(), Some("Declined on 14 October"));
+    // Declined before declines had dates.
+    let old = memberships::Model {
+        approved_by_id: Some(3),
+        ..base.clone()
+    };
+    assert_eq!(line(&old).as_deref(), Some("Declined before"));
+    // Active rows have none.
+    let active = memberships::Model {
+        status: "active".to_string(),
+        ..was_removed
+    };
+    assert_eq!(active.history(), None);
+    // Another year shows the year.
+    let last_year = chrono::Utc.with_ymd_and_hms(2020, 5, 1, 12, 0, 0).unwrap();
+    let older = memberships::Model {
+        approved_at: Some(last_year.fixed_offset()),
+        ..was_declined
+    };
+    assert_eq!(line(&older).as_deref(), Some("Declined on 2 May 2020"));
+}
