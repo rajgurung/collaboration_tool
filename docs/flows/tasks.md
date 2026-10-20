@@ -9,6 +9,11 @@ organisation (or a super admin acting inside it) can use them. There is no
 role check: any member can create, edit and delete any task, and create or
 edit any project.
 
+Every app path below is under the organisation's address, `/o/{slug}/`
+(so `POST /tasks` is `POST /o/acme-studio/tasks`). Bare paths redirect a page
+load and refuse anything else (see [accounts.md](accounts.md), "Choosing an
+organisation").
+
 ## Projects
 
 - Created and edited on the roadmap: `POST /roadmap/projects` and

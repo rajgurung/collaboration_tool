@@ -59,7 +59,7 @@ create below passes the one chosen for the new org.
 ## Create another organisation
 
 Anyone with an active membership can create another organisation from the
-switcher's "New organisation" row, or at `/orgs/new`. They become its owner,
+switcher's "New organisation" row, or at `/o/{slug}/orgs/new`. They become its owner,
 under a username they choose for it. Same account, same email and password.
 
 ```mermaid
@@ -68,7 +68,7 @@ sequenceDiagram
     participant C as orgs controller
     participant O as organisations model
     participant DB as Postgres
-    P->>C: POST /orgs (organisation_name, name), with the tab's org claim
+    P->>C: POST /o/{slug}/orgs (organisation_name, name), with the tab's org claim
     Note over C: CurrentMember: a stale tab is refused here
     C->>O: create_for_user(user, params, time zone unless acting)
     O->>O: validate, as signup
@@ -79,13 +79,13 @@ sequenceDiagram
     O->>DB: create_with_owner: organisation, owner membership, #general, folders
     O->>DB: copy the time zone, mark the welcome pop-up seen
     O->>DB: COMMIT
-    C-->>P: current_org = new org, acting_org cleared, redirect to /dashboard?created=1
-    Note over C: ends this browser's logins unlock, closes its chat sockets and streams
+    C-->>P: current_org = new org, acting_org cleared, redirect to /o/{new}/dashboard?created=1
+    Note over C: other tabs keep their own address, so nothing is closed or ended
 ```
 
 Rules:
 
-- `CurrentMember` on `GET /orgs/new` and `POST /orgs`, inside the stale-tab
+- `CurrentMember` on `GET /o/{slug}/orgs/new` and `POST /o/{slug}/orgs`, inside the stale-tab
   check. A pending, declined or removed person sees their waiting or removed
   page instead. The page form renders its own `_org`, so it works without
   JavaScript.
@@ -109,11 +109,12 @@ Rules:
 - The new membership has `welcomed_at` set, so Home skips the welcome
   pop-up. The "Getting started" checklist still shows, with the owner's
   steps.
-- After creating, the browser moves in the way a switch does (the shared
-  `enter_org` in `src/controllers/orgs.rs`). It lands on
-  `/dashboard?created=1`, a constant, where Home shows "Lumen Café is ready.
-  You're the owner.", named from the org the request resolved. The page is
-  `no-store` and `app.ts` drops `?created=1` from the address.
+- After creating, this tab opens the new org (`enter_org` in
+  `src/controllers/orgs.rs`): it remembers it in `current_org`, clears
+  `acting_org` and lands on `/o/{new slug}/dashboard?created=1`, where Home
+  shows "Lumen Café is ready. You're the owner.", named from the org the
+  request resolved. The page is `no-store` and `app.ts` drops `?created=1`
+  from the address. Other tabs and their sockets carry on in their own org.
 - No email or notification is sent. The log line "created organisation"
   has numbers only: `user_id`, `org_id`, `from_org` and, while acting,
   `acting_org`.
@@ -264,71 +265,118 @@ to their active organisation instead (see "Choosing an organisation").
 
 ## Choosing an organisation
 
-A user can have one membership per organisation. The `current_org` cookie says
-which organisation this browser is working in. It is only a hint: every
-request checks it again.
+Every app page lives at `/o/{slug}/...`, for example
+`/o/acme-studio/tasks/58`. The address picks the organisation for that
+request, so each tab holds its own and two organisations can be open side by
+side (`docs/plans/org-url-1.md`).
 
-`CurrentMember` picks the organisation in this order
-(`src/extractors/current_member.rs`, `chosen_org`):
+**The address layer.** `src/initializers/org_path.rs` wraps the whole router.
+For `/o/{slug}/{section}/...`, where the slug is 1 to 60 of `a`-`z`, `0`-`9`
+or `-` and the first segment is a tenant section (`TENANT_SECTIONS` in
+`src/views/links.rs`), it routes the request as `/{section}/...` and records
+the slug as `PathOrg`. Routes, handlers and `Path` extractors don't change.
+Any other shape under `/o/` (a bad slug, `.` or `..`, a public route) is left
+alone and 404s. `/o/{slug}` alone is a 303 to its Home (GET and HEAD only).
 
-1. A super admin with a valid `acting_org`: that org (see
+**Resolution** (`src/extractors/current_member.rs`, `in_address_org`). On
+every request, signed in:
+
+1. A super admin whose `acting_org` is this org: acting there (see
    [super-admin.md](super-admin.md)).
-2. A `current_org` where the user has an `active` membership: that org.
-3. Otherwise the default: the oldest active membership, else the oldest
-   pending one, else the oldest in any status.
-   If a `current_org` cookie was sent (not a number, no access, a deleted
-   org, any status but active), the response clears it
-   (`src/initializers/current_org.rs`).
+2. One query, `memberships::Model::in_org_by_slug`: your own row in the org
+   with that slug, in any status.
+3. Active: you're in.
+4. Pending, removed or declined: that org's waiting, removed or declined
+   page (403), with "Open {your last org}" or a list of your other
+   organisations (last used first, then A to Z). HTMX and `fetch` get 409,
+   `HX-Redirect: /o/{slug}/dashboard` and `X-Org-Gone`. A super admin gets
+   `/admin`.
+5. No row, or no such org: the same answer from the same query. A page load
+   is the plain "We couldn't find that page" with "Signed in as {email}"
+   (`errors/not_found_signed_in.html`, drawn by `not_found_page` from the
+   user alone). HTMX and `fetch` get 409 to `/dashboard`.
 
-`POST /orgs/{id}/switch` sets the cookie (`src/controllers/orgs.rs`). The
-switcher calls it (see "The switcher"). `POST /orgs` sets it too, to the org
-it just created, through the same `enter_org` (see "Create another
-organisation").
+What the identical not-found protects: who belongs to an organisation, not
+whether it exists. An organisation's existence is already public through its
+join page, `/join/{slug}`.
 
-- It answers 404 unless the user has an active membership in that org, so it
-  does not reveal whether the org exists.
-- It sets `current_org` (`HttpOnly`, `SameSite=Lax`, 7 days like the session)
-  and clears `acting_org`.
-- It ends this sign-in's logins unlock (`end_unlock_for_session`) and
-  closes this browser's chat sockets and notification streams
-  (`close_in_browser`, matched by sign-in id). They reconnect in the new
-  org. The person's other browsers keep their own `current_org`, so their
-  sockets and unlocks are left alone. A cookie from before sign-in ids has
-  none, so it ends every unlock and closes every socket, as before.
-- It lands on `/dashboard?switched=1`, a constant: it ignores any `next`.
-  Home then shows "You're now in Northwind Bakery", named from the org the
-  request resolved, never from the URL.
-- There is no GET that changes the org.
+**The `current_org` cookie** only remembers the last organisation, for bare
+addresses and for landing after sign-in. A page load at `/o/{slug}/` (own
+membership, not acting) moves it there, but only when `Sec-Fetch-Site` is
+`same-origin` or `none` (typed or bookmarked), or missing. A navigation
+started by another site never moves it, and HTMX, `fetch`, writes and acting
+never do. It never affects a request with `/o/{slug}/`. Same attributes as
+before: `HttpOnly`, `SameSite=Lax`, `Path=/`, as long as a session. One that
+names an org you aren't active in is cleared.
+
+**Bare addresses** (`/tasks`, an old email's `/tasks?open=58`):
+
+- A page load (GET or HEAD, no `HX-Request`, no `X-Org-Id`, no `Upgrade`, not
+  asking for `text/event-stream`) is a 303 to `/o/{slug}` plus the same path
+  and query. The slug is the item's org when the address names one
+  (`old_link_item`: a task, saved view, conversation, folder, file, login,
+  member or project) and you are active there or acting in it; otherwise the
+  last org: `acting_org`, then a `current_org` you're active in, then your
+  default membership.
+- Anything else bare (a POST, an HTMX call, a `fetch`, the socket, the stream)
+  is refused and never redirected, so a write can't be replayed into the
+  last-used org: 409 with `HX-Redirect` for HTMX and `fetch`, 303 for a form.
+  It lands on Home in the org the tab was showing if you're still active
+  there, else the last org, with `?from=`.
+- The Claude Allow page (`/oauth/authorize`) stays bare and uses the last org
+  until PR 3's picker.
+
+**The rule, restated from PR 2.** The address grants nothing: access is
+checked on every request. A GET may only move the remember cookie as above.
+No GET starts or ends acting, ends an unlock, closes connections or writes.
+A bare request that isn't a page load is refused. Every redirect target is
+`/o/` plus a slug from the database plus the request's own path and query.
+
+**Links.** Every app link is built by one helper: `org_url(path=...)` in
+templates, `member.url(...)` and `member.fragment(...)` in Rust,
+`orgUrl(...)` in `frontend/app.ts` (from `<body data-org-base>`). Paths
+stored by models (`notifications.link`, guide steps, saved views) stay
+org-relative and get the prefix when shown. `tests/requests/links.rs` walks
+the rendered pages and write responses, and greps the sources.
+
+`POST /orgs/{id}/switch` remains for one release, for tabs drawn before the
+deploy: it checks you're active there, remembers it, clears `acting_org` and
+lands on `/o/{slug}/dashboard`. Under `/o/` it is a 404. It closes nothing.
 
 The Claude Allow page and the personal token form carry the org they were
-shown for in a hidden `org_id`. If the browser has switched since, they are
-refused and no code or token is made.
+shown for in a hidden `org_id`. A token form posted under one org's address
+with another org's pin is refused, and no token is made.
 
 ### The switcher
 
 For every member who is not acting, even with one org, the org name at the
 top of the sidebar opens a menu of your organisations. On phones, Home's
 header name opens the same list in a sheet. The list ends with "New
-organisation", a link to `/orgs/new` outside the switch form, which opens the
-form as a dialog on desktop and in place of the list on a phone.
-`CurrentMember.org_menu` decides this, on full page loads only. For members
-it costs no query. While acting it needs an org of their own
-(`memberships::Model::switcher_counts`, one indexed query), and the menu has
-no "New organisation" row.
+organisation", a link to `/o/{slug}/orgs/new`, which opens the form as a
+dialog on desktop and in place of the list on a phone.
+`CurrentMember.org_menu` decides this, on full page loads only.
 
-More's "Organisation" section shows for everyone: the current org, with
-"Switch" only when there is another org (or a pending request) to switch to,
-then "New organisation" (not while acting).
+Each other org's row is a link to the same section there: from
+`/o/acme/tasks/58` the Beta row is `/o/beta/tasks` (`section_path`, from the
+page's `active` key, no query). So Cmd-click, middle-click and long-press
+open it in a new tab. A plain click shows "Opening…" on the row, and the
+next page shows "You're now in Beta", from its own org name (a
+`sessionStorage` flag says to). The current org is a button with a tick.
 
-The rows come from `GET /orgs` (`memberships::Model::for_user_with_orgs`):
-active A to Z, then pending, greyed. Declined and removed are not listed.
-Over HTMX it is a fragment for the menu or sheet; without JavaScript it is a
-page, and each row is a plain form button. Both are `no-store`.
+The rows come from `GET /o/{slug}/orgs?section=...`
+(`memberships::Model::for_user_with_orgs`): active A to Z, then pending,
+greyed. Declined and removed are not listed. Over HTMX it is a fragment for
+the menu or sheet; without JavaScript it is a page of the same links. Both
+are `no-store`.
+
+For people in two or more organisations, every phone page but Home names its
+org in a small line above the title, and the task sheet names it above the
+project (`body[data-multi-org]`).
 
 ### Stale tabs
 
-The cookie is per browser, so a switch in one tab moves every tab. A tab
-left on the old org must not write into the new one.
+Each page posts to its own org's address, so another tab can no longer make
+it stale. The check stays as a backstop for tabs drawn before an update.
 
 - Every app page says which org it was drawn for: `data-org-id` and
   `hx-headers='{"X-Org-Id": <id>}'` on `<body>` (`layouts/base.html`).
@@ -338,39 +386,27 @@ left on the old org must not write into the new one.
 - The `current-org` layer (`src/initializers/current_org.rs`) reads the
   header, or `_org` from a signed-in urlencoded body, into an `OrgClaim`. It
   puts the body back for `Form`. Over 2 MB is a 413, as `Form` would.
-- `CurrentMember` compares the claim with the org it resolved (the acting
-  org while acting). Plain GET page loads are never checked. HTMX GETs with
-  no claim pass, so tabs from before the deploy keep polling. Anything else
-  that is missing, garbage or another org is refused: 409 with
-  `HX-Redirect: /dashboard?from=<id>` for HTMX and `fetch`, 303 for a plain
-  form. Only a parsed number goes into that address.
-- Home then shows a notice: "This tab was showing Acme Studio. You're now in
-  Northwind Bakery." It names the old org, with "Back to Acme Studio", only
-  if you are an active member there. Nothing was saved.
-- When the claimed org is one this user was removed from, the refusal also
-  carries `X-Org-Gone: 1`, and Home says "You no longer have access to Beta.
-  You're now in Acme." and "An owner or admin removed you. Nothing from this
-  tab was saved.", with no Back. Both look up the signed-in user's own
-  membership (`in_org_for_user`), never one named by the request, so a
-  forged `X-Org-Id` or `?from=` can only name an org the person was removed
-  from themselves. Pending, declined, someone else's or a deleted org gets
-  the nameless notice.
+- `CurrentMember` compares the claim with the address's org. Plain GET page
+  loads are never checked. A claim for another org, or one that is missing
+  or garbage, is refused to `/o/{address slug}/dashboard?from=<id>`. Only a
+  page drawn for one org that posts to another org's address gets here: a
+  bug or a forged request.
+- Home then shows "Your last change wasn't saved." and "The app was updated
+  while this tab was open, so we stopped the change to be safe. Please make
+  it again." When the claimed org is one your own row was removed from, the
+  refusal carries `X-Org-Gone: 1` and Home says "You no longer have access
+  to Beta." instead.
 - A tab holding typed text or an upload does not move. It shows one banner
-  in place, keeps the text, and offers "Back to Acme Studio" (which switches
-  the browser back without leaving the page) and "Go to Home". After a
-  removal the banner says "You no longer have access to Beta." and offers
-  only "Go to Home"; it replaces a switch banner already up.
-- `app.ts` also asks `GET /orgs/current` when the chat socket closes, when
-  the notification stream comes back or ends for good, on a back or forward
-  load and before each upload, so a stale tab moves within seconds.
-- The check runs when a request starts. An upload already in flight when a
-  switch happens finishes into the org the page showed. The person is still
-  a member there, so it is not a cross-org write.
+  in place: "This tab is out of date, so nothing was saved." with "Reload
+  page". After a removal the banner says "You no longer have access to
+  Beta." and offers only "Go to Home".
+- `app.ts` asks `GET /o/{slug}/orgs/current` when the chat socket closes,
+  when the notification stream comes back or ends for good, on a back or
+  forward load and before each upload.
 
 The Claude Allow page and the token form keep their own `org_id` pin and
-skip this check (`PinnedMember`), so they can answer better than the generic
-refusal. The route walk in `tests/requests/stale_tab.rs` lists every route
-that skips the check.
+skip this check (`PinnedMember`). The route walk in
+`tests/requests/stale_tab.rs` lists every route that skips the check.
 
 ### Removing a member
 

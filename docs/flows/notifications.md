@@ -17,7 +17,7 @@ sequenceDiagram
     Src->>Send: send(org, actor, recipients, notice)
     Send->>DB: one row per recipient (actor skipped unless a mention)
     Send->>Hub: publish recipients
-    Hub-->>Page: SSE event "notify" on /notifications/stream
+    Hub-->>Page: SSE event "notify" on /o/SLUG/notifications/stream
     Page->>Page: reload the badge from /notifications/unread
     Job->>DB: unread mentions older than 15 minutes, not yet emailed
     Job->>DB: mark them emailed first
@@ -33,31 +33,37 @@ Rules:
 - The SSE stream sends only the event name `notify` with data `1`. The page
   then fetches the count. Keep-alive every 25 seconds
   (`src/controllers/notifications.rs:546`).
-- The stream follows one organisation, the one `CurrentMember` resolved. A
-  notice in another of the person's orgs doesn't ping it; the badge only
-  counts this org anyway, and polls every 60 seconds as a fallback.
+- The stream follows one organisation, the one in its address
+  (`/o/{slug}/notifications/stream`). Each tab has its own, so each tab's
+  bell counts its own org. A notice in another of the person's orgs doesn't
+  ping it; the badge polls every 60 seconds as a fallback.
 - After subscribing, the stream checks the session version and the active
   membership again (the membership part is skipped for an acting super
   admin), so a close published meanwhile is never missed.
 - The stream ends when the person is signed out everywhere, a password reset
-  or a lock (every org), when they are removed from its org, when this
-  browser switches org, or when it falls behind. The browser reconnects
-  through `CurrentMember` again. A refused reconnect ends it for good, and
-  `app.ts` then asks `/orgs/current` once, so the tab moves.
+  or a lock (every org), when they are removed from its org, or when it
+  falls behind. Nothing ends it on a switch. The browser reconnects through
+  `CurrentMember` again. A refused reconnect ends it for good, and `app.ts`
+  then asks `/o/{slug}/orgs/current` once, so the tab moves. A bare
+  `/notifications/stream` is refused (303), never a stream.
 - `NotifyHub` is in memory, like `ChatHub`. The app must run as one instance.
 
 ## The bell
+
+All under `/o/{slug}/`.
 
 | Route | What it does |
 |---|---|
 | `GET /notifications` | The latest 50, newest first |
 | `GET /notifications/unread` | The badge HTML: a count, "99+", or nothing |
 | `GET /notifications/stream` | The SSE stream |
-| `POST /notifications/<id>/open` | Marks one read, then follows its link (only links that start with `/`) |
+| `POST /notifications/<id>/open` | Marks one read, then follows its link inside this org (`member.url`; anything that isn't a path inside the org goes to `/dashboard`) |
 | `POST /notifications/read` | Marks all read |
 
 Everything is scoped to the viewer's organisation and user id. Another
-person's notification id is "not found".
+person's notification id is "not found". `notifications.link` stays a path
+inside its organisation (`/tasks?open=58`); the bell adds the prefix when
+it opens one. Email links are unchanged until PR 2.
 
 ## What triggers each kind
 

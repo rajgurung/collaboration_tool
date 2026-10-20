@@ -10,6 +10,11 @@ admin acting inside another organisation gets 403. Every Documents page is
 sent with headers that stop it being shown in a frame (`no_framing`,
 `src/controllers/documents.rs:544`).
 
+Every app path below is under the organisation's address, `/o/{slug}/`
+(so `POST /tasks` is `POST /o/acme-studio/tasks`). Bare paths redirect a page
+load and refuse anything else (see [accounts.md](accounts.md), "Choosing an
+organisation").
+
 ## Who can do what
 
 | Action | Who |

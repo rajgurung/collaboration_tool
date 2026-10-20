@@ -2,6 +2,11 @@
 
 Status: Approved by Raj 19 Oct (mockup recommendations); reviews folded in (staff: approve with changes, applied; security: approve with changes, applied) · PR 3 of 7 · Owner: Raj · 19 October 2026
 
+
+> Superseded in part by `docs/plans/org-url-1.md` (20 October 2026): the
+> address `/o/{slug}/` now picks the organisation, the `current_org` cookie
+> only remembers the last one, and a switch no longer closes connections.
+
 ## Summary
 
 PR 2 (#43) added the `current_org` cookie and `POST /orgs/{id}/switch`, with
