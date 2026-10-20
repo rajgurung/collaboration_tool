@@ -122,10 +122,8 @@ async fn removing_someone_locks_them_out_of_everything() {
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(
-            page.contains("carol has been removed and signed out."),
-            "{page}"
-        );
+        assert!(page.contains("carol has been removed."), "{page}");
+        assert!(!page.contains("signed out"), "{page}");
         // The name comes from the database: a member id that was not removed shows nothing.
         let alice_m = memberships::Model::default_for_user(&ctx.db, org.created_by_id.unwrap())
             .await
@@ -136,7 +134,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(!page.contains("was removed and signed out."));
+        assert!(!page.contains("was removed."));
 
         // Her open pages in Acme were told to close.
         assert_eq!(

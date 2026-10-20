@@ -749,7 +749,7 @@ async fn removing_someone_lists_the_logins_to_change() {
             .add_header(acme.carol.0.clone(), acme.carol.1.clone())
             .await
             .text();
-        assert!(page.contains("dave has been removed and signed out."));
+        assert!(page.contains("dave has been removed."));
         assert!(page.contains("Change these at the source"));
         assert!(page.contains("Companies House"));
         assert!(page.contains("Last seen"));
