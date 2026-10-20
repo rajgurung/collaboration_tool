@@ -672,7 +672,8 @@ async fn request_to_join_adds_a_pending_member_row() {
     let ctx = &boot.app_context;
     let (alice, _, _, beta) = alice_and_beta(ctx).await;
 
-    let row = requested(request(&ctx.db, &beta, alice, "alice2").await);
+    // Checked after trimming.
+    let row = requested(request(&ctx.db, &beta, alice, " alice2 ").await);
     assert_eq!(row.status, "pending");
     assert_eq!(row.role, "member");
     assert_eq!(row.username, "alice2");
@@ -903,7 +904,7 @@ async fn other_orgs(ctx: &AppContext, n: usize) -> Vec<organisations::Model> {
     orgs
 }
 
-const CAP_MESSAGE: &str = "You're waiting to hear from 5 organisations already. Ask again once one of them lets you in or declines.";
+const CAP_MESSAGE: &str = "You've already asked to join 5 organisations. You can ask again once one of them lets you in or declines.";
 
 #[tokio::test]
 #[serial]
@@ -918,7 +919,13 @@ async fn request_to_join_stops_at_five_pending_requests() {
     let err = memberships::Model::request_to_join(&ctx.db, &orgs[5], alice, &ask("alice"))
         .await
         .unwrap_err();
-    assert_eq!(name_error(&err), CAP_MESSAGE);
+    let errors = collab::views::forms::field_errors(&err).unwrap();
+    assert_eq!(
+        errors.get(memberships::AT_PENDING_CAP).map(String::as_str),
+        Some(CAP_MESSAGE),
+        "a page error, not one on the username"
+    );
+    assert!(!errors.contains_key("name"));
     assert!(rows_for(ctx, orgs[5].id, alice).await.is_empty());
 }
 

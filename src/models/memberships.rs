@@ -33,6 +33,10 @@ pub mod status {
 /// How many requests to join one account may have waiting at once.
 pub const MAX_PENDING_REQUESTS: u64 = 5;
 
+/// The error key for [`MAX_PENDING_REQUESTS`]: about the whole form, not a
+/// field, so the page shows it above the form.
+pub const AT_PENDING_CAP: &str = "pending_cap";
+
 /// 0 for active, 1 for pending, 2 for the rest, for ordering memberships
 /// active first, then pending (ascending).
 fn status_rank() -> sea_orm::sea_query::SimpleExpr {
@@ -326,17 +330,21 @@ impl Model {
     /// indexes are the backstop for two that pass before either locks.
     ///
     /// # Errors
-    /// Field errors on `name`: bad or reserved username, one already used in
-    /// this organisation, a locked account, or [`MAX_PENDING_REQUESTS`]
-    /// waiting. Database errors.
+    /// Field errors on `name`: bad or reserved username (checked after
+    /// trimming), one already used in this organisation, or a locked
+    /// account. [`AT_PENDING_CAP`] at [`MAX_PENDING_REQUESTS`] waiting.
+    /// Database errors.
     pub async fn request_to_join(
         db: &DatabaseConnection,
         org: &organisations::Model,
         user_id: i64,
         params: &JoinParams,
     ) -> ModelResult<JoinOutcome> {
-        ValidatorTrait::validate(params)?;
-        match Self::file_request(db, org, user_id, params.name.trim()).await {
+        let params = JoinParams {
+            name: params.name.trim().to_string(),
+        };
+        ValidatorTrait::validate(&params)?;
+        match Self::file_request(db, org, user_id, &params.name).await {
             Err(ModelError::DbErr(err)) if violates(&err, "idx-memberships-org-user") => {
                 // Another request inserted first. This transaction has rolled
                 // back, so read what that one made.
@@ -363,14 +371,12 @@ impl Model {
         username: &str,
     ) -> ModelResult<JoinOutcome> {
         let txn = db.begin().await?;
-        let row = |txn| {
+        let row = || {
             Entity::find()
                 .in_tenant(org.id)
                 .filter(Column::UserId.eq(user_id))
-                .lock_exclusive()
-                .one(txn)
         };
-        let mut existing = row(&txn).await?;
+        let mut existing = row().lock_exclusive().one(&txn).await?;
         if let Some(outcome) = existing.clone().and_then(Self::settled) {
             return Ok(outcome);
         }
@@ -390,8 +396,10 @@ impl Model {
         }
         if existing.is_none() {
             // A double submit waited on the account lock above; now it sees
-            // the first one's row.
-            existing = row(&txn).await?;
+            // the first one's row. A plain read: locking the membership row
+            // after the account row would be the reverse of `approve`'s
+            // order. The update below checks the status again.
+            existing = row().one(&txn).await?;
             if let Some(outcome) = existing.clone().and_then(Self::settled) {
                 return Ok(outcome);
             }
@@ -403,9 +411,9 @@ impl Model {
             .await?;
         if waiting >= MAX_PENDING_REQUESTS {
             return Err(field_error(
-                "name",
+                AT_PENDING_CAP,
                 &format!(
-                    "You're waiting to hear from {MAX_PENDING_REQUESTS} organisations already. Ask again once one of them lets you in or declines."
+                    "You've already asked to join {MAX_PENDING_REQUESTS} organisations. You can ask again once one of them lets you in or declines."
                 ),
             ));
         }
@@ -435,7 +443,7 @@ impl Model {
                 .await?
                 .into_iter()
                 .next()
-                .ok_or_else(|| ModelError::msg("That request changed. Try again."))?
+                .ok_or_else(|| field_error("name", "That request changed. Try again."))?
         } else {
             ActiveModel {
                 user_id: ActiveValue::Set(user_id),
