@@ -546,3 +546,31 @@ async fn the_in_org_404_has_no_other_org_hint() {
     })
     .await;
 }
+
+/// A slug that isn't one (set by hand in the database) never makes a
+/// redirect loop: bare addresses answer 500 instead of `/dashboard` again.
+#[tokio::test]
+#[serial]
+async fn a_bad_slug_in_the_database_is_an_error_not_a_loop() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let org = organisations::Model::find_by_id(&ctx.db, alice.org_id)
+            .await
+            .unwrap();
+        let mut bad = org.into_active_model();
+        bad.slug = ActiveValue::Set("Acme Studio!".to_string());
+        bad.update(&ctx.db).await.unwrap();
+        let res = open(&request, &alice, "/dashboard").await;
+        assert_eq!(res.status_code(), 500);
+        assert!(res.headers().get("location").is_none());
+        let res = request
+            .post("/tasks")
+            .add_header(alice.0.clone(), alice.1.clone())
+            .add_header("x-org-id", alice.org_id.to_string())
+            .form(&json!({ "title": "Nope" }))
+            .await;
+        assert_eq!(res.status_code(), 500);
+        assert!(res.headers().get("hx-redirect").is_none());
+    })
+    .await;
+}

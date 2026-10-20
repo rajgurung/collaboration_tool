@@ -22,7 +22,7 @@ use crate::{
     },
     views::{
         layout::avatar_color,
-        links::{old_link_item, org_base, org_path, Item},
+        links::{is_slug, old_link_item, org_base, org_path, Item},
     },
 };
 
@@ -356,13 +356,28 @@ async fn bare_page_load(
         .uri
         .path_and_query()
         .map_or("/dashboard", |pq| pq.as_str());
-    let to = org_path(&slug, path_and_query);
+    let Some(to) = into_org(&slug, path_and_query) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
     let Ok(location) = HeaderValue::from_str(&to) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
     let mut response = (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response();
     no_store(&mut response, false);
     response
+}
+
+/// `path` under `/o/{slug}` for a redirect. `None` for a slug in the
+/// database that isn't one, which the caller answers with a 500: `org_path`
+/// would fall back to a bare `/dashboard`, which redirects back here for
+/// ever.
+fn into_org(slug: &str, path: &str) -> Option<String> {
+    if is_slug(slug) {
+        Some(org_path(slug, path))
+    } else {
+        tracing::error!("an organisation's slug is not a slug; refusing to redirect");
+        None
+    }
 }
 
 /// The org a bare link's item is in, only where this user is active, or the
@@ -437,9 +452,9 @@ async fn refuse_bare(
         None => "/dashboard?from=".to_string(),
     };
     let to = match showing {
-        Some(org) => org_path(&org.slug, &home),
+        Some(org) => into_org(&org.slug, &home),
         None => match last_org(parts, ctx, user, session_id).await {
-            Ok(last) => last.url(&home),
+            Ok(last) => into_org(&last.org.slug, &home),
             // No org at all: the answer that says so (`/admin` for a super
             // admin, else the waiting or no-org page), as before.
             Err(answer) => {
@@ -448,6 +463,9 @@ async fn refuse_bare(
                 return answer;
             }
         },
+    };
+    let Some(to) = to else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     tracing::info!(
         user_id,
