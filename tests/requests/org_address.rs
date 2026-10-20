@@ -612,6 +612,29 @@ async fn a_cross_site_navigation_sets_no_cookie() {
     .await;
 }
 
+/// Only a document load moves the remembered org: not an image or script
+/// the page pulls in. The stream and the socket are in `live_sign_out.rs`.
+#[tokio::test]
+#[serial]
+async fn only_a_document_load_remembers_the_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let w = world(&request, &ctx).await;
+        let in_acme = with_org(&ctx, &w.alice, w.acme.id).await;
+        let res = page(&request, "/o/beta/tasks", &in_acme)
+            .add_header("sec-fetch-dest", "image")
+            .await;
+        assert!(set_cookie(&res, "current_org").is_none(), "an image");
+        let res = page(&request, "/o/beta/tasks", &in_acme)
+            .add_header("sec-fetch-dest", "document")
+            .await;
+        assert!(
+            set_cookie(&res, "current_org").is_some(),
+            "a document load does"
+        );
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn the_token_form_pin_is_checked_against_the_address() {

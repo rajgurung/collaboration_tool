@@ -563,3 +563,47 @@ async fn a_bare_stream_is_not_a_stream() {
         Some("text/event-stream")
     );
 }
+
+/// The stream and the socket under another org's address never move the
+/// remembered org: only a page load does.
+#[tokio::test]
+#[serial]
+async fn the_stream_and_the_socket_remember_nothing() {
+    let (ctx, addr, cookie, alice, _socket) = open_general_socket().await;
+    let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+        .await
+        .unwrap()
+        .id;
+    let (_, _, beta_general) = alice_in_beta_general(&ctx, addr, alice.id).await;
+    let in_acme = format!("{cookie}; current_org={acme}");
+    let stream = reqwest::Client::new()
+        .get(format!("http://{addr}/o/beta/notifications/stream"))
+        .header("cookie", &in_acme)
+        .header("accept", "text/event-stream")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stream.status(), 200);
+    assert!(
+        stream
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .all(|c| !c.to_str().unwrap().starts_with("current_org=")),
+        "the stream"
+    );
+    let mut request = format!("ws://{addr}/o/beta/chat/{beta_general}/ws")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("cookie", in_acme.parse().unwrap());
+    let (_socket, res) = tokio_tungstenite::connect_async(request).await.unwrap();
+    assert!(
+        res.headers()
+            .get_all("set-cookie")
+            .iter()
+            .all(|c| !c.to_str().unwrap().starts_with("current_org=")),
+        "the socket upgrade"
+    );
+}

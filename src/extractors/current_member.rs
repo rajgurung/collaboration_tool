@@ -321,15 +321,7 @@ async fn bare_address(
     user: users::Model,
     session_id: Option<String>,
 ) -> Response {
-    let page_load = matches!(parts.method, Method::GET | Method::HEAD)
-        && !wants_hx_redirect(&parts.headers)
-        && !parts.headers.contains_key(header::UPGRADE)
-        && !parts
-            .headers
-            .get(header::ACCEPT)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|accept| accept.contains("text/event-stream"));
-    if page_load {
+    if is_page_load(parts) {
         bare_page_load(parts, ctx, user, session_id).await
     } else {
         refuse_bare(parts, ctx, user, session_id).await
@@ -535,7 +527,12 @@ fn not_here(headers: &HeaderMap) -> Response {
 /// A navigation another site started never moves it, nor do HTMX, `fetch`,
 /// writes or acting (the caller never asks for acting).
 fn remember(parts: &Parts, org_id: i64) {
-    if !matches!(parts.method, Method::GET | Method::HEAD) || wants_hx_redirect(&parts.headers) {
+    // A browser says what a request is for; only a document moves it.
+    let document = parts
+        .headers
+        .get("sec-fetch-dest")
+        .is_none_or(|dest| dest == "document");
+    if !is_page_load(parts) || !document {
         return;
     }
     let ours = match parts.headers.get("sec-fetch-site") {
@@ -790,6 +787,19 @@ async fn no_active_org(parts: &Parts, ctx: &AppContext, user_id: i64) -> Option<
     let mut response = (StatusCode::CONFLICT, [("HX-Redirect", "/dashboard")]).into_response();
     no_store(&mut response, gone);
     Some(response)
+}
+
+/// A browser loading a page: GET or HEAD, not HTMX or `fetch`, not the
+/// socket upgrade, and not asking for the notification stream.
+fn is_page_load(parts: &Parts) -> bool {
+    matches!(parts.method, Method::GET | Method::HEAD)
+        && !wants_hx_redirect(&parts.headers)
+        && !parts.headers.contains_key(header::UPGRADE)
+        && !parts
+            .headers
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|accept| accept.contains("text/event-stream"))
 }
 
 /// HTMX, or a raw `fetch` call (it sends the org header but not HX-Request).
