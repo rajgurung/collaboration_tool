@@ -1,5 +1,7 @@
-//! Owners and admins remove people. Removal ends the person's sessions, takes
-//! them out of chat, revokes their Claude tokens and stops their emails.
+//! Owners and admins remove people. Removal ends the person's access to that
+//! organisation, not their sessions: it takes them out of its chat, revokes
+//! their Claude tokens there, stops its emails and closes its live
+//! connections.
 use collab::{
     app::App,
     data::{
@@ -20,7 +22,7 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    prepare_data::{join, login, sign_up_member, AsMember, USER_PASSWORD},
+    prepare_data::{join, sign_up_member, AsMember},
 };
 
 use super::prepare_data::TestMember;
@@ -136,22 +138,16 @@ async fn removing_someone_locks_them_out_of_everything() {
             .text();
         assert!(!page.contains("was removed and signed out."));
 
-        // Her session ended, and her open pages were told.
-        let res = request
-            .get("/dashboard")
-            .add_header(carol.0.clone(), carol.1.clone())
-            .await;
-        assert_eq!(res.status_code(), 303);
+        // Her open pages in Acme were told to close.
         assert_eq!(
             notify.try_recv().unwrap(),
-            NotifyEvent::Close(CloseScope::Account {
+            NotifyEvent::Close(CloseScope::Org {
+                org_id: org.id,
                 user_id: carol_m.user_id
             })
         );
 
-        // Signing in again shows why, and nothing else.
-        let carol = login(&request, "carol@example.com", USER_PASSWORD).await;
-        let carol = TestMember::new(carol, carol_m.organisation_id);
+        // She stays signed in, and her next page says why, and nothing else.
         let res = request
             .get("/dashboard")
             .add_header(carol.0.clone(), carol.1.clone())
