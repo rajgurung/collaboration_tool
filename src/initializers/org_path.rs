@@ -113,6 +113,7 @@ async fn org_path(mut req: Request, next: Next) -> Response {
     let homepage = page_load && req.uri().path() == "/";
     let mut response = match strip(req.method(), req.uri()) {
         Err(status) => status.into_response(),
+        // Safe to echo: `strip` only returns slugs that pass `is_slug`.
         Ok(Strip::Home(slug)) => see_other(&format!("/o/{slug}/dashboard")),
         Ok(Strip::Rewrite { slug, uri }) => {
             let original = std::mem::replace(req.uri_mut(), uri);
@@ -169,8 +170,13 @@ pub fn revert_redirect(method: &Method, uri: &Uri) -> Option<Response> {
     let after = uri.path().strip_prefix("/o/")?;
     let (slug, rest) = after.split_once('/').unwrap_or((after, ""));
     let page_load = matches!(*method, Method::GET | Method::HEAD);
-    // A rest starting with `/` or `\` would make `//host`, another site.
-    if !page_load || !is_slug(slug) || rest.starts_with(['/', '\\']) {
+    // A rest starting with `/` or `\` would make `//host`, another site;
+    // `.` and `..` segments could walk to one after the browser resolves them.
+    if !page_load
+        || !is_slug(slug)
+        || rest.starts_with(['/', '\\'])
+        || rest.split('/').any(is_dot_segment)
+    {
         return Some(StatusCode::NOT_FOUND.into_response());
     }
     let to = match uri.query() {
@@ -411,5 +417,21 @@ mod tests {
             see("/%5Cevil.com")
         );
         assert_eq!(revert(Method::GET, "/tasks"), None);
+        // Odd paths stay on this host: one leading `/`, then the raw rest.
+        for odd in ["/o/acme/%2F%2Fevil.com", "/o/acme/../..//evil.com"] {
+            let Some((_, Some(to))) = revert(Method::GET, odd) else {
+                continue; // A 404: fine, nothing to follow.
+            };
+            assert!(
+                to.starts_with('/') && !to.starts_with("//"),
+                "{odd} -> {to}"
+            );
+            assert!(!to.starts_with("/\\"), "{odd} -> {to}");
+        }
+        assert_eq!(
+            revert(Method::GET, "/o/acme/%2F%2Fevil.com"),
+            see("/%2F%2Fevil.com")
+        );
+        assert_eq!(revert(Method::GET, "/o/acme/../..//evil.com"), not_found);
     }
 }
