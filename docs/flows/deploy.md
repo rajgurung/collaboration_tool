@@ -1,6 +1,6 @@
 # Deploy
 
-Merging to `main` ships to production at collab.rajgurung.me. Railway builds
+Merging to `main` ships to production at collab.zen-scale.io. Railway builds
 the Docker image and starts it, and the app runs any new migrations as it
 boots. The setup steps and variables are in [`docs/deploy.md`](../deploy.md).
 

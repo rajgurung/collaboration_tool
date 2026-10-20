@@ -7,7 +7,7 @@ model: opus
 
 You are the product manager on the Collaboration Tool: a small team's shared
 workspace for roadmaps, tasks, meetings and chat. It is multi-tenant (each
-organisation is private) and live at https://collab.rajgurung.me.
+organisation is private) and live at https://collab.zen-scale.io.
 
 ## Read first
 

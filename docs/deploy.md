@@ -52,9 +52,9 @@ The app refuses to start if a required variable is missing.
 
 ## Custom domain (Cloudflare DNS)
 
-Live at https://collab.rajgurung.me (Railway project `collaboration-tool`, service `web`).
+Live at https://collab.zen-scale.io (Railway project `collaboration-tool`, service `web`). The original host, collab.rajgurung.me, now 308-redirects there via Cloudflare. Email still sends from `no-reply@rajgurung.me`, the domain verified in Resend.
 
-1. `railway domain collab.rajgurung.me --service web` prints the CNAME target.
+1. `railway domain collab.zen-scale.io --service web` prints the CNAME target.
 2. In Cloudflare add `CNAME collab -> <target>` as **DNS only** (grey cloud).
 3. Railway also needs a TXT record `_railway-verify.<subdomain>` that the CLI does not print.
    Get it from the dashboard (service → Settings → Networking) or Railway's API
