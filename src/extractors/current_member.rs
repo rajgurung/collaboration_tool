@@ -22,7 +22,7 @@ use crate::{
     },
     views::{
         layout::avatar_color,
-        links::{org_base, org_path},
+        links::{old_link_item, org_base, org_path, Item},
     },
 };
 
@@ -252,10 +252,12 @@ async fn removed_from(ctx: &AppContext, claim: OrgClaim, user_id: i64) -> bool {
 
 /// [`CurrentMember`] without the claim check. Only for forms that pin their
 /// org with a hidden `org_id` and call `shown_for_this_org` themselves, so
-/// they can answer a stale tab better than the generic refusal: the Claude
-/// Allow page and the personal token form. Every use is listed in the route
-/// walk test (`tests/requests/stale_tab.rs`); another needs a deliberate
-/// change to that list.
+/// they can answer a stale tab better than the generic refusal. Its three
+/// uses: the Claude Allow page (GET and POST, bare, in the last org) and
+/// the personal token form (under `/o/{slug}/`). `not_found_page` calls it
+/// too, never as a handler. Every use is listed in the route walk test
+/// (`tests/requests/stale_tab.rs`); another needs a deliberate change to
+/// that list.
 pub struct PinnedMember(pub CurrentMember);
 
 /// Picks the organisation: the address's (see [`in_address_org`]), else the
@@ -300,7 +302,173 @@ async fn resolve_org(
     if let Some(PathOrg { slug }) = parts.extensions.get::<PathOrg>().cloned() {
         return in_address_org(parts, ctx, user, session_id, &slug).await;
     }
-    last_org(parts, ctx, user, session_id).await
+    // The Claude Allow page stays bare, in the last org, until PR 3's picker.
+    let allow_page = parts.uri.path() == "/oauth/authorize"
+        && matches!(parts.method, Method::GET | Method::POST);
+    if allow_page {
+        return last_org(parts, ctx, user, session_id).await;
+    }
+    Err(Box::new(bare_address(parts, ctx, user, session_id).await))
+}
+
+/// A tenant route without `/o/{slug}/`: an old bookmark, email or link, or a
+/// tab drawn before the deploy. A page load is redirected into an org; any
+/// other request is refused and never replayed, so a write can't land in the
+/// last-used org.
+async fn bare_address(
+    parts: &Parts,
+    ctx: &AppContext,
+    user: users::Model,
+    session_id: Option<String>,
+) -> Response {
+    let page_load = matches!(parts.method, Method::GET | Method::HEAD)
+        && !wants_hx_redirect(&parts.headers)
+        && !parts.headers.contains_key(header::UPGRADE)
+        && !parts
+            .headers
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|accept| accept.contains("text/event-stream"));
+    if page_load {
+        bare_page_load(parts, ctx, user, session_id).await
+    } else {
+        refuse_bare(parts, ctx, user, session_id).await
+    }
+}
+
+/// 303 to the same path and query under `/o/{slug}`: the item's org when the
+/// address names an item in an org you're active (or acting) in, else the
+/// last org. Built from `uri.path()` and `uri.query()` behind `/o/{slug}/`,
+/// so it is always on this site.
+async fn bare_page_load(
+    parts: &Parts,
+    ctx: &AppContext,
+    user: users::Model,
+    session_id: Option<String>,
+) -> Response {
+    let last = match last_org(parts, ctx, user, session_id).await {
+        Ok(last) => last,
+        // No org at all: the page that says so, as before.
+        Err(page) => return *page,
+    };
+    let mut slug = last.org.slug.clone();
+    if let Some((item, id)) = old_link_item(parts.uri.path(), parts.uri.query()) {
+        let acting = last.acting.then_some(last.org.id);
+        match item_org_for(ctx, item, id, last.user.id, acting).await {
+            Ok(Some(found)) => slug = found,
+            Ok(None) => {}
+            Err(err) => return Error::from(err).into_response(),
+        }
+    }
+    let path_and_query = parts
+        .uri
+        .path_and_query()
+        .map_or("/dashboard", |pq| pq.as_str());
+    let to = org_path(&slug, path_and_query);
+    let Ok(location) = HeaderValue::from_str(&to) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let mut response = (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response();
+    no_store(&mut response, false);
+    response
+}
+
+/// The org a bare link's item is in, only where this user is active, or the
+/// org a super admin is acting in. One query, the same whether the id is
+/// missing or in someone else's org, so it never tells them apart. The table
+/// comes from [`Item`], never from the request.
+async fn item_org_for(
+    ctx: &AppContext,
+    item: Item,
+    id: i64,
+    user_id: i64,
+    acting_org: Option<i64>,
+) -> std::result::Result<Option<String>, sea_orm::DbErr> {
+    use sea_orm::{ConnectionTrait, Statement};
+    let table = item.table();
+    let sql = format!(
+        "SELECT o.slug FROM {table} t \
+         JOIN memberships m ON m.organisation_id = t.organisation_id \
+           AND m.user_id = $2 AND m.status = '{active}' \
+         JOIN organisations o ON o.id = t.organisation_id \
+         WHERE t.id = $1 \
+         UNION ALL \
+         SELECT o.slug FROM {table} t \
+         JOIN organisations o ON o.id = t.organisation_id \
+         WHERE t.id = $1 AND t.organisation_id = $3 \
+         LIMIT 1",
+        active = memberships::status::ACTIVE,
+    );
+    let row = ctx
+        .db
+        .query_one_raw(Statement::from_sql_and_values(
+            ctx.db.get_database_backend(),
+            sql,
+            [id.into(), user_id.into(), acting_org.into()],
+        ))
+        .await?;
+    row.map(|row| row.try_get::<String>("", "slug")).transpose()
+}
+
+/// Refuses a bare request that isn't a page load: 409 with `HX-Redirect` for
+/// HTMX and `fetch`, 303 for a plain form, never 307 or 308 (which repeat the
+/// body). It lands on Home in the org the tab was showing when you're still
+/// active there, else in the last org; a claim for an org your row was
+/// removed from (or is pending or declined in) gets `?from=` and
+/// `X-Org-Gone`, for PR 5's notice. Only a slug from the database and a
+/// parsed `i64` go into the address.
+async fn refuse_bare(
+    parts: &Parts,
+    ctx: &AppContext,
+    user: users::Model,
+    session_id: Option<String>,
+) -> Response {
+    let claim = parts
+        .extensions
+        .get::<OrgClaim>()
+        .copied()
+        .unwrap_or(OrgClaim::Missing);
+    let user_id = user.id;
+    let mut showing = None;
+    let mut gone = None;
+    if let OrgClaim::Org(id) = claim {
+        match memberships::Model::in_org_for_user(&ctx.db, id, user_id).await {
+            Ok(Some(m)) if m.is_active() => {
+                showing = organisations::Model::find_by_id(&ctx.db, id).await.ok();
+            }
+            Ok(Some(_)) => gone = Some(id),
+            _ => {}
+        }
+    }
+    let home = match gone {
+        Some(id) => format!("/dashboard?from={id}"),
+        None => "/dashboard?from=".to_string(),
+    };
+    let to = match showing {
+        Some(org) => org_path(&org.slug, &home),
+        // With no active org left, the bare address shows the page that
+        // says so.
+        None => last_org(parts, ctx, user, session_id)
+            .await
+            .map_or(home.clone(), |last| last.url(&home)),
+    };
+    tracing::info!(
+        user_id,
+        claimed_org = match claim {
+            OrgClaim::Org(id) => id.to_string(),
+            OrgClaim::Missing => "missing".to_string(),
+            OrgClaim::Garbage => "garbage".to_string(),
+        },
+        method = %parts.method,
+        "refused a request without an organisation in its address"
+    );
+    let mut response = if wants_hx_redirect(&parts.headers) {
+        (StatusCode::CONFLICT, [("HX-Redirect", to)]).into_response()
+    } else {
+        (StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response()
+    };
+    no_store(&mut response, gone.is_some());
+    response
 }
 
 /// The organisation in the address, `/o/{slug}/...`, checked on every
