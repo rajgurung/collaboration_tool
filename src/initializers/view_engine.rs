@@ -14,6 +14,8 @@ use std::{
 };
 use tracing::info;
 
+use crate::views::links;
+
 const I18N_DIR: &str = "assets/i18n";
 // NOTE: must live OUTSIDE `I18N_DIR` so the locale scan doesn't also pick it up;
 // otherwise the shared resource is registered twice and bundle building fails
@@ -43,11 +45,13 @@ impl Initializer for ViewEngineInitializer {
             engines::TeraView::build_with_post_process(move |tera| {
                 tera.register_function("t", FluentLoader::new(arc.clone()));
                 tera.register_function("asset_url", asset_url);
+                tera.register_function("org_url", org_url);
                 Ok(())
             })?
         } else {
             engines::TeraView::build_with_post_process(|tera| {
                 tera.register_function("asset_url", asset_url);
+                tera.register_function("org_url", org_url);
                 Ok(())
             })?
         };
@@ -76,6 +80,34 @@ pub fn asset_url(kwargs: tera::Kwargs, _: &tera::State) -> tera::TeraResult<Stri
         .or_insert_with(|| file_version(path))
         .clone();
     Ok(version.map_or(url.clone(), |v| format!("{url}?v={v}")))
+}
+
+/// `{{ org_url(path="/tasks/" ~ task.id) }}` gives `/o/{slug}/tasks/58`, from
+/// the page's `org_base` (`CurrentMember::page` and `fragment` set it). A
+/// template drawn without `org_base` fails to render, so a missed fragment
+/// shows up in tests. An empty `org_base` (the admin page, which belongs to
+/// no org) gives the bare path, which redirects to the last org.
+///
+/// # Errors
+/// When `path` or `org_base` is missing.
+pub fn org_url(kwargs: tera::Kwargs, state: &tera::State) -> tera::TeraResult<String> {
+    let path: &str = kwargs.must_get("path")?;
+    let Some(base) = state.get::<String>("org_base")? else {
+        return Err(tera::Error::message(
+            "org_url needs org_base: use member.page() or member.fragment()",
+        ));
+    };
+    if base.is_empty() {
+        return Ok(if links::is_org_relative(path) {
+            path.to_string()
+        } else {
+            "/dashboard".to_string()
+        });
+    }
+    Ok(links::org_path(
+        base.strip_prefix("/o/").unwrap_or_default(),
+        path,
+    ))
 }
 
 /// A short hash of a file under `assets/static`, or `None` if it is missing.

@@ -53,6 +53,8 @@ async fn index(
         data!({
             "active": "admin",
             "org": { "name": "Platform admin" },
+            // No org: the sidebar's links stay bare and open the last org.
+            "org_base": "",
             "me": { "username": user.name, "color": avatar_color(&user.name), "is_super_admin": true },
             "orgs": orgs,
             "people": people,
