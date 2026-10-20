@@ -3,6 +3,7 @@
 {% block panel %}
 <h2 class="m-0 text-2xl font-semibold">Choose a new password</h2>
 <form method="post" action="/reset/{{ token }}" class="mt-8 grid gap-5">
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
   {% if error %}{{<form_alert message={error}/>}}{% endif %}
   {{<text_field name="password" label="New password" type="password" autocomplete="new-password" hint="At least 8 characters."/>}}
   {{<text_field name="password_confirmation" label="Repeat new password" type="password" autocomplete="new-password"/>}}

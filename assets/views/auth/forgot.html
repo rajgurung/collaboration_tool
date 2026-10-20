@@ -4,8 +4,9 @@
 <h2 class="m-0 text-2xl font-semibold">Forgot your password?</h2>
 <p class="mt-2 text-sm text-muted">Enter your email and we will send you a link to choose a new one.</p>
 <form method="post" action="/forgot" class="mt-8 grid gap-5">
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
   {{<text_field name="email" label="Email" type="email" value={email} autocomplete="email"/>}}
   <button type="submit" class="btn btn-primary btn-lg">Send reset link</button>
 </form>
-<p class="mt-6 text-sm text-muted"><a href="/login" class="hover:text-text">Back to sign in</a></p>
+<p class="mt-6 text-sm text-muted"><a href="/login{% if next_query %}?next={{ next_query }}{% endif %}" class="hover:text-text">Back to sign in</a></p>
 {% endblock panel %}

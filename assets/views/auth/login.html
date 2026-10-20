@@ -2,7 +2,11 @@
 {% block title %}Sign in · Collaboration Tool{% endblock title %}
 {% block panel %}
 <h2 class="m-0 text-2xl font-semibold">Sign in</h2>
+{% if joining %}
+<p class="mt-2 text-sm text-muted">Sign in, then ask to join <strong class="text-text">{{ joining }}</strong> with your account.</p>
+{% else %}
 <p class="mt-2 text-sm text-muted">Welcome back. Use the email you signed up with.</p>
+{% endif %}
 <form method="post" action="/login" class="mt-8 grid gap-5">
   {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
   {% if notice %}{{<form_alert message={notice} kind="success"/>}}{% endif %}
@@ -12,7 +16,7 @@
   <button type="submit" class="btn btn-primary btn-lg">Sign in</button>
 </form>
 <div class="mt-6 flex justify-between text-sm text-muted">
-  <a href="/forgot" class="hover:text-text">Forgot password?</a>
+  <a href="/forgot{% if next_query %}?next={{ next_query }}{% endif %}" class="hover:text-text">Forgot password?</a>
   <a href="/signup" class="hover:text-text">Create an organisation</a>
 </div>
 {% endblock panel %}
