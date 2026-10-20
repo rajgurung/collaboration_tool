@@ -96,6 +96,16 @@ impl CurrentMember {
     }
 
     /// Owners and admins approve members and manage settings.
+    /// The person approving or declining a request, for
+    /// `memberships::Model::approve` and `reject`.
+    #[must_use]
+    pub fn approver(&self) -> memberships::Approver {
+        memberships::Approver {
+            user_id: self.user.id,
+            acting: self.acting,
+        }
+    }
+
     #[must_use]
     pub fn can_manage(&self) -> bool {
         self.role == role::OWNER || self.role == role::ADMIN

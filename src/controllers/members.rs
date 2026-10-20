@@ -10,6 +10,7 @@ use crate::{
         current_member::{forbidden, CurrentMember},
         session::redirect_response,
     },
+    mailers::membership::MembershipMailer,
     models::{login_events::Client, logins::ToChange, memberships, organisations, users},
     views::{
         forms::{field_errors, toast},
@@ -155,8 +156,10 @@ async fn approve(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_manager()?;
-    let target = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    let result = target.approve(&ctx.db, member.user.id).await;
+    let result = memberships::Model::approve(&ctx.db, member.org.id, member.approver(), id).await;
+    if let Ok(approved) = &result {
+        tell_approved(&ctx, &member.org, approved).await;
+    }
     respond(&ctx, &v, &member, &headers, id, result, "approved").await
 }
 
@@ -169,9 +172,24 @@ async fn reject(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_manager()?;
-    let target = memberships::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    let result = target.reject(&ctx.db, member.user.id).await;
+    let result = memberships::Model::reject(&ctx.db, member.org.id, member.approver(), id).await;
     respond(&ctx, &v, &member, &headers, id, result, "declined").await
+}
+
+/// Emails the person who was let in. The approval has committed, so a
+/// failure is only logged.
+async fn tell_approved(
+    ctx: &AppContext,
+    org: &organisations::Model,
+    membership: &memberships::Model,
+) {
+    let sent = match users::Model::find_by_id(&ctx.db, membership.user_id).await {
+        Ok(user) => MembershipMailer::approved(ctx, &user, org, &membership.username).await,
+        Err(err) => Err(err.into()),
+    };
+    if let Err(err) = sent {
+        tracing::error!(error = %err, org_id = org.id, "could not send the approval email");
+    }
 }
 
 #[debug_handler]

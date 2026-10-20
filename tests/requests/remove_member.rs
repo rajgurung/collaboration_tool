@@ -22,7 +22,7 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    prepare_data::{join, sign_up_member, AsMember},
+    prepare_data::{approve_as_owner, join, sign_up_member, AsMember},
 };
 
 use super::prepare_data::TestMember;
@@ -41,7 +41,7 @@ async fn member(
         .await
         .unwrap()
         .unwrap();
-    pending.approve(&ctx.db, user.id).await.unwrap();
+    approve_as_owner(ctx, &pending).await;
     let approved = memberships::Model::default_for_user(&ctx.db, user.id)
         .await
         .unwrap()

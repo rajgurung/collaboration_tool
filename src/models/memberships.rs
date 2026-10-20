@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 pub use super::_entities::memberships::{ActiveModel, Column, Entity, Model};
 use super::{
-    access_tokens, conversation_members, conversations, field_error,
+    access_tokens, conversation_members, conversations, field_error, login_accesses,
     login_events::{self, action, Client, Entry},
     notifications, organisations,
     users::{self, RegisterParams},
@@ -87,6 +87,14 @@ impl History {
             Self::DeclinedBefore => "Declined before".to_string(),
         }
     }
+}
+
+/// Who approves or declines a request, from `CurrentMember`. `acting` is a
+/// super admin inside an organisation they don't belong to.
+#[derive(Debug, Clone, Copy)]
+pub struct Approver {
+    pub user_id: i64,
+    pub acting: bool,
 }
 
 /// "That username is already used in {org}."
@@ -475,6 +483,27 @@ impl Model {
         }
     }
 
+    /// How many people were let into the organisation since `since`, for
+    /// the approval email limit. Declines record their date in the same
+    /// column, and an owner's own row has a date but no approver, so both
+    /// are left out.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn approved_since<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::ApprovedAt.gt(since))
+            .filter(Column::ApprovedById.is_not_null())
+            .filter(Column::Status.ne(status::REJECTED))
+            .count(db)
+            .await?)
+    }
+
     /// Every membership in the organisation with its user, oldest first.
     ///
     /// # Errors
@@ -566,36 +595,150 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
-    /// Approves a pending request and adds the member to `#general`.
+    /// Approves a pending request in one transaction. The approver is
+    /// checked again first (a page left open after a demotion can't
+    /// approve), then one conditional update makes the row an active member:
+    /// only from pending, never the approver's own request, and whatever the
+    /// role was before (a rejoin keeps an old role as history). It clears
+    /// the removal and records who approved and when. Then, after locking
+    /// the account row (the order `remove` uses), it ends a logins unlock
+    /// for this organisation, revokes any Claude tokens and unused codes the
+    /// person still has here, clears logins shared with them by name here,
+    /// and adds them to `#general` and back to their direct messages. For a
+    /// first join those find nothing to undo.
     ///
     /// # Errors
-    /// When the membership is not pending, or on database errors.
-    pub async fn approve(self, db: &DatabaseConnection, approver_id: i64) -> ModelResult<Self> {
-        if !self.is_pending() {
-            return Err(ModelError::msg("Only pending requests can be approved."));
-        }
+    /// `EntityNotFound` when `id` is not in this organisation, `Message` when
+    /// the approver may not, the request is not pending or it is their own,
+    /// or database errors.
+    pub async fn approve(
+        db: &DatabaseConnection,
+        org_id: i64,
+        approver: Approver,
+        id: i64,
+    ) -> ModelResult<Self> {
         let txn = db.begin().await?;
-        let general = conversations::Model::find_general(&txn, self.organisation_id).await?;
-        let mut membership = self.into_active_model();
-        membership.status = ActiveValue::Set(status::ACTIVE.to_string());
-        membership.approved_by_id = ActiveValue::Set(Some(approver_id));
-        membership.approved_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
-        let membership = membership.update(&txn).await?;
-        conversation_members::Model::add(&txn, &general, membership.user_id).await?;
+        Self::check_approver(
+            &txn,
+            org_id,
+            approver,
+            "Only owners and admins can approve.",
+        )
+        .await?;
+        let now = chrono::Utc::now().fixed_offset();
+        let approved = Entity::update_many()
+            .col_expr(Column::Status, Expr::value(status::ACTIVE))
+            .col_expr(Column::Role, Expr::value(role::MEMBER))
+            .col_expr(Column::ApprovedById, Expr::value(Some(approver.user_id)))
+            .col_expr(Column::ApprovedAt, Expr::value(Some(now)))
+            .col_expr(
+                Column::RemovedAt,
+                Expr::value(None::<chrono::DateTime<chrono::FixedOffset>>),
+            )
+            .col_expr(Column::RemovedById, Expr::value(None::<i64>))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
+            .filter(Column::Id.eq(id))
+            .filter(Column::OrganisationId.eq(org_id))
+            .filter(Column::Status.eq(status::PENDING))
+            .filter(Column::UserId.ne(approver.user_id))
+            .exec_with_returning(&txn)
+            .await?
+            .into_iter()
+            .next();
+        let Some(membership) = approved else {
+            let row = Self::find_in_org(&txn, org_id, id).await?;
+            // Only an acting super admin can be both approver and asker.
+            if row.is_pending() && row.user_id == approver.user_id {
+                return Err(ModelError::msg("You can't approve your own request."));
+            }
+            return Err(ModelError::msg("Only pending requests can be approved."));
+        };
+        let user_id = membership.user_id;
+        users::Entity::find_by_id(user_id)
+            .lock(sea_orm::sea_query::LockType::NoKeyUpdate)
+            .one(&txn)
+            .await?;
+        users::Model::end_unlock_in(&txn, user_id, org_id).await?;
+        access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
+        login_accesses::Model::remove_for_member(&txn, org_id, user_id).await?;
+        let general = conversations::Model::find_general(&txn, org_id).await?;
+        conversation_members::Model::add_if_missing(&txn, &general, user_id).await?;
+        // Groups are not restored, as for a first join.
+        for dm in conversations::Model::dms_of(&txn, org_id, user_id).await? {
+            conversation_members::Model::add_if_missing(&txn, &dm, user_id).await?;
+        }
+        txn.commit().await?;
+        tracing::info!(
+            org_id,
+            user_id,
+            approver_id = approver.user_id,
+            "approved member"
+        );
+        Ok(membership)
+    }
+
+    /// Declines a pending request with one conditional update, so a page
+    /// left open can't turn a member who was just approved into a declined
+    /// one. Records who declined and when (`approved_at` is the time of the
+    /// last decision). The approver is checked again, as in
+    /// [`Self::approve`].
+    ///
+    /// # Errors
+    /// `EntityNotFound` when `id` is not in this organisation, `Message` when
+    /// the approver may not or the request is not pending, or database
+    /// errors.
+    pub async fn reject(
+        db: &DatabaseConnection,
+        org_id: i64,
+        approver: Approver,
+        id: i64,
+    ) -> ModelResult<Self> {
+        let txn = db.begin().await?;
+        Self::check_approver(
+            &txn,
+            org_id,
+            approver,
+            "Only owners and admins can decline.",
+        )
+        .await?;
+        let now = chrono::Utc::now().fixed_offset();
+        let declined = Entity::update_many()
+            .col_expr(Column::Status, Expr::value(status::REJECTED))
+            .col_expr(Column::ApprovedById, Expr::value(Some(approver.user_id)))
+            .col_expr(Column::ApprovedAt, Expr::value(Some(now)))
+            .col_expr(Column::UpdatedAt, Expr::value(now))
+            .filter(Column::Id.eq(id))
+            .filter(Column::OrganisationId.eq(org_id))
+            .filter(Column::Status.eq(status::PENDING))
+            .exec_with_returning(&txn)
+            .await?
+            .into_iter()
+            .next();
+        let Some(membership) = declined else {
+            Self::find_in_org(&txn, org_id, id).await?;
+            return Err(ModelError::msg("Only pending requests can be declined."));
+        };
         txn.commit().await?;
         Ok(membership)
     }
 
-    /// # Errors
-    /// When the membership is not pending, or on database errors.
-    pub async fn reject<C: ConnectionTrait>(self, db: &C, approver_id: i64) -> ModelResult<Self> {
-        if !self.is_pending() {
-            return Err(ModelError::msg("Only pending requests can be declined."));
+    /// Refuses unless the approver is an active owner or admin here, read
+    /// `FOR SHARE` so a demotion or removal that is committing is seen.
+    /// Skipped while acting: the super admin has no membership here.
+    async fn check_approver<C: ConnectionTrait>(
+        txn: &C,
+        org_id: i64,
+        approver: Approver,
+        refusal: &str,
+    ) -> ModelResult<()> {
+        if approver.acting {
+            return Ok(());
         }
-        let mut membership = self.into_active_model();
-        membership.status = ActiveValue::Set(status::REJECTED.to_string());
-        membership.approved_by_id = ActiveValue::Set(Some(approver_id));
-        Ok(membership.update(db).await?)
+        Self::active_in_for_share(txn, org_id, approver.user_id)
+            .await?
+            .filter(|m| m.role == role::OWNER || m.role == role::ADMIN)
+            .map(|_| ())
+            .ok_or_else(|| ModelError::msg(refusal))
     }
 
     /// Removes an active member. The rules are checked in a transaction that

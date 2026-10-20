@@ -11,7 +11,7 @@ use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up_member, AsMember};
+use super::prepare_data::{approve_as_owner, join, sign_up_member, AsMember};
 
 pub(super) use super::prepare_data::TestMember;
 
@@ -29,7 +29,7 @@ pub(super) async fn acme_with_bob(
         .await
         .unwrap()
         .unwrap();
-    membership.approve(&ctx.db, bob_user.id).await.unwrap();
+    approve_as_owner(ctx, &membership).await;
     (alice, bob)
 }
 
@@ -445,7 +445,7 @@ pub(super) async fn approve(ctx: &AppContext, email: &str) -> users::Model {
         .await
         .unwrap()
         .unwrap();
-    membership.approve(&ctx.db, user.id).await.unwrap();
+    approve_as_owner(ctx, &membership).await;
     user
 }
 

@@ -1127,3 +1127,463 @@ async fn dms_of_never_over_matches() {
     assert_eq!(keys(21).await, ["dm:11:21", "dm:1:21", "dm:5:21"]);
     assert!(keys(2).await.is_empty());
 }
+
+// Approving and declining.
+
+fn by(user_id: i64) -> memberships::Approver {
+    memberships::Approver {
+        user_id,
+        acting: false,
+    }
+}
+
+async fn approve(
+    db: &sea_orm::DatabaseConnection,
+    org_id: i64,
+    approver: memberships::Approver,
+    id: i64,
+) -> Result<memberships::Model, String> {
+    memberships::Model::approve(db, org_id, approver, id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn reload(ctx: &AppContext, id: i64) -> memberships::Model {
+    memberships::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+/// Alice's Beta row set straight to `status`, as if removal or approval had
+/// happened without its side effects, so approval's own work can be seen.
+async fn set_beta_status(ctx: &AppContext, orgs: &TwoOrgs, status: &str) -> memberships::Model {
+    let mut row = reload(ctx, orgs.in_beta.id).await.into_active_model();
+    row.status = ActiveValue::Set(status.to_string());
+    row.update(&ctx.db).await.unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_changes_only_a_pending_row() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    for status in ["active", "removed", "rejected"] {
+        let before = set_beta_status(ctx, &orgs, status).await;
+        let err = approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Only pending requests can be approved.", "{status}");
+        assert_eq!(reload(ctx, orgs.in_beta.id).await, before, "{status}");
+    }
+    // Not in this organisation: not found.
+    let err = memberships::Model::approve(&ctx.db, orgs.acme, by(orgs.alice), orgs.in_beta.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, loco_rs::model::ModelError::EntityNotFound));
+}
+
+#[tokio::test]
+#[serial]
+async fn two_approves_at_once_change_one_row() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    set_beta_status(ctx, &orgs, "pending").await;
+    let other = second_connection(ctx).await;
+
+    let (one, two) = tokio::join!(
+        approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id),
+        approve(&other, orgs.beta, by(orgs.bob), orgs.in_beta.id),
+    );
+    let refused: Vec<_> = [&one, &two]
+        .into_iter()
+        .filter_map(|r| r.clone().err())
+        .collect();
+    assert_eq!(
+        refused,
+        ["Only pending requests can be approved."],
+        "{one:?} {two:?}"
+    );
+    assert_eq!(reload(ctx, orgs.in_beta.id).await.status, "active");
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_rechecks_the_approver() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    // Carol is a Beta admin, then demoted in another tab.
+    let (carol, _) = sign_up(ctx, "Gamma", "carol").await;
+    let carol_in_beta = add_member(ctx, orgs.beta, carol, "carol").await.unwrap();
+    set_beta_status(ctx, &orgs, "pending").await;
+
+    let err = approve(&ctx.db, orgs.beta, by(carol), orgs.in_beta.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err, "Only owners and admins can approve.");
+    let err = memberships::Model::reject(&ctx.db, orgs.beta, by(carol), orgs.in_beta.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), "Only owners and admins can decline.");
+    assert_eq!(reload(ctx, orgs.in_beta.id).await.status, "pending");
+
+    let mut admin = carol_in_beta.into_active_model();
+    admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+    admin.update(&ctx.db).await.unwrap();
+    approve(&ctx.db, orgs.beta, by(carol), orgs.in_beta.id)
+        .await
+        .unwrap();
+
+    // An acting super admin has no membership here and isn't checked.
+    let (dan, _) = sign_up(ctx, "Delta", "dan").await;
+    let (erin, _) = sign_up(ctx, "Epsilon", "erin").await;
+    let erin_in_beta = add_member(ctx, orgs.beta, erin, "erin").await.unwrap();
+    let mut pending = erin_in_beta.into_active_model();
+    pending.status = ActiveValue::Set("pending".to_string());
+    let pending = pending.update(&ctx.db).await.unwrap();
+    let acting = memberships::Approver {
+        user_id: dan,
+        acting: true,
+    };
+    let approved = approve(&ctx.db, orgs.beta, acting, pending.id)
+        .await
+        .unwrap();
+    assert_eq!(approved.approved_by_id, Some(dan));
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_waits_for_the_approvers_removal() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let (carol, _) = sign_up(ctx, "Gamma", "carol").await;
+    let carol_in_beta = add_member(ctx, orgs.beta, carol, "carol").await.unwrap();
+    let mut admin = carol_in_beta.clone().into_active_model();
+    admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+    admin.update(&ctx.db).await.unwrap();
+    set_beta_status(ctx, &orgs, "pending").await;
+    let other = second_connection(ctx).await;
+
+    // Carol is being removed on another connection while she approves.
+    let ((), approved) = tokio::join!(
+        held_removal(&other, carol_in_beta.id),
+        after_the_lock(approve(&ctx.db, orgs.beta, by(carol), orgs.in_beta.id))
+    );
+    assert_eq!(approved.unwrap_err(), "Only owners and admins can approve.");
+    assert_eq!(reload(ctx, orgs.in_beta.id).await.status, "pending");
+}
+
+#[tokio::test]
+#[serial]
+async fn nobody_approves_their_own_request() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    set_beta_status(ctx, &orgs, "pending").await;
+    // Only an acting super admin could get this far with their own request.
+    let acting = memberships::Approver {
+        user_id: orgs.alice,
+        acting: true,
+    };
+    let err = approve(&ctx.db, orgs.beta, acting, orgs.in_beta.id)
+        .await
+        .unwrap_err();
+    assert_eq!(err, "You can't approve your own request.");
+    assert_eq!(reload(ctx, orgs.in_beta.id).await.status, "pending");
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_sets_member_and_clears_removal() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let mut admin = orgs.in_beta.clone().into_active_model();
+    admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+    admin.update(&ctx.db).await.unwrap();
+    remove_alice_from_beta(ctx, &orgs).await;
+    let beta = org(ctx, orgs.beta).await;
+    requested(request(&ctx.db, &beta, orgs.alice, "alice").await);
+
+    let approved = approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+    assert_eq!(approved.status, "active");
+    assert_eq!(
+        approved.role, "member",
+        "a former admin comes back a member"
+    );
+    assert_eq!(approved.removed_at, None);
+    assert_eq!(approved.removed_by_id, None);
+    assert_eq!(approved.approved_by_id, Some(orgs.bob));
+    assert!(approved.approved_at.is_some());
+    assert_eq!(approved.history(), None);
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_revokes_tokens_and_codes_in_that_org_only() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let claude = claude_client(ctx).await;
+    let acme_token = personal_token(ctx, orgs.acme, orgs.alice).await;
+    let beta_token = personal_token(ctx, orgs.beta, orgs.alice).await;
+    let acme_code = code_for(ctx, &claude, orgs.acme, orgs.alice).await;
+    let beta_code = code_for(ctx, &claude, orgs.beta, orgs.alice).await;
+    set_beta_status(ctx, &orgs, "pending").await;
+
+    approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+
+    assert!(!usable(ctx, &beta_token).await);
+    assert!(exchange(&ctx.db, &claude, &beta_code).await.is_none());
+    assert!(usable(ctx, &acme_token).await);
+    assert!(exchange(&ctx.db, &claude, &acme_code).await.is_some());
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_ends_an_unlock_for_that_org_only() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    assert!(
+        users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.beta)
+            .await
+            .unwrap()
+    );
+    set_beta_status(ctx, &orgs, "pending").await;
+    approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+    let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+    assert!(!alice.secrets_unlocked(Some("sid-1"), orgs.beta));
+
+    // An unlock in Acme is left alone.
+    assert!(
+        users::Model::unlock_secrets(&ctx.db, orgs.alice, "sid-1", orgs.acme)
+            .await
+            .unwrap()
+    );
+    set_beta_status(ctx, &orgs, "pending").await;
+    approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+    let alice = users::Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
+    assert!(alice.secrets_unlocked(Some("sid-1"), orgs.acme));
+}
+
+/// A login in `org_id` that names `user_id`. Stored straight, with a dummy
+/// secret: only the naming matters here.
+async fn login_naming(ctx: &AppContext, org_id: i64, user_id: i64) -> i64 {
+    use collab::models::{_entities::login_accesses, folders, logins};
+    let folder = folders::Entity::find()
+        .filter(folders::Column::OrganisationId.eq(org_id))
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let login = logins::ActiveModel {
+        title: ActiveValue::Set("Bank".to_string()),
+        username: ActiveValue::Set("shop".to_string()),
+        url: ActiveValue::Set("https://bank.example".to_string()),
+        notes: ActiveValue::Set(String::new()),
+        password_ct: ActiveValue::Set(vec![1]),
+        password_nonce: ActiveValue::Set(vec![1]),
+        dek_version: ActiveValue::Set(1),
+        organisation_id: ActiveValue::Set(org_id),
+        folder_id: ActiveValue::Set(folder.id),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await
+    .unwrap();
+    login_accesses::ActiveModel {
+        login_id: ActiveValue::Set(login.id),
+        user_id: ActiveValue::Set(user_id),
+        ..Default::default()
+    }
+    .insert(&ctx.db)
+    .await
+    .unwrap();
+    login.id
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_clears_named_login_access_in_that_org_only() {
+    use collab::models::login_accesses;
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let in_beta = login_naming(ctx, orgs.beta, orgs.alice).await;
+    let in_acme = login_naming(ctx, orgs.acme, orgs.alice).await;
+    let bob_in_beta = login_naming(ctx, orgs.beta, orgs.bob).await;
+    set_beta_status(ctx, &orgs, "pending").await;
+
+    approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+
+    let named = |login, user| async move {
+        login_accesses::Model::is_named(&ctx.db, login, user)
+            .await
+            .unwrap()
+    };
+    assert!(!named(in_beta, orgs.alice).await);
+    assert!(named(in_acme, orgs.alice).await);
+    assert!(named(bob_in_beta, orgs.bob).await);
+}
+
+async fn in_conversation(ctx: &AppContext, conversation_id: i64, user_id: i64) -> u64 {
+    collab::models::conversation_members::Entity::find()
+        .filter(collab::models::conversation_members::Column::ConversationId.eq(conversation_id))
+        .filter(collab::models::conversation_members::Column::UserId.eq(user_id))
+        .count(&ctx.db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_adds_general_once() {
+    use collab::models::{conversation_members, conversations};
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let general = conversations::Model::find_general(&ctx.db, orgs.beta)
+        .await
+        .unwrap();
+    conversation_members::Model::add(&ctx.db, &general, orgs.alice)
+        .await
+        .unwrap();
+    set_beta_status(ctx, &orgs, "pending").await;
+
+    approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+    assert_eq!(in_conversation(ctx, general.id, orgs.alice).await, 1);
+
+    // And a first join gets it too.
+    let (carol, _) = sign_up(ctx, "Gamma", "carol").await;
+    let gamma_row = requested(request(&ctx.db, &org(ctx, orgs.beta).await, carol, "carol").await);
+    approve(&ctx.db, orgs.beta, by(orgs.bob), gamma_row.id)
+        .await
+        .unwrap();
+    assert_eq!(in_conversation(ctx, general.id, carol).await, 1);
+}
+
+#[tokio::test]
+#[serial]
+async fn approve_restores_direct_messages_in_that_org() {
+    use collab::models::conversations;
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    add_member(ctx, orgs.acme, orgs.bob, "bob").await.unwrap();
+    let beta_dm = conversations::Model::start_dm(&ctx.db, orgs.beta, orgs.bob, orgs.alice)
+        .await
+        .unwrap();
+    let acme_dm = conversations::Model::start_dm(&ctx.db, orgs.acme, orgs.alice, orgs.bob)
+        .await
+        .unwrap();
+    let group = conversations::Model::create_group(
+        &ctx.db,
+        orgs.beta,
+        orgs.bob,
+        &conversations::GroupParams {
+            name: "Bakers".to_string(),
+            member_ids: vec![orgs.alice],
+        },
+    )
+    .await
+    .unwrap();
+    remove_alice_from_beta(ctx, &orgs).await;
+    assert_eq!(in_conversation(ctx, beta_dm.id, orgs.alice).await, 0);
+    requested(request(&ctx.db, &org(ctx, orgs.beta).await, orgs.alice, "alice").await);
+
+    approve(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+        .await
+        .unwrap();
+
+    assert_eq!(in_conversation(ctx, beta_dm.id, orgs.alice).await, 1);
+    assert_eq!(in_conversation(ctx, beta_dm.id, orgs.bob).await, 1);
+    assert_eq!(in_conversation(ctx, acme_dm.id, orgs.alice).await, 1);
+    assert_eq!(
+        in_conversation(ctx, group.id, orgs.alice).await,
+        0,
+        "groups are not restored"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn reject_changes_only_a_pending_row() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    for status in ["active", "removed", "rejected"] {
+        let before = set_beta_status(ctx, &orgs, status).await;
+        let err = memberships::Model::reject(&ctx.db, orgs.beta, by(orgs.bob), orgs.in_beta.id)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Only pending requests can be declined.",
+            "{status}"
+        );
+        assert_eq!(reload(ctx, orgs.in_beta.id).await, before, "{status}");
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn reject_sets_the_decision_date() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, bob, beta) = alice_and_beta(ctx).await;
+    let row = requested(request(&ctx.db, &beta, alice, "alice").await);
+    assert_eq!(row.approved_at, None);
+
+    let declined = memberships::Model::reject(&ctx.db, beta.id, by(bob), row.id)
+        .await
+        .unwrap();
+    assert_eq!(declined.status, "rejected");
+    assert_eq!(declined.approved_by_id, Some(bob));
+    assert!(declined.approved_at.is_some());
+    assert!(matches!(
+        declined.history(),
+        Some(memberships::History::Declined(_))
+    ));
+}
+
+#[tokio::test]
+#[serial]
+async fn rejoin_after_decline_updates_the_same_row() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let (alice, _, bob, beta) = alice_and_beta(ctx).await;
+    let first = requested(request(&ctx.db, &beta, alice, "alice").await);
+    let declined = memberships::Model::reject(&ctx.db, beta.id, by(bob), first.id)
+        .await
+        .unwrap();
+
+    let again = requested(request(&ctx.db, &beta, alice, "alicia").await);
+    assert_eq!(rows_for(ctx, beta.id, alice).await.len(), 1);
+    assert_eq!(again.id, first.id);
+    assert_eq!(again.status, "pending");
+    assert_eq!(again.username, "alicia");
+    assert_eq!(again.approved_at, declined.approved_at);
+    assert_eq!(again.approved_by_id, Some(bob));
+    assert!(matches!(
+        again.history(),
+        Some(memberships::History::Declined(_))
+    ));
+}

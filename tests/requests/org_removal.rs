@@ -21,7 +21,9 @@ use super::{
     mcp::{rpc, tool, RESOURCE},
     multi_org::{alice_in_two_orgs, clears, org_heading, set_status, switch, with_org},
     oauth::{post_decision, register, CLAUDE},
-    prepare_data::{join, login, sign_up_member, AsMember, TestMember, USER_PASSWORD},
+    prepare_data::{
+        approve_as_owner, join, login, sign_up_member, AsMember, TestMember, USER_PASSWORD,
+    },
     tasks::{project_in, task_form},
 };
 
@@ -300,13 +302,14 @@ async fn someone_elses_removal_is_never_named() {
         let carol = users::Model::find_by_email(&ctx.db, "carol@example.com")
             .await
             .unwrap();
-        let carol_m = memberships::Model::default_for_user(&ctx.db, carol.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .approve(&ctx.db, carol.id)
-            .await
-            .unwrap();
+        let carol_m = approve_as_owner(
+            &ctx,
+            &memberships::Model::default_for_user(&ctx.db, carol.id)
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .await;
         remove(&request, &gail, &carol_m).await;
         let gamma = gail.org_id;
 
@@ -486,13 +489,14 @@ async fn carol_only_in_beta(request: &TestServer, ctx: &AppContext) -> (TestMemb
         .await
         .unwrap()
         .id;
-    let carol_m = memberships::Model::default_for_user(&ctx.db, carol_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .approve(&ctx.db, carol_id)
-        .await
-        .unwrap();
+    let carol_m = approve_as_owner(
+        ctx,
+        &memberships::Model::default_for_user(&ctx.db, carol_id)
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .await;
     remove(request, &bob, &carol_m).await;
     (bob, carol)
 }

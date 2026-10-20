@@ -9,7 +9,7 @@ use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, IntoActiveModel, PaginatorTrait};
 use serial_test::serial;
 
-use super::prepare_data::{join, sign_up_member, AsMember};
+use super::prepare_data::{approve_as_owner, join, sign_up_member, AsMember};
 
 use super::prepare_data::TestMember;
 
@@ -33,7 +33,7 @@ async fn acme(
             .await
             .unwrap()
             .unwrap();
-        let approved = pending.approve(&ctx.db, user.id).await.unwrap();
+        let approved = approve_as_owner(ctx, &pending).await;
         let mut active = approved.into_active_model();
         active.role = ActiveValue::Set(role.to_string());
         active.update(&ctx.db).await.unwrap();
