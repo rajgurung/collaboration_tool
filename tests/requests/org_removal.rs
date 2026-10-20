@@ -183,6 +183,9 @@ async fn a_plain_beta_form_is_refused_after_removal() {
             header(&res, "location"),
             Some(format!("/dashboard?from={}", r.beta))
         );
+        // The header comes with every refusal. A plain form's browser follows
+        // the 303 and never reads it; Home names the org from `?from=`.
+        assert_eq!(header(&res, "X-Org-Gone").as_deref(), Some("1"));
         assert_eq!(task_count(&ctx).await, before, "nothing saved");
     })
     .await;
