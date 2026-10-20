@@ -4,12 +4,12 @@
 {% block heading %}Tasks{% endblock heading %}
 {% block actions %}
 <nav class="segmented segmented-sm desktop-only mr-2" aria-label="View">
-  <a href="/tasks?scope={{ board.scope }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if view == "board" and filter != "done" %}aria-current="true"{% endif %}>Board</a>
-  <a href="/tasks?view=list&scope={{ board.scope }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if view == "list" and filter != "done" %}aria-current="true"{% endif %}>List</a>
+  <a href="{{ org_url(path="/tasks?scope=" ~ (board.scope) ~ "&group=" ~ (board.group)) }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if view == "board" and filter != "done" %}aria-current="true"{% endif %}>Board</a>
+  <a href="{{ org_url(path="/tasks?view=list&scope=" ~ (board.scope) ~ "&group=" ~ (board.group)) }}{% if board.q %}&q={{ board.q }}{% endif %}" {% if view == "list" and filter != "done" %}aria-current="true"{% endif %}>List</a>
 </nav>
 <button type="button" class="icon-btn mobile-only" aria-label="Search tasks" data-toggle="#task-search">{{<icon name="search" class="h-5 w-5"/>}}</button>
 <button type="button" class="btn btn-primary" id="new-task-button"
-        hx-get="/tasks/new" hx-target="#task-dialog-body"
+        hx-get="{{ org_url(path="/tasks/new") }}" hx-target="#task-dialog-body"
         hx-trigger="click{% if open_new %}, load{% endif %}"
         hx-on::after-request="document.getElementById('task-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}<span class="mobile-only">Task</span><span class="desktop-only">New task</span></button>
 {% endblock actions %}
@@ -22,7 +22,7 @@
 <div class="board-view">{% if view == "list" %}{% include "tasks/_table.html" %}{% else %}{% include "tasks/_board.html" %}{% endif %}</div>
 <div class="list-view">
 {% endif %}
-  <form id="task-search" action="/tasks" method="get" class="mb-3 {% if not q %}hidden{% endif %}{% if filter == "done" %} min-[900px]:block{% endif %}">
+  <form id="task-search" action="{{ org_url(path="/tasks") }}" method="get" class="mb-3 {% if not q %}hidden{% endif %}{% if filter == "done" %} min-[900px]:block{% endif %}">
     <input type="hidden" name="filter" value="{{ filter }}">
     {% if within_project %}<input type="hidden" name="project" value="{{ within_project }}">{% elif within_person %}<input type="hidden" name="person" value="{{ within_person }}">{% endif %}
     {% if view == "list" %}<input type="hidden" name="view" value="list">{% endif %}
@@ -33,12 +33,12 @@
   </form>
   <nav class="chips mb-4" aria-label="Filter tasks">
     {% for f in filters %}
-    <a href="/tasks?filter={{ f.key }}{% if view == "list" %}&view=list{% endif %}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{% if f.key == "blocked" %}<span class="dot" style="--dot: var(--blocked)"></span>{% endif %}{{ f.label }} {{ f.count }}</a>
+    <a href="{{ org_url(path="/tasks?filter=" ~ (f.key)) }}{% if view == "list" %}&view=list{% endif %}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{% if f.key == "blocked" %}<span class="dot" style="--dot: var(--blocked)"></span>{% endif %}{{ f.label }} {{ f.count }}</a>
     {% endfor %}
   </nav>
   {% include "tasks/_list.html" %}
 </div>
 <dialog id="task-dialog" class="sheet" aria-label="New task"><div class="sheet-handle"></div><div id="task-dialog-body" class="sheet-body"></div></dialog>
-{% if open_task %}<span hidden hx-get="/tasks/{{ open_task }}" hx-target="#task-sheet-body" hx-trigger="load" hx-on::after-request="if (event.detail.successful) document.getElementById('task-sheet').showModal()"></span>{% endif %}
+{% if open_task %}<span hidden hx-get="{{ org_url(path="/tasks/" ~ (open_task)) }}" hx-target="#task-sheet-body" hx-trigger="load" hx-on::after-request="if (event.detail.successful) document.getElementById('task-sheet').showModal()"></span>{% endif %}
 <dialog id="task-sheet" class="sheet sheet-side" aria-label="Task details"><div class="sheet-handle"></div><div id="task-sheet-body" class="sheet-body"></div></dialog>
 {% endblock content %}

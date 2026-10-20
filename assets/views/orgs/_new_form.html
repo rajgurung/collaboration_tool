@@ -1,5 +1,5 @@
 {# "New organisation" (docs/designs/create-org.html): the desktop dialog, the phone sheet and the /orgs/new page share it. A 422 over HTMX replaces the whole form. The server renders _org, so it also works without JavaScript. #}
-<form id="org-new-form" method="post" action="/orgs" hx-post="/orgs" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find .org-new-cancel, find [name=organisation_name], find [name=name]" class="org-new-form" data-org-new-form>
+<form id="org-new-form" method="post" action="{{ org_url(path="/orgs") }}" hx-post="{{ org_url(path="/orgs") }}" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="find .org-new-submit, find .org-new-cancel, find [name=organisation_name], find [name=name]" class="org-new-form" data-org-new-form>
   <input type="hidden" name="_org" value="{{ current_org_id }}">
   {% if as_page %}<input type="hidden" name="as_page" value="1">{% endif %}
   {% if at_cap %}
@@ -8,7 +8,7 @@
     <h3>You've set up {{ max_orgs }} organisations</h3>
     <p>That's the most one account can set up for now. You can keep using the ones you have.</p>
   </div>
-  <div class="org-new-foot sheet-sticky-foot">{% if as_page %}<a href="/dashboard" class="btn btn-secondary btn-tall">Back to Home</a>{% else %}<button type="button" class="btn btn-secondary btn-tall org-new-close" data-dialog-close>Close</button>{% endif %}</div>
+  <div class="org-new-foot sheet-sticky-foot">{% if as_page %}<a href="{{ org_url(path="/dashboard") }}" class="btn btn-secondary btn-tall">Back to Home</a>{% else %}<button type="button" class="btn btn-secondary btn-tall org-new-close" data-dialog-close>Close</button>{% endif %}</div>
   {% else %}
   {% if me.acting %}<div class="org-acting-note">{{<icon name="shield" class="h-4 w-4"/>}}<span>You're acting in <strong>{{ org.name }}</strong>. Creating this ends acting. The new organisation is yours, with you as owner.</span></div>{% endif %}
   <p class="alert alert-error org-new-alert" role="alert" data-org-new-alert hidden>Something went wrong, and nothing was created. Try again.</p>

@@ -1,4 +1,4 @@
-{% set action = "/tasks/" ~ task_id if task_id else "/tasks" %}
+{% set action = org_url(path="/tasks/" ~ task_id) if task_id else org_url(path="/tasks") %}
 <form id="task-form" method="post" action="{{ action }}" hx-post="{{ action }}" {% if task_id %}hx-target="#task-sheet-body"{% else %}data-close-on-success{% endif %} class="grid gap-5">
   <div class="flex items-start gap-2">
     <div class="flex-1">
@@ -65,7 +65,7 @@
 
   <div class="flex justify-end gap-2">
     {% if task_id %}
-    <button type="button" class="btn btn-secondary" hx-get="/tasks/{{ task_id }}" hx-target="#task-sheet-body">Cancel</button>
+    <button type="button" class="btn btn-secondary" hx-get="{{ org_url(path="/tasks/" ~ (task_id)) }}" hx-target="#task-sheet-body">Cancel</button>
     <button type="submit" class="btn btn-primary">Save changes</button>
     {% else %}
     <button type="button" class="btn btn-secondary" data-dialog-close>Cancel</button>

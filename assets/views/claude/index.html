@@ -48,7 +48,7 @@
         {% else %}
         <p class="meta m-0 text-sm">For tools that can't sign in. A token works until you revoke it. You can have up to {{ max_tokens }}.</p>
         {% if error %}{{<form_alert message={error}/>}}{% endif %}
-        <form method="post" action="/settings/claude/tokens" class="flex flex-col gap-3">
+        <form method="post" action="{{ org_url(path="/settings/claude/tokens") }}" class="flex flex-col gap-3">
           <input type="hidden" name="org_id" value="{{ org_id }}">
           {{<text_field name="name" label="Name" value={name} error={errors.name | default(value="")} hint="Where you'll use it, e.g. Work laptop"/>}}
           <button type="submit" class="btn btn-primary self-start">Create token</button>
@@ -68,7 +68,7 @@
           <p class="truncate-1 m-0 font-medium">{{ c.name }}</p>
           <p class="meta m-0">{% if c.personal %}Personal token{% else %}Connector{% endif %} · Connected {{ c.connected }} · {% if c.last_used %}Last used {{ c.last_used }}{% else %}Not used yet{% endif %}</p>
         </div>
-        <form method="post" action="/settings/claude/grants/{{ c.grant_id }}/revoke"><button type="submit" class="btn btn-danger">Revoke</button></form>
+        <form method="post" action="{{ org_url(path="/settings/claude/grants/" ~ (c.grant_id) ~ "/revoke") }}"><button type="submit" class="btn btn-danger">Revoke</button></form>
       </div>
       {% else %}
       <p class="empty">Nothing is connected yet.</p>

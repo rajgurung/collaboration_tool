@@ -1,4 +1,4 @@
-<form id="note-form" method="post" action="/tasks/{{ task.id }}/notes" hx-post="/tasks/{{ task.id }}/notes" hx-target="#task-sheet-body" class="flex flex-col gap-2">
+<form id="note-form" method="post" action="{{ org_url(path="/tasks/" ~ (task.id) ~ "/notes") }}" hx-post="{{ org_url(path="/tasks/" ~ (task.id) ~ "/notes") }}" hx-target="#task-sheet-body" class="flex flex-col gap-2">
   <div class="flex items-end gap-2">
     <label class="sr-only" for="note-body">Add a note</label>
     <div class="emoji-field">

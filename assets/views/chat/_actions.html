@@ -5,9 +5,9 @@
     <div class="quote-head">{{<avatar name={message.author} color={message.color} size="xs" label={false}/>}}<span>{% if message.own %}You{% else %}{{ message.author }}{% endif %}</span><span class="meta">{{ message.at }}</span></div>
     <p>{{ message.body }}</p>
   </div>
-  <div class="pick" role="group" aria-label="React">{% for p in message.picks %}<button type="button"{% if p.mine %} class="mine"{% endif %} data-react data-emoji="{{ p.emoji }}" data-message="{{ message.id }}" data-url="/chat/{{ message.conversation_id }}/messages/{{ message.id }}/reactions" aria-pressed="{% if p.mine %}true{% else %}false{% endif %}" aria-label="{% if p.mine %}Remove your {{ p.emoji }}{% else %}React {{ p.emoji }}{% endif %}"><span class="emoji">{{ p.emoji }}</span></button>{% endfor %}</div>
+  <div class="pick" role="group" aria-label="React">{% for p in message.picks %}<button type="button"{% if p.mine %} class="mine"{% endif %} data-react data-emoji="{{ p.emoji }}" data-message="{{ message.id }}" data-url="{{ org_url(path="/chat/" ~ (message.conversation_id) ~ "/messages/" ~ (message.id) ~ "/reactions") }}" aria-pressed="{% if p.mine %}true{% else %}false{% endif %}" aria-label="{% if p.mine %}Remove your {{ p.emoji }}{% else %}React {{ p.emoji }}{% endif %}"><span class="emoji">{{ p.emoji }}</span></button>{% endfor %}</div>
   {% if message.can_reply %}
-  <div class="list"><a class="list-row action-row" href="/chat/{{ message.conversation_id }}/threads/{{ message.id }}?reply=1">{{<icon name="message-square-reply" class="h-6 w-6"/>}}<span class="flex-1">Reply in thread</span>{% if message.thread %}<span class="meta">{{ message.thread.label }}</span>{% endif %}{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a></div>
+  <div class="list"><a class="list-row action-row" href="{{ org_url(path="/chat/" ~ (message.conversation_id) ~ "/threads/" ~ (message.id) ~ "?reply=1") }}">{{<icon name="message-square-reply" class="h-6 w-6"/>}}<span class="flex-1">Reply in thread</span>{% if message.thread %}<span class="meta">{{ message.thread.label }}</span>{% endif %}{{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}</a></div>
   {% endif %}
   {% if message.reactions | length > 0 %}
   <p class="section-label m-0">Reactions · {{ reaction_total }}</p>

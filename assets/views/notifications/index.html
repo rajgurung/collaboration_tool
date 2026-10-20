@@ -2,15 +2,15 @@
 {% block title %}Notifications · {{ org.name }}{% endblock title %}
 {% block heading %}Notifications{% endblock heading %}
 {% block actions %}
-{% if unread %}<form method="post" action="/notifications/read"><button type="submit" class="btn btn-secondary">{{<icon name="check" class="h-4 w-4"/>}}Mark all read</button></form>{% endif %}
+{% if unread %}<form method="post" action="{{ org_url(path="/notifications/read") }}"><button type="submit" class="btn btn-secondary">{{<icon name="check" class="h-4 w-4"/>}}Mark all read</button></form>{% endif %}
 {% endblock actions %}
 {% block content %}
 <div id="notification-list" class="flex max-w-[760px] flex-col gap-3"
-     hx-get="/notifications" hx-select="#notification-list" hx-swap="outerHTML" hx-trigger="notifications-changed from:body">
+     hx-get="{{ org_url(path="/notifications") }}" hx-select="#notification-list" hx-swap="outerHTML" hx-trigger="notifications-changed from:body">
   {% if items | length > 0 %}
   <div class="list">
     {% for n in items %}
-    <form method="post" action="/notifications/{{ n.id }}/open">
+    <form method="post" action="{{ org_url(path="/notifications/" ~ (n.id) ~ "/open") }}">
       <button type="submit" class="list-row notice {% if n.unread %}notice-unread{% endif %}">
         <span class="relative shrink-0">
           {{<avatar name={n.actor} color={n.color} size="md"/>}}

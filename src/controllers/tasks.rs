@@ -618,13 +618,13 @@ async fn list_partial(
     format::render().view(
         &v,
         "tasks/_list.html",
-        list_data(
+        member.fragment(list_data(
             &ws,
             member.user.id,
             filter,
             &query.q,
             Within::from_query(&query),
-        ),
+        )),
     )
 }
 
@@ -648,7 +648,7 @@ async fn board_partial(
     } else {
         "tasks/_board.html"
     };
-    format::render().view(&v, template, data)
+    format::render().view(&v, template, member.fragment(data))
 }
 
 /// The values a task form shows: a new task's defaults, an existing task, or what was submitted.
@@ -730,7 +730,7 @@ async fn new(
         &FieldErrors::new(),
     )
     .await?;
-    format::render().view(&v, "tasks/_form.html", data)
+    format::render().view(&v, "tasks/_form.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -746,7 +746,9 @@ async fn create(
         notifications::task_saved(&ctx, &member, None, task).await?;
     }
     match result {
-        Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
+        Ok(_) if !headers.contains_key("hx-request") => {
+            Ok(redirect_response(&headers, &member.url("/tasks")))
+        }
         Ok(_) => {
             let trigger = serde_json::json!({
                 "toast": { "kind": "success", "message": "Task added" },
@@ -760,7 +762,7 @@ async fn create(
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             let data = task_form_data(&ctx, &member, None, form_values(&params), &errors).await?;
-            invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, data)
+            invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, member.fragment(data))
         }
     }
 }
@@ -789,7 +791,7 @@ async fn edit(
         &FieldErrors::new(),
     )
     .await?;
-    format::render().view(&v, "tasks/_form.html", data)
+    format::render().view(&v, "tasks/_form.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -811,19 +813,21 @@ async fn update(
         notifications::task_saved(&ctx, &member, Some(before), task).await?;
     }
     match result {
-        Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
+        Ok(_) if !headers.contains_key("hx-request") => {
+            Ok(redirect_response(&headers, &member.url("/tasks")))
+        }
         Ok(task) => {
             let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
             let trigger = serde_json::json!({ "toast": { "kind": "success", "message": "Task saved" }, "tasks-changed": true });
             format::render()
                 .header("HX-Trigger", trigger.to_string())
-                .view(&v, "tasks/_sheet.html", data)
+                .view(&v, "tasks/_sheet.html", member.fragment(data))
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             let data =
                 task_form_data(&ctx, &member, Some(id), form_values(&params), &errors).await?;
-            invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, data)
+            invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, member.fragment(data))
         }
     }
 }
@@ -838,7 +842,7 @@ async fn destroy(
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     task.remove(&ctx.db).await?;
     if !headers.contains_key("hx-request") {
-        return Ok(redirect_response(&headers, "/tasks"));
+        return Ok(redirect_response(&headers, &member.url("/tasks")));
     }
     let trigger = serde_json::json!({
         "toast": { "kind": "success", "message": "Task deleted" },
@@ -1031,7 +1035,7 @@ async fn show(
 ) -> Result<Response> {
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
-    format::render().view(&v, "tasks/_sheet.html", data)
+    format::render().view(&v, "tasks/_sheet.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -1054,13 +1058,13 @@ async fn set_status(
     let task = task.set_status(&ctx.db, &form.status).await?;
     notifications::task_saved(&ctx, &member, Some(before), &task).await?;
     if !headers.contains_key("hx-request") {
-        return Ok(redirect_response(&headers, "/tasks"));
+        return Ok(redirect_response(&headers, &member.url("/tasks")));
     }
     let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
     let trigger = serde_json::json!({ "toast": { "kind": "success", "message": "Status updated" }, "tasks-changed": true });
     format::render()
         .header("HX-Trigger", trigger.to_string())
-        .view(&v, "tasks/_sheet.html", data)
+        .view(&v, "tasks/_sheet.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -1078,18 +1082,25 @@ async fn add_note(
         notifications::note_added(&ctx, &member, &task, note).await?;
     }
     match result {
-        Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(&headers, "/tasks")),
+        Ok(_) if !headers.contains_key("hx-request") => {
+            Ok(redirect_response(&headers, &member.url("/tasks")))
+        }
         Ok(_) => {
             let data = sheet_data(&ctx, &member, &task, "", &FieldErrors::new()).await?;
             let trigger = serde_json::json!({ "toast": { "kind": "success", "message": "Note posted" }, "tasks-changed": true });
             format::render()
                 .header("HX-Trigger", trigger.to_string())
-                .view(&v, "tasks/_sheet.html", data)
+                .view(&v, "tasks/_sheet.html", member.fragment(data))
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             let data = sheet_data(&ctx, &member, &task, &params.body, &errors).await?;
-            invalid_form(&v, "tasks/_note_form.html", NOTE_FORM_ID, data)
+            invalid_form(
+                &v,
+                "tasks/_note_form.html",
+                NOTE_FORM_ID,
+                member.fragment(data),
+            )
         }
     }
 }
@@ -1146,7 +1157,11 @@ async fn react_note(
         &reaction_rows(rows, &team),
         &member,
     );
-    format::render().view(&v, "tasks/_note.html", data!({ "note": view }))
+    format::render().view(
+        &v,
+        "tasks/_note.html",
+        member.fragment(data!({ "note": view })),
+    )
 }
 
 pub fn routes() -> Routes {

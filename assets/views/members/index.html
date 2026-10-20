@@ -16,7 +16,7 @@
   <section class="card flex flex-col gap-2 p-4">
     <h2 class="m-0 text-[17px] font-semibold">Time zone</h2>
     <p class="meta m-0 text-sm">Everyone in {{ org.name }} sees times in this zone. It's {{ local_now }} there now.</p>
-    <form method="post" action="/members/timezone" hx-post="/members/timezone" class="flex gap-2">
+    <form method="post" action="{{ org_url(path="/members/timezone") }}" hx-post="{{ org_url(path="/members/timezone") }}" class="flex gap-2">
       <select name="timezone" class="input" aria-label="Time zone">
         {% for tz in timezones %}<option value="{{ tz }}" {% if tz == timezone %}selected{% endif %}>{{ tz | replace(from="_", to=" ") }}</option>{% endfor %}
       </select>
@@ -47,7 +47,7 @@
     <h2 class="section-label">Removed · {{ removed | length }}</h2>
     <div class="list">
       {% for row in removed %}
-      <a class="list-row" href="/members/{{ row.id }}/rotate">
+      <a class="list-row" href="{{ org_url(path="/members/" ~ (row.id) ~ "/rotate") }}">
         {{<avatar name={row.username} color={row.color} size="md"/>}}
         <div class="min-w-0 flex-1">
           <p class="truncate-1 m-0 font-medium">{{ row.username }}</p>

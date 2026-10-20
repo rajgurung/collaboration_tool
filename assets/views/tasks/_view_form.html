@@ -1,4 +1,4 @@
-{% set action = "/tasks/views/" ~ view.id if view else "/tasks/views" %}
+{% set action = org_url(path="/tasks/views/" ~ view.id) if view else org_url(path="/tasks/views") %}
 <form id="view-form" method="post" action="{{ action }}" hx-post="{{ action }}" class="grid gap-5">
   <div class="flex items-start gap-2">
     <div class="flex-1">
@@ -30,13 +30,13 @@
 {% if view %}
 <div class="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
   {% if not view.same %}
-  <form method="post" action="/tasks/views/{{ view.id }}/setup" hx-post="/tasks/views/{{ view.id }}/setup">
+  <form method="post" action="{{ org_url(path="/tasks/views/" ~ (view.id) ~ "/setup") }}" hx-post="{{ org_url(path="/tasks/views/" ~ (view.id) ~ "/setup") }}">
     <input type="hidden" name="scope" value="{{ setup.scope }}"><input type="hidden" name="group" value="{{ setup.group }}">
     <input type="hidden" name="view" value="{{ setup.view }}"><input type="hidden" name="q" value="{{ setup.q }}">
     <button type="submit" class="btn btn-secondary">Update to what's on screen</button>
   </form>
   {% endif %}
-  <form method="post" action="/tasks/views/{{ view.id }}/delete" hx-post="/tasks/views/{{ view.id }}/delete" class="ml-auto">
+  <form method="post" action="{{ org_url(path="/tasks/views/" ~ (view.id) ~ "/delete") }}" hx-post="{{ org_url(path="/tasks/views/" ~ (view.id) ~ "/delete") }}" class="ml-auto">
     <input type="hidden" name="scope" value="{{ setup.scope }}"><input type="hidden" name="group" value="{{ setup.group }}">
     <input type="hidden" name="view" value="{{ setup.view }}"><input type="hidden" name="q" value="{{ setup.q }}">
     <button type="submit" class="btn-text-danger">Delete view</button>

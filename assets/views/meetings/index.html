@@ -3,7 +3,7 @@
 {% block heading %}Meetings{% endblock heading %}
 {% block actions %}
 <button type="button" class="btn btn-primary"
-        hx-get="/meetings/new" hx-target="#meeting-dialog-body"
+        hx-get="{{ org_url(path="/meetings/new") }}" hx-target="#meeting-dialog-body"
         hx-on::after-request="document.getElementById('meeting-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}Meeting</button>
 {% endblock actions %}
 {% block content %}

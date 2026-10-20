@@ -5,7 +5,7 @@ use loco_rs::controller::views::{
 };
 
 /// Builds the view engine the same way `ViewEngineInitializer` does, including
-/// the i18n `t()` and `asset_url()` functions the templates call.
+/// the i18n `t()`, `asset_url()` and `org_url()` functions the templates call.
 fn view_engine() -> TeraView {
     let loader = std::sync::Arc::new(
         ArcLoader::builder("assets/i18n", unic_langid::langid!("en-US"))
@@ -18,6 +18,7 @@ fn view_engine() -> TeraView {
     engines::TeraView::build_with_post_process(move |tera| {
         tera.register_function("t", FluentLoader::new(loader.clone()));
         tera.register_function("asset_url", collab::initializers::view_engine::asset_url);
+        tera.register_function("org_url", collab::initializers::view_engine::org_url);
         Ok(())
     })
     .expect("view engine should build")

@@ -2,7 +2,7 @@
 {% block title %}Login activity · Documents · {{ org.name }}{% endblock title %}
 {% block body_attrs %}hx-history="false"{% endblock body_attrs %}
 {% block topbar %}
-<a href="/documents" class="back">{{<icon name="chevron-left" class="h-5 w-5"/>}}Documents</a>
+<a href="{{ org_url(path="/documents") }}" class="back">{{<icon name="chevron-left" class="h-5 w-5"/>}}Documents</a>
 <span class="flex-1"></span>
 {% endblock topbar %}
 {% block content %}

@@ -242,7 +242,7 @@ async fn respond(
         Err(err) => return Err(err.into()),
     };
     if !headers.contains_key("hx-request") {
-        return Ok(redirect_response(headers, "/members"));
+        return Ok(redirect_response(headers, &member.url("/members")));
     }
     let all = memberships::Model::list_for_org(&ctx.db, member.org.id).await?;
     let (membership, user) = all
@@ -280,7 +280,7 @@ async fn remove(
     match memberships::Model::remove(&ctx, member.org.id, member.user.id, id, &client).await {
         Ok(removed) => Ok(redirect_response(
             &headers,
-            &format!("/members/{}/rotate?removed=1", removed.id),
+            &member.url(&format!("/members/{}/rotate?removed=1", removed.id)),
         )),
         Err(ModelError::Message(message)) => format::render()
             .status(422)
@@ -393,7 +393,7 @@ async fn set_timezone(
                 toast("success", &format!("Times now show in {}", org.timezone)),
             )
             .empty(),
-        Ok(_) => Ok(redirect_response(&headers, "/members")),
+        Ok(_) => Ok(redirect_response(&headers, &member.url("/members"))),
         Err(err) => {
             let message = field_errors(&err)
                 .and_then(|e| e.values().next().cloned())

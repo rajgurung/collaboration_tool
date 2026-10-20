@@ -7,7 +7,7 @@
     {% for f in items %}
     {% if f.kind == "login" %}
     <div class="file-row" id="login-{{ f.id }}">
-      <a class="file-main" href="/documents/logins/{{ f.id }}" data-login-sheet>
+      <a class="file-main" href="{{ org_url(path="/documents/logins/" ~ (f.id)) }}" data-login-sheet>
         <span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span>
         <span class="min-w-0 flex-1">
           <span class="name truncate-1 block">{{ f.title }}</span>
@@ -17,11 +17,11 @@
       <span class="who desktop-only text-sm">{{<avatar name={f.added_by} color={f.color} size="xs" label={false}/>}}<span class="truncate-1">{{ f.added_by }}</span></span>
       <span class="meta desktop-only">{{ f.added }}</span>
       <span class="meta desktop-only"></span>
-      <a class="icon-btn text-muted" href="/documents/logins/{{ f.id }}" data-login-sheet aria-label="Open {{ f.title }}">{{<icon name="chevron-right" class="h-[18px] w-[18px]"/>}}</a>
+      <a class="icon-btn text-muted" href="{{ org_url(path="/documents/logins/" ~ (f.id)) }}" data-login-sheet aria-label="Open {{ f.title }}">{{<icon name="chevron-right" class="h-[18px] w-[18px]"/>}}</a>
     </div>
     {% else %}
     <div class="file-row" id="file-{{ f.id }}">
-      <a class="file-main" href="/documents/files/{{ f.id }}" {% if f.opens_inline %}target="_blank" rel="noopener"{% endif %}>
+      <a class="file-main" href="{{ org_url(path="/documents/files/" ~ (f.id)) }}" {% if f.opens_inline %}target="_blank" rel="noopener"{% endif %}>
         <span class="tile">{% if f.is_image %}{{<icon name="image" class="h-5 w-5"/>}}{% else %}<span class="tile-type">{{ f.label }}</span>{% endif %}</span>
         <span class="min-w-0 flex-1">
           <span class="name truncate-1 block">{{ f.name }}</span>
@@ -41,13 +41,13 @@
             <button type="button" class="icon-btn self-start" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button>
           </div>
           <div class="list" data-pane="menu">
-            {% if f.opens_inline %}<a class="list-row" href="/documents/files/{{ f.id }}" target="_blank" rel="noopener">{{<icon name="external-link" class="h-5 w-5"/>}}<span class="flex-1">Open</span></a>{% endif %}
-            <a class="list-row" href="/documents/files/{{ f.id }}?download=1">{{<icon name="download" class="h-5 w-5"/>}}<span class="flex-1">Download</span></a>
+            {% if f.opens_inline %}<a class="list-row" href="{{ org_url(path="/documents/files/" ~ (f.id)) }}" target="_blank" rel="noopener">{{<icon name="external-link" class="h-5 w-5"/>}}<span class="flex-1">Open</span></a>{% endif %}
+            <a class="list-row" href="{{ org_url(path="/documents/files/" ~ (f.id) ~ "?download=1") }}">{{<icon name="download" class="h-5 w-5"/>}}<span class="flex-1">Download</span></a>
             <button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit" data-show-pane="rename">{{<icon name="pencil" class="h-5 w-5"/>}}<span class="flex-1">Rename</span></button>
             {% if f.can_delete %}<button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-danger" data-show-pane="delete">{{<icon name="trash" class="h-5 w-5"/>}}<span class="flex-1">Delete</span></button>{% endif %}
           </div>
           {% if not f.can_delete %}<p class="meta m-0" data-pane="menu">Only the person who added a file, owners and admins can delete it.</p>{% endif %}
-          <form data-pane="rename" hidden method="post" action="/documents/files/{{ f.id }}/rename" hx-post="/documents/files/{{ f.id }}/rename"
+          <form data-pane="rename" hidden method="post" action="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/rename") }}" hx-post="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/rename") }}"
                 hx-target="#files" hx-swap="innerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="grid gap-3">
             <label class="field">
               <span class="field-label">Name</span>
@@ -56,7 +56,7 @@
             <button type="submit" class="btn btn-primary btn-lg w-full">Save name</button>
           </form>
           {% if f.can_delete %}
-          <form data-pane="delete" hidden method="post" action="/documents/files/{{ f.id }}/delete" hx-post="/documents/files/{{ f.id }}/delete"
+          <form data-pane="delete" hidden method="post" action="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/delete") }}" hx-post="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/delete") }}"
                 hx-target="#files" hx-swap="innerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-3">
             <p class="m-0 text-[19px] font-bold">Delete “{{ f.name }}”?</p>
             <p class="m-0 text-muted">It goes for everyone in {{ org.name }}. There is no bin, so you can't get it back.</p>

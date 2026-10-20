@@ -18,7 +18,7 @@ async fn dismiss(
 ) -> Result<Response> {
     memberships::Model::set_guide_hidden(&ctx.db, member.org.id, member.user.id, true).await?;
     if !headers.contains_key("hx-request") {
-        return Ok(redirect_response(&headers, "/dashboard"));
+        return Ok(redirect_response(&headers, &member.url("/dashboard")));
     }
     format::render()
         .header(
@@ -39,7 +39,7 @@ async fn show(
     headers: HeaderMap,
 ) -> Result<Response> {
     memberships::Model::set_guide_hidden(&ctx.db, member.org.id, member.user.id, false).await?;
-    Ok(redirect_response(&headers, "/dashboard"))
+    Ok(redirect_response(&headers, &member.url("/dashboard")))
 }
 
 /// The welcome pop-up was closed or finished; it doesn't show again.

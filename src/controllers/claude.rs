@@ -152,7 +152,7 @@ async fn revoke(
     Path(grant_id): Path<Uuid>,
 ) -> Result<Response> {
     access_tokens::Model::revoke_mine(&ctx.db, member.org.id, member.user.id, grant_id).await?;
-    Ok(redirect_response(&headers, "/settings/claude"))
+    Ok(redirect_response(&headers, &member.url("/settings/claude")))
 }
 
 pub fn routes() -> Routes {

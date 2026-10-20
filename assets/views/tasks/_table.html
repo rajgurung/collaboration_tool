@@ -1,5 +1,5 @@
 <div id="task-table" class="board"
-     hx-get="/tasks/board?view=list&scope={{ board.scope }}&group={{ board.group }}&q={{ board.q }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
+     hx-get="{{ org_url(path="/tasks/board?view=list&scope=" ~ (board.scope) ~ "&group=" ~ (board.group) ~ "&q=" ~ (board.q)) }}" hx-trigger="tasks-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
   {% include "tasks/_toolbar.html" %}
 
   <div class="task-row-head" aria-hidden="true">
@@ -19,8 +19,8 @@
       {% for cell in lane.cells %}
       {% set column = board.columns[loop.index0] %}
       {% for card in cell %}
-      <a href="/tasks/{{ card.id }}" class="task-row"
-         hx-get="/tasks/{{ card.id }}" hx-target="#task-sheet-body"
+      <a href="{{ org_url(path="/tasks/" ~ (card.id)) }}" class="task-row"
+         hx-get="{{ org_url(path="/tasks/" ~ (card.id)) }}" hx-target="#task-sheet-body"
          hx-on::after-request="document.getElementById('task-sheet').showModal()">
         <span class="task-row-title {% if card.status == "done" %}text-muted{% endif %}">{{ card.title }}</span>
         <span><span class="status-pill" style="--dot: {{ column.color }}"><span class="dot"></span>{{ column.label }}</span></span>
@@ -38,14 +38,14 @@
         {% endif %}
       </a>
       {% endfor %}
-      {% if column.key == "done" and lane.more_done %}<a href="/tasks?filter=done{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}{% if board.q %}&q={{ board.q }}{% endif %}" class="task-row-more">All done tasks</a>{% endif %}
+      {% if column.key == "done" and lane.more_done %}<a href="{{ org_url(path="/tasks?filter=done") }}{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}{% if board.q %}&q={{ board.q }}{% endif %}" class="task-row-more">All done tasks</a>{% endif %}
       {% endfor %}
     </div>
   </section>
   {% else %}
   <div class="card empty mt-3">
-    {% if board.q %}No tasks match “{{ board.q }}”. <a href="/tasks?view=list&scope={{ board.scope }}&group={{ board.group }}" class="text-link">Clear the search</a>
-    {% elif board.scope == "mine" %}Nothing assigned to you. <a href="/tasks?view=list&scope=all&group={{ board.group }}" class="text-link">See everyone's tasks</a>
+    {% if board.q %}No tasks match “{{ board.q }}”. <a href="{{ org_url(path="/tasks?view=list&scope=" ~ (board.scope) ~ "&group=" ~ (board.group)) }}" class="text-link">Clear the search</a>
+    {% elif board.scope == "mine" %}Nothing assigned to you. <a href="{{ org_url(path="/tasks?view=list&scope=all&group=" ~ (board.group)) }}" class="text-link">See everyone's tasks</a>
     {% else %}No tasks yet. Add the first one with New task.{% endif %}
   </div>
   {% endfor %}

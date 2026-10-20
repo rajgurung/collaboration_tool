@@ -85,7 +85,7 @@ async fn new(
         "attendee_ids": [member.user.id],
     });
     let data = form_data(&ctx, &member, values, &FieldErrors::new()).await?;
-    format::render().view(&v, "meetings/_form.html", data)
+    format::render().view(&v, "meetings/_form.html", member.fragment(data))
 }
 
 #[debug_handler]
@@ -98,13 +98,17 @@ async fn create(
 ) -> Result<Response> {
     match meetings::Model::create(&ctx.db, member.org.id, member.user.id, &params).await {
         Ok(_) if !headers.contains_key("hx-request") => {
-            Ok(redirect_response(&headers, "/meetings"))
+            Ok(redirect_response(&headers, &member.url("/meetings")))
         }
         Ok(_) => {
             let meetings = list(&ctx, member.org.id).await?;
             format::render()
                 .header("HX-Trigger", toast("success", "Meeting saved"))
-                .view(&v, "meetings/_list.html", data!({ "meetings": meetings }))
+                .view(
+                    &v,
+                    "meetings/_list.html",
+                    member.fragment(data!({ "meetings": meetings })),
+                )
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
@@ -113,7 +117,7 @@ async fn create(
                 "decisions": params.decisions, "attendee_ids": params.attendee_ids,
             });
             let data = form_data(&ctx, &member, values, &errors).await?;
-            invalid_form(&v, "meetings/_form.html", FORM_ID, data)
+            invalid_form(&v, "meetings/_form.html", FORM_ID, member.fragment(data))
         }
     }
 }

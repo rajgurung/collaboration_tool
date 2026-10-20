@@ -1,12 +1,12 @@
 {# Shared by the board and the desktop list. Links keep the current layout. #}
-{% set base = "/tasks?view=list&" if board.layout == "list" else "/tasks?" %}
+{% set base = org_url(path="/tasks?view=list&") if board.layout == "list" else org_url(path="/tasks?") %}
 <div class="board-toolbar">
   <nav class="chips" aria-label="Whose tasks">
     {% for s in board.scopes %}
     <a href="{{ base }}scope={{ s.key }}&group={{ board.group }}{% if board.q %}&q={{ board.q }}{% endif %}" class="chip" {% if s.current %}aria-current="true"{% endif %}>{{ s.label }}</a>
     {% endfor %}
   </nav>
-  <form action="/tasks" method="get" class="board-search" role="search">
+  <form action="{{ org_url(path="/tasks") }}" method="get" class="board-search" role="search">
     {% if board.layout == "list" %}<input type="hidden" name="view" value="list">{% endif %}
     <input type="hidden" name="scope" value="{{ board.scope }}">
     <input type="hidden" name="group" value="{{ board.group }}">

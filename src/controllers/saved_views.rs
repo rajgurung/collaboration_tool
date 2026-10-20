@@ -15,7 +15,7 @@ const FORM_ID: &str = "view-form";
 /// The save form, describing the setup about to be saved.
 #[debug_handler]
 async fn new(
-    _member: CurrentMember,
+    member: CurrentMember,
     State(_ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     Query(setup): Query<Setup>,
@@ -24,7 +24,9 @@ async fn new(
     format::render().view(
         &v,
         "tasks/_view_form.html",
-        data!({ "view": null, "name": "", "is_default": false, "setup": setup, "errors": FieldErrors::new() }),
+        member.fragment(
+            data!({ "view": null, "name": "", "is_default": false, "setup": setup, "errors": FieldErrors::new() }),
+        ),
     )
 }
 
@@ -37,17 +39,20 @@ async fn create(
     Form(params): Form<ViewParams>,
 ) -> Result<Response> {
     match saved_views::Model::create(&ctx.db, member.org.id, member.user.id, &params).await {
-        Ok(view) => Ok(redirect_response(&headers, &view.setup().url())),
+        Ok(view) => Ok(redirect_response(
+            &headers,
+            &member.url(&view.setup().url()),
+        )),
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             invalid_form(
                 &v,
                 "tasks/_view_form.html",
                 FORM_ID,
-                data!({
+                member.fragment(data!({
                     "view": null, "name": params.name, "is_default": params.is_default.is_some(),
                     "setup": params.setup.cleaned(), "errors": errors,
-                }),
+                })),
             )
         }
     }
@@ -68,11 +73,11 @@ async fn edit(
     format::render().view(
         &v,
         "tasks/_view_form.html",
-        data!({
+        member.fragment(data!({
             "view": { "id": view.id, "same": view.setup() == current },
             "name": view.name, "is_default": view.is_default,
             "setup": current, "errors": FieldErrors::new(),
-        }),
+        })),
     )
 }
 
@@ -98,17 +103,20 @@ async fn update(
         .edit(&ctx.db, &form.name, form.is_default.is_some())
         .await
     {
-        Ok(view) => Ok(redirect_response(&headers, &view.setup().url())),
+        Ok(view) => Ok(redirect_response(
+            &headers,
+            &member.url(&view.setup().url()),
+        )),
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             invalid_form(
                 &v,
                 "tasks/_view_form.html",
                 FORM_ID,
-                data!({
+                member.fragment(data!({
                     "view": { "id": id, "same": true }, "name": form.name,
                     "is_default": form.is_default.is_some(), "setup": setup, "errors": errors,
-                }),
+                })),
             )
         }
     }
@@ -125,7 +133,10 @@ async fn update_setup(
 ) -> Result<Response> {
     let view = saved_views::Model::find_mine(&ctx.db, member.org.id, member.user.id, id).await?;
     let view = view.update_setup(&ctx.db, &setup).await?;
-    Ok(redirect_response(&headers, &view.setup().url()))
+    Ok(redirect_response(
+        &headers,
+        &member.url(&view.setup().url()),
+    ))
 }
 
 /// Deletes the view and stays on the current setup.
@@ -139,7 +150,10 @@ async fn destroy(
 ) -> Result<Response> {
     let view = saved_views::Model::find_mine(&ctx.db, member.org.id, member.user.id, id).await?;
     view.remove(&ctx.db).await?;
-    Ok(redirect_response(&headers, &setup.cleaned().url()))
+    Ok(redirect_response(
+        &headers,
+        &member.url(&setup.cleaned().url()),
+    ))
 }
 
 pub fn routes() -> Routes {

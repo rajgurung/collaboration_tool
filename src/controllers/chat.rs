@@ -19,6 +19,7 @@ use crate::{
     views::{
         forms::{field_errors, invalid_form, toast, FieldErrors},
         layout::{avatar_color, Person},
+        links::org_base,
         reactions::FORMER_MEMBER,
         time,
     },
@@ -504,7 +505,7 @@ async fn index(
     Query(legacy): Query<LegacyQuery>,
 ) -> Result<Response> {
     if let Some(id) = legacy.c {
-        return format::redirect(&format!("/chat/{id}"));
+        return format::redirect(&member.url(&format!("/chat/{id}")));
     }
     let names = names(&ctx, member.org.id).await?;
     let items = list_items(&ctx, &member, &names).await?;
@@ -679,13 +680,17 @@ async fn send(
     match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(
             &headers,
-            &format!("/chat/{}", conversation.id),
+            &member.url(&format!("/chat/{}", conversation.id)),
         )),
         Ok(message) => {
             let names = names(&ctx, member.org.id).await?;
             let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
             view.read_receipts = true;
-            format::render().view(&v, "chat/_message.html", data!({ "message": view }))
+            format::render().view(
+                &v,
+                "chat/_message.html",
+                member.fragment(data!({ "message": view })),
+            )
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
@@ -719,7 +724,11 @@ async fn feed(
     .await?;
     let names = names(&ctx, member.org.id).await?;
     let feed = main_feed(&ctx, &member, &conversation, &names).await?;
-    format::render().view(&v, "chat/_feed.html", data!({ "messages": feed }))
+    format::render().view(
+        &v,
+        "chat/_feed.html",
+        member.fragment(data!({ "messages": feed })),
+    )
 }
 
 /// Adds or removes the viewer's reaction, tells every open socket, and returns
@@ -765,6 +774,7 @@ async fn react(
     }
     format::html(&render_reactions(
         &v,
+        &org_base(&member.org.slug),
         conversation.id,
         message.id,
         &rows,
@@ -779,6 +789,7 @@ async fn react(
 /// When the template fails to render.
 pub fn render_reactions(
     v: &TeraView,
+    org_base: &str,
     conversation_id: i64,
     message_id: i64,
     rows: &[ReactionRow],
@@ -795,6 +806,7 @@ pub fn render_reactions(
                 "reactions": reactions,
             },
             "oob": true,
+            "org_base": org_base,
         }),
     )
 }
@@ -828,7 +840,7 @@ async fn actions(
     format::render().view(
         &v,
         "chat/_actions.html",
-        data!({ "message": view, "reaction_total": reaction_total }),
+        member.fragment(data!({ "message": view, "reaction_total": reaction_total })),
     )
 }
 
@@ -954,7 +966,7 @@ async fn thread_feed(
     let (_, parent) = find_thread(&ctx, &member, id, message_id).await?;
     let names = names(&ctx, member.org.id).await?;
     let data = thread_feed_data(&ctx, &member, &parent, &names).await?;
-    format::render().view(&v, "chat/_thread_feed.html", data)
+    format::render().view(&v, "chat/_thread_feed.html", member.fragment(data))
 }
 
 /// Plain HTTP reply in a thread, used when the live connection is not available.
@@ -979,7 +991,7 @@ async fn reply(
     match result {
         Ok(_) if !headers.contains_key("hx-request") => Ok(redirect_response(
             &headers,
-            &thread_url(conversation.id, parent.id),
+            &member.url(&thread_url(conversation.id, parent.id)),
         )),
         Ok(reply) => {
             let names = names(&ctx, member.org.id).await?;
@@ -987,7 +999,7 @@ async fn reply(
             format::render().view(
                 &v,
                 "chat/_message.html",
-                data!({ "message": view, "in_thread": true }),
+                member.fragment(data!({ "message": view, "in_thread": true })),
             )
         }
         Err(err) => {
@@ -1021,7 +1033,9 @@ async fn new_group(
     format::render().view(
         &v,
         "chat/_group_form.html",
-        data!({ "team": team, "form": { "name": "", "member_ids": [] }, "errors": FieldErrors::new() }),
+        member.fragment(
+            data!({ "team": team, "form": { "name": "", "member_ids": [] }, "errors": FieldErrors::new() }),
+        ),
     )
 }
 
@@ -1035,7 +1049,10 @@ async fn create_group(
 ) -> Result<Response> {
     match conversations::Model::create_group(&ctx.db, member.org.id, member.user.id, &params).await
     {
-        Ok(group) => Ok(redirect_response(&headers, &format!("/chat/{}", group.id))),
+        Ok(group) => Ok(redirect_response(
+            &headers,
+            &member.url(&format!("/chat/{}", group.id)),
+        )),
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
             let team = team_except_me(&ctx, &member).await?;
@@ -1043,7 +1060,9 @@ async fn create_group(
                 &v,
                 "chat/_group_form.html",
                 GROUP_FORM_ID,
-                data!({ "team": team, "form": { "name": params.name, "member_ids": params.member_ids }, "errors": errors }),
+                member.fragment(
+                    data!({ "team": team, "form": { "name": params.name, "member_ids": params.member_ids }, "errors": errors }),
+                ),
             )
         }
     }
@@ -1056,7 +1075,11 @@ async fn new_dm(
     ViewEngine(v): ViewEngine<TeraView>,
 ) -> Result<Response> {
     let team = team_except_me(&ctx, &member).await?;
-    format::render().view(&v, "chat/_dm_picker.html", data!({ "team": team }))
+    format::render().view(
+        &v,
+        "chat/_dm_picker.html",
+        member.fragment(data!({ "team": team })),
+    )
 }
 
 #[debug_handler]
@@ -1068,7 +1091,10 @@ async fn start_dm(
 ) -> Result<Response> {
     match conversations::Model::start_dm(&ctx.db, member.org.id, member.user.id, form.user_id).await
     {
-        Ok(dm) => Ok(redirect_response(&headers, &format!("/chat/{}", dm.id))),
+        Ok(dm) => Ok(redirect_response(
+            &headers,
+            &member.url(&format!("/chat/{}", dm.id)),
+        )),
         Err(ModelError::Message(msg)) => Err(Error::BadRequest(msg)),
         Err(err) => Err(err.into()),
     }
