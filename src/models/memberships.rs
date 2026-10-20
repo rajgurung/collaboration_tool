@@ -889,6 +889,27 @@ impl Model {
             .await?)
     }
 
+    /// This user's membership, in any status, in the organisation with this
+    /// slug, with that organisation. One query: no row is the same answer
+    /// for "not a member" and "no such organisation". For the address
+    /// `/o/{slug}/...`; always pass the signed-in user's own id.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn in_org_by_slug<C: ConnectionTrait>(
+        db: &C,
+        slug: &str,
+        user_id: i64,
+    ) -> ModelResult<Option<(Self, organisations::Model)>> {
+        Ok(Entity::find()
+            .find_also_related(organisations::Entity)
+            .filter(Column::UserId.eq(user_id))
+            .filter(Expr::col((organisations::Entity, organisations::Column::Slug)).eq(slug))
+            .one(db)
+            .await?
+            .and_then(|(m, org)| org.map(|org| (m, org))))
+    }
+
     /// [`Self::active_in`], reading the row `FOR SHARE`: it waits for a
     /// removal of this membership that is committing, then sees `removed`.
     /// Other readers never wait. For minting tokens and unlocking logins,
