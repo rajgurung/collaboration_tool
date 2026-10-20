@@ -52,8 +52,24 @@ struct Seen {
 }
 
 impl Seen {
+    /// A write's response: its links, and the status it must have.
+    fn write(&mut self, what: &str, res: &axum_test::TestResponse, status: u16) {
+        if res.status_code().as_u16() != status {
+            self.bad.insert(format!(
+                "{what}: status {}, expected {status}",
+                res.status_code()
+            ));
+        }
+        self.check(what, res, None);
+    }
+
     /// `also` is another org whose address may appear (the switcher's rows).
+    /// A 5xx is always bad: a template that failed to render, say.
     fn check(&mut self, what: &str, res: &axum_test::TestResponse, also: Option<&str>) {
+        if res.status_code().is_server_error() {
+            self.bad
+                .insert(format!("{what}: status {}", res.status_code()));
+        }
         let mut values = links(&res.text());
         for name in ["location", "hx-redirect"] {
             if let Some(v) = res.headers().get(name) {
@@ -121,26 +137,26 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
             &bob_user.id.to_string(),
         )))
     .await;
-    seen.check("create a task", &res, None);
+    seen.write("create a task", &res, 200);
     let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
     let res = hx(request
         .post(&alice.at(&format!("/tasks/{}", task.id)))
         .as_member(&alice)
         .form(&task_form("Write the brief again", project.id, "")))
     .await;
-    seen.check("edit a task", &res, None);
+    seen.write("edit a task", &res, 200);
     let res = hx(request
         .post(&alice.at(&format!("/tasks/{}/status", task.id)))
         .as_member(&alice)
         .form(&json!({ "status": "progress" })))
     .await;
-    seen.check("change a status", &res, None);
+    seen.write("change a status", &res, 200);
     let res = hx(request
         .post(&bob.at(&format!("/tasks/{}/notes", task.id)))
         .as_member(&bob)
         .form(&json!({ "body": "Started @alice" })))
     .await;
-    seen.check("add a note", &res, None);
+    seen.write("add a note", &res, 200);
     let note = task_notes::Entity::find()
         .one(&ctx.db)
         .await
@@ -151,13 +167,13 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&alice)
         .form(&json!({ "emoji": "👍", "on": "1" })))
     .await;
-    seen.check("react to a note", &res, None);
+    seen.write("react to a note", &res, 200);
     let res = hx(request
         .post(&alice.at("/tasks/views"))
         .as_member(&alice)
         .form(&json!({ "name": "Mine", "scope": "mine" })))
     .await;
-    seen.check("save a view", &res, None);
+    seen.write("save a view", &res, 200);
 
     let org = organisations::Model::find_by_slug(&ctx.db, "acme")
         .await
@@ -170,7 +186,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&alice)
         .form(&json!({ "body": "Hello @bobby" })))
     .await;
-    seen.check("send a message", &res, None);
+    seen.write("send a message", &res, 200);
     let hello = messages::Entity::find()
         .one(&ctx.db)
         .await
@@ -184,7 +200,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&bob)
         .form(&json!({ "emoji": "🎉", "on": "1" })))
     .await;
-    seen.check("react to a message", &res, None);
+    seen.write("react to a message", &res, 200);
     let res = hx(request
         .post(&bob.at(&format!(
             "/chat/{}/threads/{}/replies",
@@ -193,26 +209,26 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&bob)
         .form(&json!({ "body": "In the thread @alice" })))
     .await;
-    seen.check("reply in a thread", &res, None);
+    seen.write("reply in a thread", &res, 200);
     let res = request
         .post(&alice.at("/chat/groups"))
         .as_member(&alice)
         .form(&json!({ "name": "leadership" }))
         .await;
-    seen.check("create a group", &res, None);
+    seen.write("create a group", &res, 303);
     let res = request
         .post(&alice.at("/chat/dms"))
         .as_member(&alice)
         .form(&json!({ "user_id": bob_user.id.to_string() }))
         .await;
-    seen.check("start a DM", &res, None);
+    seen.write("start a DM", &res, 303);
 
     let res = hx(request
         .post(&alice.at("/documents/folders"))
         .as_member(&alice)
         .form(&json!({ "name": "Insurance", "note": "" })))
     .await;
-    seen.check("create a folder", &res, None);
+    seen.write("create a folder", &res, 200);
     let all = folders::Model::list_for_org(&ctx.db, org.id).await.unwrap();
     let folder = all
         .iter()
@@ -234,7 +250,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .add_header("hx-request", "true")
         .multipart(MultipartForm::new().add_part("file", Part::bytes(pdf).file_name("policy.pdf")))
         .await;
-    seen.check("upload a file", &res, None);
+    seen.write("upload a file", &res, 200);
     let doc = documents::Entity::find()
         .one(&ctx.db)
         .await
@@ -245,7 +261,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&alice)
         .form(&json!({ "name": "renewal" })))
     .await;
-    seen.check("rename a file", &res, None);
+    seen.write("rename a file", &res, 200);
     let res = hx(request
         .post(&alice.at(&format!("/documents/folders/{}/logins", logins.id)))
         .as_member(&alice)
@@ -257,7 +273,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
             ("password", "pa55word-long"),
         ]))
     .await;
-    seen.check("add a login", &res, None);
+    seen.write("add a login", &res, 200);
 
     let res = hx(request
         .post(&alice.at("/roadmap/projects"))
@@ -267,13 +283,13 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
             "accent": "#72e5b4", "owner_id": "", "summary": "",
         })))
     .await;
-    seen.check("create a project", &res, None);
+    seen.write("create a project", &res, 200);
     let res = hx(request
         .post(&alice.at("/meetings"))
         .as_member(&alice)
-        .form(&json!({ "title": "Weekly", "held_on": "", "summary": "" })))
+        .form(&json!({ "title": "Weekly", "held_on": "2026-10-05", "summary": "Agreed the launch scope" })))
     .await;
-    seen.check("create a meeting", &res, None);
+    seen.write("create a meeting", &res, 200);
     let bob_row = memberships::Model::active_in(&ctx.db, org.id, bob_user.id)
         .await
         .unwrap()
@@ -283,7 +299,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&alice)
         .form(&json!({ "role": "admin" })))
     .await;
-    seen.check("change a role", &res, None);
+    seen.write("change a role", &res, 200);
     // Approving is a write too; leave carol waiting for the Members page.
     let dana = join(request, ctx, "acme", "dana", "dana@example.com").await;
     let dana_row = memberships::Entity::find()
@@ -296,7 +312,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .post(&alice.at(&format!("/members/{}/approve", dana_row.id)))
         .as_member(&alice))
     .await;
-    seen.check("approve a member", &res, None);
+    seen.write("approve a member", &res, 200);
     drop(dana);
 
     World {
