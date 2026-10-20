@@ -150,6 +150,16 @@ message or token typed for Acme would land in Beta. PR 3 must add:
 - The response is the same whether the email has an account or not.
 - A removed or declined member can't re-join as active.
 - The joiner sets their username for the new org.
+- A rejoin updates the existing removed or declined row. It never inserts a
+  second one; `(organisation_id, user_id)` is unique.
+- Approving a membership revokes every token and unused OAuth code that
+  `(org, user)` still has, and clears an unlock for that org, inside the
+  approval transaction (from the PR 5 security review).
+- `memberships::approve` becomes a conditional update (`WHERE status =
+  'pending'`, exactly one row changed), so a stale page can't turn a declined
+  or removed membership into active (from the PR 5 security review).
+- Once re-approved, open sessions regain the org without signing in again,
+  since removal no longer ends them (PR 5).
 
 **Org-scoped removal.**
 
@@ -159,6 +169,9 @@ message or token typed for Acme would land in Beta. PR 3 must add:
   version.
 - Decide who is told when an account lock (account-wide) is caused by one
   org's app passwords.
+- Planned in `docs/plans/multi-org-5.md`.
+- Follow-up: a super admin "sign out everywhere and lock" for a user, from
+  `/admin`, for suspected takeovers. Remove itself never signs people out.
 
 **Known account-wide effects (accepted).**
 
