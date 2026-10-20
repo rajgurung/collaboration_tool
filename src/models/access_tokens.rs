@@ -310,8 +310,19 @@ impl Model {
                 .one(db)
                 .await?;
             if let Some(row) = reused {
-                tracing::warn!(grant = %row.grant_id, "refresh token reused; revoking grant");
-                Self::revoke_grant(db, row.grant_id).await?;
+                // Swapped before: a newer token in the grant. Otherwise it was
+                // revoked (a reset, a lock, a removal, a disconnect), and the
+                // grant is already revoked with it.
+                let rotated = Entity::find()
+                    .filter(Column::GrantId.eq(row.grant_id))
+                    .filter(Column::Id.gt(row.id))
+                    .count(db)
+                    .await?
+                    > 0;
+                if rotated {
+                    tracing::warn!(grant = %row.grant_id, "refresh token reused; revoking grant");
+                    Self::revoke_grant(db, row.grant_id).await?;
+                }
             }
             return Ok(None);
         };
