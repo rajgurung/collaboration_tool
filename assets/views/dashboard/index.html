@@ -2,16 +2,16 @@
 {% block title %}Home · {{ org.name }}{% endblock title %}
 {% block topbar %}
 {% if org_menu %}
-<h1 class="text-[17px]! min-[900px]:hidden"><a href="/orgs" class="org-head" role="button" aria-haspopup="dialog" data-org-sheet><span class="truncate-1">{{ org.name }}</span>{{<icon name="chevron-down" class="h-[18px] w-[18px]"/>}}</a></h1>
+<h1 class="text-[17px]! min-[900px]:hidden"><a href="{{ org_url(path="/orgs") }}" class="org-head" role="button" aria-haspopup="dialog" data-org-sheet><span class="truncate-1">{{ org.name }}</span>{{<icon name="chevron-down" class="h-[18px] w-[18px]"/>}}</a></h1>
 {% else %}
 <h1 class="text-[17px]! min-[900px]:hidden">{{ org.name }}</h1>
 {% endif %}
-<a href="/more" class="icon-btn min-[900px]:hidden" aria-label="Account and settings">{{<avatar name={me.username} color={me.color} size="sm"/>}}</a>
+<a href="{{ org_url(path="/more") }}" class="icon-btn min-[900px]:hidden" aria-label="Account and settings">{{<avatar name={me.username} color={me.color} size="sm"/>}}</a>
 {% endblock topbar %}
 {% block content %}
 <div class="flex flex-col gap-6">
   {% if stale %}
-  {# After a stale tab was sent here. Names the old org only if you are in it, or were removed from it. #}
+  {# After a refused save was sent here (§5). Names the tab's org only if your row there was removed. #}
   <div class="notice" role="status" data-stale-notice>
     <span class="notice-icon">{{<icon name="rotate-ccw" class="h-[18px] w-[18px]"/>}}</span>
     <div class="notice-body">
@@ -19,9 +19,8 @@
       <p class="notice-title">You no longer have access to {{ stale.name }}. You're now in {{ org.name }}.</p>
       <p class="meta m-0 text-[14px]">An owner or admin removed you. Nothing from this tab was saved.</p>
       {% else %}
-      <p class="notice-title">This tab was showing {% if stale.name %}{{ stale.name }}{% else %}another organisation{% endif %}. You're now in {{ org.name }}.</p>
-      <p class="meta m-0 text-[14px]">You switched organisation in another tab, and every tab follows. Nothing was saved.</p>
-      {% if stale.id %}<form method="post" action="/orgs/{{ stale.id }}/switch" class="notice-actions"><button type="submit" class="btn btn-secondary btn-tall">Back to {{ stale.name }}</button></form>{% endif %}
+      <p class="notice-title">Your last change wasn't saved.</p>
+      <p class="meta m-0 text-[14px]">The app was updated while this tab was open, so we stopped the change to be safe. Please make it again.</p>
       {% endif %}
     </div>
     <button type="button" class="icon-btn" aria-label="Dismiss" data-dismiss-notice>{{<icon name="x" class="h-5 w-5"/>}}</button>
@@ -45,26 +44,26 @@
       <p class="meta m-0 mb-1 text-[14px]">{{ today }}</p>
       <p class="m-0 text-[28px] font-bold tracking-tight min-[900px]:text-[32px]">{{ greeting }}, {{ me.username }}</p>
     </div>
-    <a href="/tasks?new=1" class="btn btn-primary desktop-only">{{<icon name="plus" class="h-4 w-4"/>}}New task</a>
+    <a href="{{ org_url(path="/tasks?new=1") }}" class="btn btn-primary desktop-only">{{<icon name="plus" class="h-4 w-4"/>}}New task</a>
   </div>
 
   {% if guide %}{% include "dashboard/_guide.html" %}{% endif %}
 
   <div class="grid grid-cols-2 gap-3 min-[900px]:grid-cols-4">
-    <a href="/tasks?view=list&filter=mine" class="stat" style="--dot: var(--progress)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ my_open }}</span><span class="meta">Your open tasks</span></span></a>
-    <a href="/tasks?view=list&filter=blocked" class="stat" style="--dot: var(--blocked)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ blocked }}</span><span class="meta">Blocked</span></span></a>
-    <a href="/tasks" class="stat" style="--dot: var(--accent)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ due_this_week }}</span><span class="meta">Due this week</span></span></a>
-    <a href="/chat" class="stat" style="--dot: var(--done)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ unread }}</span><span class="meta">Unread messages</span></span></a>
+    <a href="{{ org_url(path="/tasks?view=list&filter=mine") }}" class="stat" style="--dot: var(--progress)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ my_open }}</span><span class="meta">Your open tasks</span></span></a>
+    <a href="{{ org_url(path="/tasks?view=list&filter=blocked") }}" class="stat" style="--dot: var(--blocked)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ blocked }}</span><span class="meta">Blocked</span></span></a>
+    <a href="{{ org_url(path="/tasks") }}" class="stat" style="--dot: var(--accent)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ due_this_week }}</span><span class="meta">Due this week</span></span></a>
+    <a href="{{ org_url(path="/chat") }}" class="stat" style="--dot: var(--done)"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">{{ unread }}</span><span class="meta">Unread messages</span></span></a>
   </div>
 
   <div class="home-grid">
     <div class="flex flex-col gap-6">
       <section class="flex flex-col gap-2">
-        <div class="section-head"><h2>Roadmap: now</h2><a href="/roadmap">Full roadmap</a></div>
+        <div class="section-head"><h2>Roadmap: now</h2><a href="{{ org_url(path="/roadmap") }}">Full roadmap</a></div>
         {% if roadmap_now | length > 0 %}
         <div class="grid gap-3 sm:grid-cols-2 min-[1200px]:grid-cols-3">
           {% for p in roadmap_now %}
-          <a href="/roadmap" class="project-card" style="--accent-bar: {{ p.accent }}">
+          <a href="{{ org_url(path="/roadmap") }}" class="project-card" style="--accent-bar: {{ p.accent }}">
             <span class="flex items-center gap-2"><span class="truncate-1 flex-1 font-bold">{{ p.name }}</span>{% if p.status %}<span class="pill {% if p.blocked > 0 %}pill-blocked{% endif %}">{{ p.status }}</span>{% endif %}</span>
             <span class="flex items-center gap-2.5"><span class="bar flex-1" style="--bar: {{ p.accent }}" role="progressbar" aria-label="Tasks done" aria-valuenow="{{ p.progress.percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ p.progress.percent }}%"></span></span><span class="meta tabular-nums">{{ p.progress.percent }}%</span></span>
             <span class="flex items-center gap-2">
@@ -75,23 +74,23 @@
           {% endfor %}
         </div>
         {% else %}
-        <div class="card empty">Nothing in the "now" lane. <a href="/roadmap" class="text-link">Add a project</a></div>
+        <div class="card empty">Nothing in the "now" lane. <a href="{{ org_url(path="/roadmap") }}" class="text-link">Add a project</a></div>
         {% endif %}
       </section>
 
       <section class="flex flex-col gap-2">
-        <div class="section-head"><h2>My tasks</h2><a href="/tasks">All tasks</a></div>
+        <div class="section-head"><h2>My tasks</h2><a href="{{ org_url(path="/tasks") }}">All tasks</a></div>
         {% if my_tasks | length > 0 %}
         <div class="list">
           {% for t in my_tasks %}
-          <a href="/tasks?view=list&filter=mine" class="list-row">
+          <a href="{{ org_url(path="/tasks?view=list&filter=mine") }}" class="list-row">
             {{<status_icon status={t.status}/>}}
             <span class="flex min-w-0 flex-1 flex-col"><span class="truncate-1 text-[15px] font-semibold">{{ t.title }}</span><span class="meta truncate-1 flex items-center gap-1.5"><span class="dot" style="--dot: {{ t.accent }}"></span>{{ t.meta }}</span></span>
           </a>
           {% endfor %}
         </div>
         {% else %}
-        <div class="card empty">Nothing on your plate. <a href="/tasks?new=1" class="text-link">Add a task</a></div>
+        <div class="card empty">Nothing on your plate. <a href="{{ org_url(path="/tasks?new=1") }}" class="text-link">Add a task</a></div>
         {% endif %}
       </section>
     </div>
@@ -99,10 +98,10 @@
     <div class="flex flex-col gap-6">
       {% if recent_chats | length > 0 %}
       <section class="flex flex-col gap-2">
-        <div class="section-head"><h2>Recent chat</h2><a href="/chat">All chats</a></div>
+        <div class="section-head"><h2>Recent chat</h2><a href="{{ org_url(path="/chat") }}">All chats</a></div>
         <div class="list">
           {% for c in recent_chats %}
-          <a href="/chat/{{ c.id }}" class="list-row">
+          <a href="{{ org_url(path="/chat/" ~ (c.id)) }}" class="list-row">
             {% if c.kind == "dm" %}{{<avatar name={c.label} color={c.color} size="md"/>}}{% else %}<span class="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-chip text-muted">{{<icon name="hash" class="h-[18px] w-[18px]"/>}}</span>{% endif %}
             <span class="flex min-w-0 flex-1 flex-col">
               <span class="flex justify-between gap-2"><span class="truncate-1 text-[15px] {% if c.unread > 0 %}font-bold{% else %}font-semibold{% endif %}">{{ c.label }}</span><span class="meta shrink-0">{{ c.time }}</span></span>
@@ -117,7 +116,7 @@
 
       {% if decision %}
       <section class="flex flex-col gap-2">
-        <div class="section-head"><h2>Latest decision</h2><a href="/meetings">Meetings</a></div>
+        <div class="section-head"><h2>Latest decision</h2><a href="{{ org_url(path="/meetings") }}">Meetings</a></div>
         <figure class="decision">
           <blockquote class="m-0 whitespace-pre-wrap text-[15px] font-medium leading-relaxed">{{ decision.decisions }}</blockquote>
           <figcaption class="meta">{{ decision.title }} · {{ decision.held_on }}</figcaption>

@@ -18,21 +18,18 @@ const RECENT_CHATS: usize = 2;
 
 #[derive(Debug, Deserialize)]
 struct HomeQuery {
-    /// Set by a switch. Only says "show the toast"; the name comes from the
-    /// org this request resolved.
-    switched: Option<String>,
-    /// Set by a stale-tab refusal: the org the tab was drawn for, if known.
+    /// Set by a refused save: the org the tab was drawn for, if known.
     from: Option<String>,
-    /// Set by "New organisation". Like `switched`, only says "show the
-    /// toast"; the name comes from the org this request resolved.
+    /// Set by "New organisation". Only says "show the toast"; the name comes
+    /// from the org this request resolved.
     created: Option<String>,
     /// Set by "Ask to join": the org asked. See [`requested_notice`].
     requested: Option<String>,
 }
 
-/// The card shown after a stale tab was sent here. It names the old org only
-/// when you are an active member of it, or were removed from it (then it says
-/// so, with no Back button), so a hand-made `?from=` reveals nothing new.
+/// The card shown after a refused save was sent here: "Your last change
+/// wasn't saved". It names the tab's org only when your own row there was
+/// removed (PR 5's notice), so a hand-made `?from=` reveals nothing new.
 async fn stale_notice(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -40,28 +37,20 @@ async fn stale_notice(
 ) -> Option<serde_json::Value> {
     let from = from?;
     // Never empty, so the template's `if` holds for the nameless notice too.
-    let nameless = serde_json::json!({ "id": null, "name": null });
+    let nameless = serde_json::json!({ "removed": false });
     let Ok(id) = from.parse::<i64>() else {
         return Some(nameless);
     };
-    if id == member.org.id {
-        return None;
-    }
     // An error only changes the wording: the refusal has already happened.
     // Always this member's own rows, never anyone else's.
-    let removed = match memberships::Model::in_org_for_user(&ctx.db, id, member.user.id).await {
-        Ok(Some(m)) if m.is_active() => false,
-        Ok(Some(m)) if m.is_removed() => true,
+    match memberships::Model::in_org_for_user(&ctx.db, id, member.user.id).await {
+        Ok(Some(m)) if m.is_removed() => {}
         _ => return Some(nameless),
-    };
+    }
     let Ok(org) = organisations::Model::find_by_id(&ctx.db, id).await else {
         return Some(nameless);
     };
-    Some(if removed {
-        serde_json::json!({ "id": null, "name": org.name, "removed": true })
-    } else {
-        serde_json::json!({ "id": org.id, "name": org.name })
-    })
+    Some(serde_json::json!({ "name": org.name, "removed": true }))
 }
 
 /// The card shown after asking to join an org. Only for an org where your
@@ -216,16 +205,12 @@ async fn index(
 
     let stale = stale_notice(&ctx, &member, query.from.as_deref()).await;
     let requested = requested_notice(&ctx, &member, query.requested.as_deref()).await;
-    let flash = if query.created.is_some() {
-        Some(data!({
+    let flash = query.created.as_ref().map(|_| {
+        data!({
             "kind": "info",
             "message": format!("{} is ready. You're the owner.", member.org.name),
-        }))
-    } else {
-        query.switched.as_ref().map(
-            |_| data!({ "kind": "info", "message": format!("You're now in {}", member.org.name) }),
-        )
-    };
+        })
+    });
 
     let mut response = format::render().view(
         &v,
@@ -251,11 +236,7 @@ async fn index(
             }),
         ),
     )?;
-    if query.switched.is_some()
-        || query.from.is_some()
-        || query.created.is_some()
-        || query.requested.is_some()
-    {
+    if query.from.is_some() || query.created.is_some() || query.requested.is_some() {
         response.headers_mut().insert(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("no-store"),
