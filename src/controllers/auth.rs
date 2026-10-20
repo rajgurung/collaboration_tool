@@ -50,15 +50,33 @@ pub struct LoginQuery {
     pub next: Option<String>,
 }
 
-/// Only the Claude "Allow access" page sends people to log in and back, so
-/// `next` must be that page. Anything else (other paths, `//host`, absolute
-/// URLs, backslashes or line breaks, raw or percent-encoded) is dropped.
+/// Where sign-in may send people back to: the Claude "Allow access" page,
+/// or a join page (see [`join_page`]). Anything else (other paths, `//host`,
+/// absolute URLs, backslashes or line breaks, raw or percent-encoded) is
+/// dropped.
 #[must_use]
 pub fn safe_next(next: &str) -> Option<&str> {
+    if join_page(next).is_some() {
+        return Some(next);
+    }
     let lower = next.to_ascii_lowercase();
     let sneaky = next.contains(['\\', '\r', '\n'])
         || ["%5c", "%0d", "%0a"].iter().any(|s| lower.contains(s));
     (next.starts_with("/oauth/authorize?") && !sneaky).then_some(next)
+}
+
+/// The slug when `next` is exactly `/join/` and 1 to 60 of `a`-`z`, `0`-`9`
+/// or `-`, and nothing else. Checked byte by byte on the raw value: no
+/// decoding and no lowercasing, so nothing can follow the slug and anything
+/// outside ASCII fails.
+#[must_use]
+pub fn join_page(next: &str) -> Option<&str> {
+    let slug = next.strip_prefix("/join/")?;
+    let ok = (1..=60).contains(&slug.len())
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    ok.then_some(slug)
 }
 
 #[debug_handler]
@@ -319,11 +337,16 @@ mod tests {
     use super::safe_next;
 
     #[test]
-    fn next_only_returns_to_the_allow_access_page() {
+    fn next_only_returns_to_allow_access_or_a_join_page() {
         assert_eq!(
             safe_next("/oauth/authorize?client_id=a&state=b"),
             Some("/oauth/authorize?client_id=a&state=b")
         );
+        let sixty = format!("/join/{}", "a".repeat(60));
+        for good in ["/join/acme-studio", "/join/a", sixty.as_str()] {
+            assert_eq!(safe_next(good), Some(good), "{good}");
+        }
+        let sixty_one = format!("/join/{}", "a".repeat(61));
         for bad in [
             "",
             "/",
@@ -336,6 +359,22 @@ mod tests {
             "/oauth/authorizeX?x=1",
             "/oauth/authorize?x=%0d%0aSet-Cookie:a=b",
             "/oauth/authorize?x=\\y",
+            "/join/",
+            "/join/Acme",
+            "/join/acme/",
+            "/join/acme#x",
+            "/join/acme?",
+            "/join/acme?x=1",
+            "/join/ acme",
+            "/join/acme%20",
+            "/join/%61cme",
+            "/join/\u{ff41}cme",
+            "/\\join/acme",
+            "/join/acme\r\n",
+            "/join/acme/request",
+            "/join/../admin",
+            "//join/acme",
+            sixty_one.as_str(),
         ] {
             assert_eq!(safe_next(bad), None, "{bad}");
         }
