@@ -546,8 +546,9 @@ impl Model {
     /// session, and signs the person out everywhere. Only a password reset
     /// unlocks it. Their Claude tokens are revoked too, in every
     /// organisation, not only the one where it happened. Who is told is the
-    /// caller's job, and unchanged: that organisation's owners. Returns false
-    /// if it was already locked, so the owners are told once per lock.
+    /// caller's job: the owners of the organisation where it happened, and
+    /// the person. Returns false if it was already locked, so they are told
+    /// once per lock.
     ///
     /// # Errors
     /// On database errors.

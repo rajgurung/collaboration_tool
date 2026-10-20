@@ -342,7 +342,9 @@ fn plain(status: StatusCode, message: &str) -> Result<Response> {
         .text(message)
 }
 
-/// Locks the account, logs it, and tells the owners once per lock.
+/// Locks the account, logs it, and tells this organisation's owners and
+/// the person, once per lock. Owners of the person's other organisations
+/// are not told: their logins were never at risk.
 async fn lock(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -362,8 +364,14 @@ async fn lock(
             },
         )
         .await?;
-        if let Err(err) = SecurityMailer::account_locked(ctx, &member.org, &member.username).await {
+        if let Err(err) =
+            SecurityMailer::account_locked(ctx, &member.org, member.user.id, &member.username).await
+        {
             tracing::error!(error = %err, "could not email owners about a locked account");
+        }
+        if let Err(err) = SecurityMailer::your_account_locked(ctx, &member.org, &member.user).await
+        {
+            tracing::error!(error = %err, "could not email the person about their locked account");
         }
     }
     plain(StatusCode::UNAUTHORIZED, "Your account is locked.")
