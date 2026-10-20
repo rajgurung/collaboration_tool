@@ -843,6 +843,8 @@
   .signed-as { display: flex; flex-direction: column; align-items: flex-start; margin-top: 20px; padding: 10px 12px 0; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; }
   .signed-as > span { overflow-wrap: anywhere; }
   .signed-as .link-btn { padding: 0; }
+  .signed-as-row { flex-direction: row; align-items: center; gap: 10px; padding: 6px 12px; }
+  .signed-as-row > span:not(.avatar) { flex: 1; min-width: 0; }
   .link-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; border: 0; background: none; color: var(--link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
   .join-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; }
   .join-note svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }
@@ -851,6 +853,11 @@
   .state-tile { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 12px; border-radius: 14px; background: var(--chip); color: var(--muted); }
   .state-ok { background: color-mix(in srgb, var(--done) 14%, transparent); color: var(--done); }
   .state-wait { background: var(--active-bg); color: var(--link); }
+  /* Waiting, removed and declined pages: the ways to another org. */
+  .btn-col { display: grid; gap: 12px; margin-top: 28px; }
+  .auth-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 22px; color: var(--muted); font-size: 14px; }
+  .other-orgs { margin-top: 28px; }
+  .other-orgs .org-row { min-height: 60px; padding: 8px 14px; border-radius: 0; }
   .join-buttons { display: grid; gap: 12px; margin-top: 28px; }
   .join-sign-in { color: var(--link); font-weight: 600; }
   /* Members: a waiting row's last decision. */

@@ -63,7 +63,7 @@ async fn page(
         v,
         "claude/index.html",
         member.page(
-            "more",
+            "claude",
             data!({
                 "mcp_url": mcp_url,
                 "connections": connections,

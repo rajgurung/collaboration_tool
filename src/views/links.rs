@@ -31,6 +31,44 @@ pub const TENANT_SECTIONS: [&str; 12] = [
     "orgs",
 ];
 
+/// The list a page's `active` key belongs to, with no query, for the
+/// switcher's "same section in the other org" and the in-org 404's way back.
+/// Every one of them opens for every role. Anything unknown is Home.
+#[must_use]
+pub fn section_path(active: &str) -> &'static str {
+    match active {
+        "notifications" => "/notifications",
+        "tasks" => "/tasks",
+        "chat" => "/chat",
+        "roadmap" => "/roadmap",
+        "meetings" => "/meetings",
+        "documents" => "/documents",
+        "members" => "/members",
+        "more" => "/more",
+        "claude" => "/settings/claude",
+        _ => "/dashboard",
+    }
+}
+
+/// The `active` key and name of the section a path is in, for the in-org
+/// 404. `None` for Home and for paths with no list of their own.
+#[must_use]
+pub fn section_of(path: &str) -> Option<(&'static str, &'static str)> {
+    let first = path.trim_start_matches('/').split(['/', '?']).next()?;
+    Some(match first {
+        "notifications" => ("notifications", "Notifications"),
+        "tasks" => ("tasks", "Tasks"),
+        "chat" => ("chat", "Chat"),
+        "roadmap" => ("roadmap", "Roadmap"),
+        "meetings" => ("meetings", "Meetings"),
+        "documents" => ("documents", "Documents"),
+        "members" => ("members", "Members"),
+        "more" => ("more", "More"),
+        "settings" => ("claude", "Connect Claude"),
+        _ => return None,
+    })
+}
+
 /// `/o/{slug}{path}`, for a path inside the organisation such as `/tasks/58`.
 /// Fails closed: a bad slug, or a path that doesn't start with one `/` or
 /// already names an organisation, gives a bare `/dashboard` and an error in
@@ -49,14 +87,27 @@ pub fn org_path(slug: &str, path: &str) -> String {
     }
 }
 
+/// `/o/{slug}`, the base templates' `org_url` adds paths to. Empty, with an
+/// error in the logs, for a bad slug, so links fall back to bare addresses.
+#[must_use]
+pub fn org_base(slug: &str) -> String {
+    if is_slug(slug) {
+        format!("/o/{slug}")
+    } else {
+        tracing::error!("refused to build an organisation base");
+        String::new()
+    }
+}
+
 /// Starts with exactly one `/`, and isn't already under `/o/`.
-fn is_org_relative(path: &str) -> bool {
+#[must_use]
+pub fn is_org_relative(path: &str) -> bool {
     path.starts_with('/') && !path.starts_with("//") && !path.starts_with("/o/") && path != "/o"
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_slug, org_path, SLUG_MAX};
+    use super::{is_slug, org_base, org_path, section_of, section_path, SLUG_MAX};
 
     #[test]
     fn slugs_are_1_to_60_safe_bytes() {
@@ -86,6 +137,29 @@ mod tests {
         assert_eq!(org_path("acme", "/tasks"), "/o/acme/tasks");
         assert_eq!(org_path("acme", "/tasks?open=58"), "/o/acme/tasks?open=58");
         assert_eq!(org_path("acme", "/"), "/o/acme/");
+    }
+
+    #[test]
+    fn sections_map_to_fixed_lists() {
+        assert_eq!(section_path("tasks"), "/tasks");
+        assert_eq!(section_path("claude"), "/settings/claude");
+        for other in ["dashboard", "orgs", "not_found", "../../evil", ""] {
+            assert_eq!(section_path(other), "/dashboard", "{other}");
+        }
+        assert_eq!(section_of("/tasks/913"), Some(("tasks", "Tasks")));
+        assert_eq!(section_of("/chat?c=1"), Some(("chat", "Chat")));
+        assert_eq!(
+            section_of("/settings/claude"),
+            Some(("claude", "Connect Claude"))
+        );
+        assert_eq!(section_of("/dashboard"), None);
+        assert_eq!(section_of("/orgs/9"), None);
+    }
+
+    #[test]
+    fn org_base_is_empty_for_a_bad_slug() {
+        assert_eq!(org_base("acme"), "/o/acme");
+        assert_eq!(org_base("Acme"), "");
     }
 
     #[test]
