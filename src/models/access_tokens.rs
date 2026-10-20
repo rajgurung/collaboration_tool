@@ -401,27 +401,41 @@ impl Model {
 
     /// Revokes every token and unused code a person has, in every
     /// organisation, for when their account is locked or their password is
-    /// reset. Returns how many tokens it revoked.
+    /// reset. Returns how many of them still worked: personal tokens, and
+    /// OAuth tokens whose refresh token had not expired. So the emails only
+    /// say Claude was disconnected when it was connected.
     ///
     /// # Errors
     /// On database errors.
     pub async fn revoke_all_for_user<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<u64> {
         let now = chrono::Utc::now();
-        let revoked = Entity::update_many()
+        let unrevoked = || {
+            Condition::all()
+                .add(Column::UserId.eq(user_id))
+                .add(Column::RevokedAt.is_null())
+        };
+        let connected = Entity::find()
+            .filter(unrevoked())
+            .filter(
+                Condition::any()
+                    .add(Column::RefreshExpiresAt.is_null())
+                    .add(Column::RefreshExpiresAt.gt(now)),
+            )
+            .count(db)
+            .await?;
+        Entity::update_many()
             .col_expr(Column::RevokedAt, Expr::value(now))
             .col_expr(Column::UpdatedAt, Expr::value(now))
-            .filter(Column::UserId.eq(user_id))
-            .filter(Column::RevokedAt.is_null())
+            .filter(unrevoked())
             .exec(db)
-            .await?
-            .rows_affected;
+            .await?;
         oauth_codes::Entity::update_many()
             .col_expr(oauth_codes::Column::UsedAt, Expr::value(now))
             .filter(oauth_codes::Column::UserId.eq(user_id))
             .filter(oauth_codes::Column::UsedAt.is_null())
             .exec(db)
             .await?;
-        Ok(revoked)
+        Ok(connected)
     }
 
     /// Revokes one of this person's own grants.

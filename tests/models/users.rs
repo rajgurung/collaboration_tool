@@ -522,6 +522,18 @@ async fn a_password_reset_revokes_tokens_in_every_org() {
     let in_acme = personal_token(ctx, orgs.acme, orgs.alice).await;
     let in_beta = oauth_tokens(ctx, orgs.beta, orgs.alice).await;
     let bobs = personal_token(ctx, orgs.beta, orgs.bob).await;
+    // A connection that had already lapsed is not counted.
+    let lapsed = oauth_tokens(ctx, orgs.acme, orgs.alice).await;
+    let mut row: access_tokens::ActiveModel = access_tokens::Entity::find()
+        .filter(access_tokens::Column::TokenHash.eq(access_tokens::hash(&lapsed.access_token)))
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    row.refresh_expires_at =
+        ActiveValue::Set(Some((chrono::Utc::now() - Duration::days(1)).into()));
+    row.update(&ctx.db).await.unwrap();
 
     let alice = Model::find_by_id(&ctx.db, orgs.alice).await.unwrap();
     let (alice, revoked) = alice
