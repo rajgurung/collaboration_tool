@@ -256,3 +256,56 @@ async fn owners_cannot_touch_another_organisations_members() {
     })
     .await;
 }
+
+/// Bob joins Acme and is approved. Returns his membership.
+async fn approved_bob(request: &loco_rs::TestServer, ctx: &AppContext) -> memberships::Model {
+    join(request, ctx, "acme", "bob", "bob@example.com").await;
+    let bob = membership_of(ctx, "bob@example.com").await;
+    let user_id = bob.user_id;
+    bob.approve(&ctx.db, user_id).await.unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn the_remove_dialog_says_access_ends_in_this_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        approved_bob(&request, &ctx).await;
+
+        let page = request
+            .get("/members")
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
+        assert!(page.contains("They lose access to Acme straight away, on every device."));
+        assert!(page.contains(
+            "If you think their account was taken over, ask them to reset their password."
+        ));
+        assert!(!page.contains("signed out on every device"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_members_flash_says_removed() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let bob = approved_bob(&request, &ctx).await;
+        let res = request
+            .post(&format!("/members/{}/remove", bob.id))
+            .as_member(&owner)
+            .add_header("HX-Request", "true")
+            .await;
+        assert_eq!(res.status_code(), 200);
+
+        let page = request
+            .get(&format!("/members?removed={}", bob.id))
+            .add_header(owner.0.clone(), owner.1.clone())
+            .await
+            .text();
+        assert!(page.contains("bob was removed."), "{page}");
+        assert!(!page.contains("signed out"));
+    })
+    .await;
+}
