@@ -1011,7 +1011,7 @@ async fn an_old_org_link_is_an_app_404_naming_only_the_current_org() {
         // A bare old link finds the task's own org first.
         let bare = format!("/tasks/{}", task.id);
         let res = request
-            .get(&lumen.to(&bare))
+            .get(&bare)
             .add_header(lumen.0.clone(), lumen.1.clone())
             .add_header("Accept", "text/html")
             .await;
