@@ -21,11 +21,16 @@ pub struct SecurityMailer {}
 
 impl SecurityMailer {
     /// Tells someone their password was changed, so a reset they did not ask
-    /// for does not go unnoticed.
+    /// for does not go unnoticed. `claude_disconnected` adds how to connect
+    /// Claude again, when the reset revoked a token.
     ///
     /// # Errors
     /// When the email cannot be rendered or handed off.
-    pub async fn password_changed(ctx: &AppContext, user: &users::Model) -> Result<()> {
+    pub async fn password_changed(
+        ctx: &AppContext,
+        user: &users::Model,
+        claude_disconnected: bool,
+    ) -> Result<()> {
         let settings = Settings::from_context(ctx)?;
         let args = mailer::Args {
             from: Some(settings.mail_from.clone()),
@@ -34,6 +39,7 @@ impl SecurityMailer {
                 "name": user.name,
                 "email": user.email,
                 "forgot_url": format!("{}/forgot", settings.app_url),
+                "claude_disconnected": claude_disconnected,
             }),
             ..Default::default()
         };

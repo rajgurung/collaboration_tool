@@ -232,10 +232,10 @@ async fn reset(
         return reset_form_error(&v, &token, "The two passwords do not match.");
     }
     match user.reset_password_everywhere(&ctx, &form.password).await {
-        Ok(user) => {
+        Ok((user, revoked)) => {
             auth_attempts::Model::clear_logins(&ctx.db, &user.email).await?;
             auth_attempts::Model::clear_reauth(&ctx.db, &user.email).await?;
-            tell_about_reset(&ctx, &user).await;
+            tell_about_reset(&ctx, &user, revoked > 0).await;
             format::redirect("/login?reset=1")
         }
         Err(err) => {
@@ -250,8 +250,8 @@ async fn reset(
 /// Emails the person, and the owners too when the person can see login
 /// passwords: someone who took over their email could now see them. The
 /// password is already changed, so failures are logged, each on its own.
-async fn tell_about_reset(ctx: &AppContext, user: &users::Model) {
-    if let Err(err) = SecurityMailer::password_changed(ctx, user).await {
+async fn tell_about_reset(ctx: &AppContext, user: &users::Model, claude_disconnected: bool) {
+    if let Err(err) = SecurityMailer::password_changed(ctx, user, claude_disconnected).await {
         tracing::error!(error = %err, "could not send the password changed email");
     }
     if let Err(err) = tell_owners_about_reset(ctx, user).await {

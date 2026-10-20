@@ -617,8 +617,10 @@ impl Model {
         Ok(())
     }
 
-    /// Sets a new password from a reset link and ends every session, in one
-    /// transaction, then closes the user's live connections.
+    /// Sets a new password from a reset link, ends every session and revokes
+    /// the person's Claude tokens in every organisation, in one transaction,
+    /// then closes the user's live connections. Returns the user and how
+    /// many tokens were revoked, for the email.
     ///
     /// # Errors
     /// Validation errors for a bad password, or database errors.
@@ -626,16 +628,17 @@ impl Model {
         self,
         ctx: &AppContext,
         password: &str,
-    ) -> ModelResult<Self> {
+    ) -> ModelResult<(Self, u64)> {
         let txn = ctx.db.begin().await?;
         let user = self
             .into_active_model()
             .reset_password(&txn, password)
             .await?;
         Self::increment_session_version(&txn, user.id).await?;
+        let revoked = super::access_tokens::Model::revoke_all_for_user(&txn, user.id).await?;
         txn.commit().await?;
         Self::close_live_connections(ctx, user.id);
-        Ok(user)
+        Ok((user, revoked))
     }
 
     /// Closes every open chat socket and notification stream of the user,

@@ -386,26 +386,28 @@ impl Model {
     }
 
     /// Revokes every token and unused code a person has, in every
-    /// organisation, for when their account is locked.
+    /// organisation, for when their account is locked or their password is
+    /// reset. Returns how many tokens it revoked.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn revoke_all_for_user<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<()> {
+    pub async fn revoke_all_for_user<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<u64> {
         let now = chrono::Utc::now();
-        Entity::update_many()
+        let revoked = Entity::update_many()
             .col_expr(Column::RevokedAt, Expr::value(now))
             .col_expr(Column::UpdatedAt, Expr::value(now))
             .filter(Column::UserId.eq(user_id))
             .filter(Column::RevokedAt.is_null())
             .exec(db)
-            .await?;
+            .await?
+            .rows_affected;
         oauth_codes::Entity::update_many()
             .col_expr(oauth_codes::Column::UsedAt, Expr::value(now))
             .filter(oauth_codes::Column::UserId.eq(user_id))
             .filter(oauth_codes::Column::UsedAt.is_null())
             .exec(db)
             .await?;
-        Ok(())
+        Ok(revoked)
     }
 
     /// Revokes one of this person's own grants.
