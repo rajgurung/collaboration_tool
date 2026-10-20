@@ -2,7 +2,8 @@ use chrono::{offset::Local, Duration};
 use collab::{
     app::App,
     models::{
-        access_tokens,
+        access_tokens::{self, PersonalParams},
+        oauth_clients,
         organisations::{self, SignupParams},
         users::{self, Model, RegisterParams},
     },
@@ -586,4 +587,103 @@ async fn a_refresh_waits_for_a_password_reset_in_progress() {
         .await
         .unwrap();
     assert_eq!(live, 0);
+}
+
+/// A password reset of Alice on its own connection: the user row update,
+/// then revoking her tokens, then commit.
+async fn reset_alice(db: &sea_orm::DatabaseConnection, alice: i64) {
+    let txn = db.begin().await.unwrap();
+    Model::increment_session_version(&txn, alice).await.unwrap();
+    access_tokens::Model::revoke_all_for_user(&txn, alice)
+        .await
+        .unwrap();
+    txn.commit().await.unwrap();
+}
+
+/// Holds a row `FOR UPDATE` for [`HOLD`] on its own connection, so a token
+/// insert that points at it (a key share for the foreign key) waits, with
+/// its transaction still open.
+async fn hold_row<E>(db: &sea_orm::DatabaseConnection, id: i64)
+where
+    E: EntityTrait,
+    <E::PrimaryKey as sea_orm::PrimaryKeyTrait>::ValueType: From<i64>,
+{
+    let txn = db.begin().await.unwrap();
+    E::find_by_id(id).lock_exclusive().one(&txn).await.unwrap();
+    tokio::time::sleep(HOLD).await;
+    txn.commit().await.unwrap();
+}
+
+async fn after(fraction: u32) {
+    tokio::time::sleep(HOLD * fraction / 5).await;
+}
+
+// A token minted while a reset runs must not survive it. The mint is held
+// mid-transaction (its insert waits on `hold_row`) while the reset runs.
+// Without the mint's `FOR SHARE` on the user row, the reset would revoke
+// before the new token was committed, and miss it.
+
+#[tokio::test]
+#[serial]
+async fn a_code_exchange_racing_a_reset_ends_revoked() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let claude = claude_client(ctx).await;
+    let code = code_for(ctx, &claude, orgs.acme, orgs.alice).await;
+    let blocker = second_connection(ctx).await;
+    let resetter = second_connection(ctx).await;
+
+    let (_, issued, ()) = tokio::join!(
+        hold_row::<oauth_clients::Entity>(&blocker, claude.id),
+        async {
+            after(1).await;
+            exchange(&ctx.db, &claude, &code).await
+        },
+        async {
+            after(2).await;
+            reset_alice(&resetter, orgs.alice).await;
+        }
+    );
+    if let Some(issued) = issued {
+        assert!(
+            !usable(ctx, &issued.access_token).await,
+            "revoked by the reset"
+        );
+    }
+    let live = access_tokens::Entity::find()
+        .filter(access_tokens::Column::UserId.eq(orgs.alice))
+        .filter(access_tokens::Column::RevokedAt.is_null())
+        .count(&ctx.db)
+        .await
+        .unwrap();
+    assert_eq!(live, 0);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_personal_token_racing_a_reset_ends_revoked() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let orgs = alice_in_two_orgs(ctx).await;
+    let blocker = second_connection(ctx).await;
+    let resetter = second_connection(ctx).await;
+    let params = PersonalParams {
+        name: "Laptop".to_string(),
+    };
+
+    let (_, minted, ()) = tokio::join!(
+        hold_row::<organisations::Entity>(&blocker, orgs.acme),
+        async {
+            after(1).await;
+            access_tokens::Model::create_personal(&ctx.db, orgs.acme, orgs.alice, &params, RESOURCE)
+                .await
+        },
+        async {
+            after(2).await;
+            reset_alice(&resetter, orgs.alice).await;
+        }
+    );
+    let (_, token) = minted.unwrap();
+    assert!(!usable(ctx, &token).await, "revoked by the reset");
 }

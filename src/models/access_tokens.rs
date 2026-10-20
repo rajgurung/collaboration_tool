@@ -133,9 +133,10 @@ impl Model {
     }
 
     /// Makes a personal access token. Returns the row and the plain token,
-    /// which is never stored. Refused unless the person is an active member;
-    /// the membership is read `FOR SHARE`, so a removal committing meanwhile
-    /// is seen.
+    /// which is never stored. Refused unless the person is an active member.
+    /// The membership, then the user row, are read `FOR SHARE`, so a removal,
+    /// a password reset or a lock committing meanwhile either waits for this
+    /// token and revokes it, or runs first and is seen.
     ///
     /// # Errors
     /// Validation errors (including the 10-token limit and not being an
@@ -159,6 +160,7 @@ impl Model {
                 "You no longer have access to this organisation.",
             ));
         }
+        lock_user(&txn, user_id).await?;
         let active = Entity::find()
             .filter(Column::OrganisationId.eq(org_id))
             .filter(Column::UserId.eq(user_id))
@@ -199,10 +201,12 @@ impl Model {
     /// request for the same code waits on the row lock until the tokens
     /// exist, so revoking the grant on reuse always catches them.
     ///
-    /// The membership is read `FOR SHARE` before the code is spent, so a
-    /// removal committing meanwhile is seen. Before, not after: a removal
-    /// locks the membership and then spends the person's codes, so the other
-    /// order could deadlock.
+    /// The membership, then the user row, are read `FOR SHARE` before the
+    /// code is spent, so a removal, a password reset or a lock committing
+    /// meanwhile either waits for these tokens and revokes them, or runs first
+    /// and spends the code. Before, not after: those lock the membership or
+    /// user and then spend the person's codes, so the other order could
+    /// deadlock.
     ///
     /// # Errors
     /// On database errors.
@@ -213,9 +217,11 @@ impl Model {
         let txn = db.begin().await?;
         let active = match oauth_codes::Model::owner(&txn, exchange.code).await? {
             Some((org_id, user_id)) => {
-                memberships::Model::active_in_for_share(&txn, org_id, user_id)
+                let active = memberships::Model::active_in_for_share(&txn, org_id, user_id)
                     .await?
-                    .is_some()
+                    .is_some();
+                lock_user(&txn, user_id).await?;
+                active
             }
             None => false,
         };
@@ -282,10 +288,7 @@ impl Model {
             active = memberships::Model::active_in_for_share(&txn, org_id, user_id)
                 .await?
                 .is_some();
-            users::Entity::find_by_id(user_id)
-                .lock_shared()
-                .one(&txn)
-                .await?;
+            lock_user(&txn, user_id).await?;
         }
         // After the waits, so a token revoked meanwhile is not rotated.
         let now = chrono::Utc::now();
@@ -514,6 +517,16 @@ impl Model {
             .await?;
         oauth_codes::Model::prune(db).await
     }
+}
+
+/// Reads the user row `FOR SHARE`, so minting waits for a password reset or
+/// a lock that is committing (they update the row), and they wait for it.
+async fn lock_user<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<()> {
+    users::Entity::find_by_id(user_id)
+        .lock_shared()
+        .one(db)
+        .await?;
+    Ok(())
 }
 
 struct Grant<'a> {
