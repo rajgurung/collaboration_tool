@@ -489,13 +489,9 @@ async fn open(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     let n = notifications::Model::mark_read(&ctx.db, member.org.id, member.user.id, id).await?;
-    // Links are written by the app, but only ever follow ones on this site.
-    let link = if n.link.starts_with('/') && !n.link.starts_with("//") {
-        n.link
-    } else {
-        "/notifications".to_string()
-    };
-    Ok(redirect_response(&headers, &link))
+    // Links are written by the app as paths inside its org; `url` refuses
+    // anything else.
+    Ok(redirect_response(&headers, &member.url(&n.link)))
 }
 
 #[debug_handler]
@@ -505,7 +501,7 @@ async fn read_all(
     headers: HeaderMap,
 ) -> Result<Response> {
     notifications::Model::mark_all_read(&ctx.db, member.org.id, member.user.id).await?;
-    Ok(redirect_response(&headers, "/notifications"))
+    Ok(redirect_response(&headers, &member.url("/notifications")))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -556,7 +552,7 @@ async fn stream(
     // extractor's checks and the subscribe would otherwise be missed.
     let rx = hub.subscribe();
     let events = if still_allowed(&ctx, &member).await {
-        events_for(rx, member.org.id, member.user.id, member.session_id).left_stream()
+        events_for(rx, member.org.id, member.user.id).left_stream()
     } else {
         stream::empty().right_stream()
     };
@@ -577,18 +573,16 @@ async fn still_allowed(ctx: &AppContext, member: &CurrentMember) -> bool {
                 .is_ok_and(|m| m.is_some()))
 }
 
-/// The events for `me` in `org_id`, on the sign-in `session_id`. Ends on a
+/// The events for `me` in `org_id`. Ends on a
 /// close that matches (see `CloseScope`), so a signed-out or removed browser
 /// stops listening; its reconnect then goes through the same checks.
 fn events_for(
     rx: broadcast::Receiver<NotifyEvent>,
     org_id: i64,
     me: i64,
-    session_id: Option<String>,
 ) -> impl Stream<Item = std::result::Result<Event, Infallible>> {
     let notify = || Ok(Event::default().event("notify").data("1"));
     stream::unfold(rx, move |mut rx| {
-        let session_id = session_id.clone();
         async move {
             loop {
                 match rx.recv().await {
@@ -596,11 +590,7 @@ fn events_for(
                         org_id: org,
                         user_id,
                     }) if org == org_id && user_id == me => return Some((notify(), rx)),
-                    Ok(NotifyEvent::Close(scope))
-                        if scope.closes(org_id, me, session_id.as_deref()) =>
-                    {
-                        return None
-                    }
+                    Ok(NotifyEvent::Close(scope)) if scope.closes(org_id, me) => return None,
                     Ok(_) => {}
                     // Missed events may include a close: end the stream. The
                     // browser reconnects through the same checks.
@@ -640,7 +630,7 @@ mod tests {
     #[tokio::test]
     async fn the_stream_forwards_only_its_own_orgs_notices() {
         let hub = NotifyHub::new();
-        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7, Some("a".to_string())));
+        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7));
         hub.publish(2, &[7]);
         hub.publish(1, &[8]);
         assert_eq!(has_next(&mut events).await, None, "nothing for org 1");
@@ -651,7 +641,7 @@ mod tests {
     #[tokio::test]
     async fn the_stream_ends_on_removal_from_its_org_only() {
         let hub = NotifyHub::new();
-        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7, Some("a".to_string())));
+        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7));
         hub.close(CloseScope::Org {
             org_id: 2,
             user_id: 7,
@@ -659,10 +649,6 @@ mod tests {
         hub.close(CloseScope::Org {
             org_id: 1,
             user_id: 8,
-        });
-        hub.close(CloseScope::Browser {
-            user_id: 7,
-            session_id: Arc::from("b"),
         });
         hub.publish(1, &[7]);
         assert_eq!(has_next(&mut events).await, Some(true), "still open");
@@ -676,7 +662,7 @@ mod tests {
     #[tokio::test]
     async fn the_stream_ends_when_the_account_is_signed_out() {
         let hub = NotifyHub::new();
-        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7, None));
+        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7));
         hub.close(CloseScope::Account { user_id: 8 });
         hub.publish(1, &[7]);
         assert_eq!(has_next(&mut events).await, Some(true), "a notice for 7");

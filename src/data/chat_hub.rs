@@ -50,8 +50,7 @@ pub enum ChatEvent {
     },
     /// Some of a person's sockets close: every one on sign out everywhere, a
     /// password reset or a lock (`Account`); those in one organisation on
-    /// removal (`Org`); those of one browser on a switch or a create
-    /// (`Browser`). See [`CloseScope`].
+    /// removal (`Org`). See [`CloseScope`].
     Close(CloseScope),
 }
 
