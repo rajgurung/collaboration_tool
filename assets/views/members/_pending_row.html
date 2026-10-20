@@ -2,16 +2,17 @@
   {{<avatar name={row.username} color={row.color} size="md"/>}}
   <div class="min-w-0 flex-1">
     <p class="truncate-1 m-0 font-medium">{{ row.username }}</p>
-    <p class="meta truncate-1 m-0">{{ row.email }}</p>
-    {% if row.history %}<p class="row-history">{{<icon name="rotate-ccw" class="h-[13px] w-[13px]"/>}}{{ row.history }}</p>{% endif %}
+    <p class="meta m-0 [overflow-wrap:anywhere]">{{ row.email }}</p>
+    {% if row.history %}<p class="row-history">{{<icon name="rotate-ccw" class="h-[13px] w-[13px]"/>}}<span>{{ row.history }}{% if row.rotate %} · <a href="/members/{{ row.id }}/rotate" class="link-strong">Change these at the source</a>{% endif %}</span></p>{% endif %}
   </div>
   {% if row.status == "pending" %}
-  <div class="flex gap-2">
-    <form method="post" action="/members/{{ row.id }}/reject" hx-post="/members/{{ row.id }}/reject" hx-target="#member-{{ row.id }}" hx-swap="outerHTML">
-      <button type="submit" class="btn btn-danger">Decline</button>
+  {# Under 900px the buttons get a full-width row of their own below the text. #}
+  <div class="flex gap-2 max-[899px]:w-full max-[899px]:pl-12">
+    <form method="post" action="/members/{{ row.id }}/reject" hx-post="/members/{{ row.id }}/reject" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="max-[899px]:flex-1">
+      <button type="submit" class="btn btn-danger max-[899px]:w-full max-[899px]:min-h-11">Decline</button>
     </form>
-    <form method="post" action="/members/{{ row.id }}/approve" hx-post="/members/{{ row.id }}/approve" hx-target="#member-{{ row.id }}" hx-swap="outerHTML">
-      <button type="submit" class="btn btn-primary">Approve</button>
+    <form method="post" action="/members/{{ row.id }}/approve" hx-post="/members/{{ row.id }}/approve" hx-target="#member-{{ row.id }}" hx-swap="outerHTML" class="max-[899px]:flex-1">
+      <button type="submit" class="btn btn-primary max-[899px]:w-full max-[899px]:min-h-11">Approve</button>
     </form>
   </div>
   {% elif row.status == "active" %}

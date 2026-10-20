@@ -1164,6 +1164,57 @@ async fn the_waiting_list_shows_only_this_orgs_details() {
     .await;
 }
 
+#[tokio::test]
+#[serial]
+async fn a_waiting_row_that_was_removed_links_to_the_rotate_page() {
+    request::<App, _, _>(|request, ctx| async move {
+        let w = world(&request, &ctx).await;
+        let joined = alice_joins_beta(&request, &ctx, &w).await;
+        manage(&request, &w.bob, "remove", joined.id).await;
+        ask(&request, &w.alice, "beta", "alice").await;
+        // Carol was declined, so her line has no link.
+        let carol = join(&request, &ctx, "beta", "carol", "carol@example.com").await;
+        let carol_row = row(&ctx, w.beta, user_id(&ctx, "carol@example.com").await)
+            .await
+            .unwrap();
+        manage(&request, &w.bob, "reject", carol_row.id).await;
+        ask(&request, &carol, "beta", "carol").await;
+
+        let html = get(&request, Some(&w.bob), "/members").await.text();
+        let link = format!(r#"href="/members/{}/rotate""#, joined.id);
+        assert!(html.contains(&link), "{html}");
+        assert!(html.contains("Change these at the source"));
+        assert!(!html.contains(&format!("/members/{}/rotate", carol_row.id)));
+        assert_eq!(
+            get(
+                &request,
+                Some(&w.bob),
+                &format!("/members/{}/rotate", joined.id)
+            )
+            .await
+            .status_code(),
+            200
+        );
+
+        // A Beta admin who didn't remove her can't open the page, so no link.
+        let dan = join(&request, &ctx, "beta", "dan", "dan@example.com").await;
+        let dan_row = row(&ctx, w.beta, user_id(&ctx, "dan@example.com").await)
+            .await
+            .unwrap();
+        manage(&request, &w.bob, "approve", dan_row.id).await;
+        let mut admin = row(&ctx, w.beta, dan_row.user_id)
+            .await
+            .unwrap()
+            .into_active_model();
+        admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+        admin.update(&ctx.db).await.unwrap();
+        let html = get(&request, Some(&dan), "/members").await.text();
+        assert!(html.contains("Removed on "));
+        assert!(!html.contains(&link));
+    })
+    .await;
+}
+
 // The pending row's role is left alone until approval; a former owner or
 // admin who asks again grants nothing while waiting.
 #[tokio::test]

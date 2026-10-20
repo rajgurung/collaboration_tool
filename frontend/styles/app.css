@@ -854,7 +854,8 @@
   .join-buttons { display: grid; gap: 12px; margin-top: 28px; }
   .join-sign-in { color: var(--link); font-weight: 600; }
   /* Members: a waiting row's last decision. */
-  .row-history { display: inline-flex; align-items: center; gap: 5px; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+  .row-history { display: flex; align-items: flex-start; gap: 5px; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+  .row-history svg { flex-shrink: 0; margin-top: 3px; }
   .org-facts { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 0; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--lane); font-size: 14px; list-style: none; }
   .org-facts li { display: flex; align-items: flex-start; gap: 10px; }
   .org-facts svg { flex-shrink: 0; margin-top: 2px; color: var(--muted); }

@@ -32,6 +32,9 @@ struct MemberRow {
     /// For a waiting row, the last decision here, e.g. "Removed on 3
     /// October". Dates only, no names.
     history: Option<String>,
+    /// "Change these at the source" for a waiting row that was removed,
+    /// when this person may open it (see [`rotate`]).
+    rotate: bool,
 }
 
 impl MemberRow {
@@ -41,6 +44,13 @@ impl MemberRow {
         me: &CurrentMember,
         owners: usize,
     ) -> Self {
+        let history = membership
+            .is_pending()
+            .then(|| membership.history())
+            .flatten();
+        let may_rotate = !me.acting
+            && me.can_manage()
+            && (me.is_owner() || membership.removed_by_id == Some(me.user.id));
         Self {
             id: membership.id,
             username: membership.username.clone(),
@@ -50,10 +60,8 @@ impl MemberRow {
             color: avatar_color(&membership.username),
             is_me: user.id == me.user.id,
             can_remove: !me.acting && membership.can_remove(me.user.id, &me.role, owners),
-            history: membership
-                .is_pending()
-                .then(|| membership.history().map(|h| h.line(me.tz())))
-                .flatten(),
+            history: history.map(|h| h.line(me.tz())),
+            rotate: may_rotate && matches!(history, Some(memberships::History::Removed(_))),
         }
     }
 }
