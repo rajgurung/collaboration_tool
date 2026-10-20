@@ -1,8 +1,13 @@
-//! Owners and admins remove people. Removal ends the person's sessions, takes
-//! them out of chat, revokes their Claude tokens and stops their emails.
+//! Owners and admins remove people. Removal ends the person's access to that
+//! organisation, not their sessions: it takes them out of its chat, revokes
+//! their Claude tokens there, stops its emails and closes its live
+//! connections.
 use collab::{
     app::App,
-    data::notify_hub::{NotifyEvent, NotifyHub},
+    data::{
+        live::CloseScope,
+        notify_hub::{NotifyEvent, NotifyHub},
+    },
     models::{
         access_tokens, conversation_members, conversations, memberships, messages, note_reactions,
         notifications, organisations, reactions, task_notes, tasks, users,
@@ -17,7 +22,7 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    prepare_data::{join, login, sign_up_member, AsMember, USER_PASSWORD},
+    prepare_data::{join, sign_up_member, AsMember},
 };
 
 use super::prepare_data::TestMember;
@@ -117,10 +122,8 @@ async fn removing_someone_locks_them_out_of_everything() {
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(
-            page.contains("carol has been removed and signed out."),
-            "{page}"
-        );
+        assert!(page.contains("carol has been removed."), "{page}");
+        assert!(!page.contains("signed out"), "{page}");
         // The name comes from the database: a member id that was not removed shows nothing.
         let alice_m = memberships::Model::default_for_user(&ctx.db, org.created_by_id.unwrap())
             .await
@@ -131,22 +134,18 @@ async fn removing_someone_locks_them_out_of_everything() {
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(!page.contains("was removed and signed out."));
+        assert!(!page.contains("was removed."));
 
-        // Her session ended, and her open pages were told.
-        let res = request
-            .get("/dashboard")
-            .add_header(carol.0.clone(), carol.1.clone())
-            .await;
-        assert_eq!(res.status_code(), 303);
+        // Her open pages in Acme were told to close.
         assert_eq!(
             notify.try_recv().unwrap(),
-            NotifyEvent::SignedOut(carol_m.user_id)
+            NotifyEvent::Close(CloseScope::Org {
+                org_id: org.id,
+                user_id: carol_m.user_id
+            })
         );
 
-        // Signing in again shows why, and nothing else.
-        let carol = login(&request, "carol@example.com", USER_PASSWORD).await;
-        let carol = TestMember::new(carol, carol_m.organisation_id);
+        // She stays signed in, and her next page says why, and nothing else.
         let res = request
             .get("/dashboard")
             .add_header(carol.0.clone(), carol.1.clone())
@@ -154,12 +153,13 @@ async fn removing_someone_locks_them_out_of_everything() {
         assert_eq!(res.status_code(), 403);
         assert!(res.text().contains("You were removed from Acme"));
         let before = messages::Entity::find().count(&ctx.db).await.unwrap();
+        // Her open tab's calls are sent Home, where the removed page shows.
         let res = request
             .post(&format!("/chat/{}/messages", general.id))
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         assert_eq!(
             messages::Entity::find().count(&ctx.db).await.unwrap(),
             before
@@ -179,7 +179,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         let res = request
             .get(&format!(
                 "/chat/{}/messages/{}/actions",
@@ -219,7 +219,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .as_member(&carol)
             .form(&serde_json::json!({ "emoji": "👍", "on": "1" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         assert_eq!(
             note_reactions::Entity::find().count(&ctx.db).await.unwrap(),
             0
@@ -242,7 +242,7 @@ async fn removing_someone_locks_them_out_of_everything() {
             .as_member(&carol)
             .form(&serde_json::json!({ "body": "still here?" }))
             .await;
-        assert_eq!(res.status_code(), 403);
+        assert_eq!(res.status_code(), 409);
         assert_eq!(
             messages::Entity::find().count(&ctx.db).await.unwrap(),
             before

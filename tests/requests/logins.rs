@@ -749,7 +749,7 @@ async fn removing_someone_lists_the_logins_to_change() {
             .add_header(acme.carol.0.clone(), acme.carol.1.clone())
             .await
             .text();
-        assert!(page.contains("dave has been removed and signed out."));
+        assert!(page.contains("dave has been removed."));
         assert!(page.contains("Change these at the source"));
         assert!(page.contains("Companies House"));
         assert!(page.contains("Last seen"));
@@ -1319,6 +1319,111 @@ async fn a_creator_resetting_their_password_gets_no_owner_notice_from_their_own_
         assert_eq!(notices.len(), 1, "Acme's other owner only");
         assert!(notices[0].contains("To: carol@example.com"));
         assert!(!notices.iter().any(|m| m.contains("To: alice@example.com")));
+    })
+    .await;
+}
+
+/// The emails since `before` that mention `text`, by recipient.
+fn emails_about(ctx: &AppContext, before: usize, text: &str) -> Vec<String> {
+    deliveries(ctx)[before..]
+        .iter()
+        .filter(|m| m.contains(text))
+        .cloned()
+        .collect()
+}
+
+#[tokio::test]
+#[serial]
+async fn locking_emails_the_person_and_the_lock_orgs_owners_only() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        // carol also owns Lumen, with dave as a second owner there.
+        let carol = users::Model::find_by_email(&ctx.db, "carol@example.com")
+            .await
+            .unwrap();
+        let lumen = organisations::Model::create_for_user(
+            &ctx.db,
+            &carol,
+            &organisations::NewOrgParams {
+                organisation_name: "Lumen Café".to_string(),
+                name: "carol".to_string(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let dave = memberships::ActiveModel {
+            user_id: ActiveValue::Set(user_id(&ctx, "dave@example.com").await),
+            username: ActiveValue::Set("dave".to_string()),
+            role: ActiveValue::Set(memberships::role::OWNER.to_string()),
+            status: ActiveValue::Set(memberships::status::ACTIVE.to_string()),
+            ..Default::default()
+        };
+        loco_rs::prelude::TenantActiveModelExt::set_tenant(dave, lumen.id)
+            .unwrap()
+            .insert(&ctx.db)
+            .await
+            .unwrap();
+
+        // A Claude connection, so her email says it was disconnected.
+        collab::models::access_tokens::Model::create_personal(
+            &ctx.db,
+            acme.org.id,
+            carol.id,
+            &collab::models::access_tokens::PersonalParams {
+                name: "Laptop".to_string(),
+            },
+            super::mcp::RESOURCE,
+        )
+        .await
+        .unwrap();
+        let before = deliveries(&ctx).len();
+        for _ in 0..5 {
+            unlock(&request, &acme.carol, "wrong").await;
+        }
+
+        let owners = emails_about(&ctx, before, "carol's account was locked");
+        assert_eq!(owners.len(), 1, "Acme's owner only");
+        assert!(owners[0].contains("To: alice@example.com"));
+        let hers = emails_about(&ctx, before, "Your Collaboration Tool account was locked");
+        assert_eq!(hers.len(), 1);
+        assert!(hers[0].contains("To: carol@example.com"));
+        assert!(hers[0].contains("trying to see logins in Acme"));
+        assert!(hers[0].contains("Claude was disconnected."));
+        assert!(hers[0].contains("/forgot"));
+        assert!(!hers[0].contains("/reset/"), "never a reset token");
+        assert!(
+            deliveries(&ctx)[before..]
+                .iter()
+                .all(|m| !m.contains("To: dave@example.com")),
+            "Lumen's owners are not told"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn an_owner_who_locks_themselves_gets_one_email() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = acme(&request, &ctx).await;
+        let before = deliveries(&ctx).len();
+        for _ in 0..5 {
+            unlock(&request, &acme.alice, "wrong").await;
+        }
+        assert!(users::Model::find_by_email(&ctx.db, "alice@example.com")
+            .await
+            .unwrap()
+            .is_locked());
+
+        let to_alice = emails_about(&ctx, before, "To: alice@example.com");
+        assert_eq!(to_alice.len(), 1, "{to_alice:?}");
+        assert!(to_alice[0].contains("Your Collaboration Tool account was locked"));
+        assert!(
+            !to_alice[0].contains("Claude was disconnected"),
+            "she had no Claude connection"
+        );
+        assert!(emails_about(&ctx, before, "alice's account was locked").is_empty());
     })
     .await;
 }

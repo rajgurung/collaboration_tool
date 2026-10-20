@@ -116,7 +116,7 @@ sequenceDiagram
     else 5th wrong password
         L->>U: lock account, end sessions, revoke Claude tokens
         L->>E: lock
-        L->>Mail: tell owners
+        L->>Mail: tell this org's owners, and the person
         L-->>M: 401 "Your account is locked."
     else right password
         L->>U: unlock for 5 minutes, this sign-in only
@@ -136,15 +136,23 @@ Rules:
   can, and so can members named on the login (`src/models/logins.rs:446`).
 - The unlock lasts 5 minutes and is tied to the sign-in id in the session
   cookie, so unlocking on one device does not unlock another. It is also tied
-  to the organisation it happened in, so it never counts in another one, and
-  switching organisation ends it (`src/models/users.rs:411`).
+  to the organisation it happened in, so it never counts in another one.
+  Switching organisation in this browser ends it; a switch in another browser
+  doesn't. Removal from that organisation ends it; removal from another one
+  doesn't (`end_unlock_in`). Unlocking reads the membership `FOR SHARE`, so
+  it can't slip in while a removal commits.
 - 5 wrong app passwords lock the account until a password reset
   (`src/models/auth_attempts.rs:29`). Too many tries from one IP gives 429
   for 15 minutes instead.
 - A lock revokes the person's Claude tokens and unused OAuth codes in every
   organisation, not only the one where it happened
   (`access_tokens::Model::revoke_all_for_user`). After the reset they
-  connect Claude again. Only the lock's organisation's owners are told.
+  connect Claude again. The lock's organisation's owners are told (the
+  locked person is skipped, so an owner who locked themselves gets one
+  email), and so is the person: "Your Collaboration Tool account was locked",
+  with a link to the plain Forgot password page, never a reset token. Owners
+  of the person's other organisations are not told: their logins were never
+  at risk.
 - The event is logged before decrypting. If logging fails, nothing is shown.
 - Owners are emailed after each reveal or copy. A failed email is only
   logged; the activity log already has the event.

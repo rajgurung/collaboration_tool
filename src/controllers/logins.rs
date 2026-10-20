@@ -342,14 +342,16 @@ fn plain(status: StatusCode, message: &str) -> Result<Response> {
         .text(message)
 }
 
-/// Locks the account, logs it, and tells the owners once per lock.
+/// Locks the account, logs it, and tells this organisation's owners and
+/// the person, once per lock. Owners of the person's other organisations
+/// are not told: their logins were never at risk.
 async fn lock(
     ctx: &AppContext,
     member: &CurrentMember,
     client: &Client,
     login: Option<(i64, &str)>,
 ) -> Result<Response> {
-    if users::Model::lock_account(ctx, member.user.id).await? {
+    if let Some(revoked) = users::Model::lock_account(ctx, member.user.id).await? {
         login_events::Model::record(
             &ctx.db,
             client,
@@ -362,8 +364,15 @@ async fn lock(
             },
         )
         .await?;
-        if let Err(err) = SecurityMailer::account_locked(ctx, &member.org, &member.username).await {
+        if let Err(err) =
+            SecurityMailer::account_locked(ctx, &member.org, member.user.id, &member.username).await
+        {
             tracing::error!(error = %err, "could not email owners about a locked account");
+        }
+        if let Err(err) =
+            SecurityMailer::your_account_locked(ctx, &member.org, &member.user, revoked > 0).await
+        {
+            tracing::error!(error = %err, "could not email the person about their locked account");
         }
     }
     plain(StatusCode::UNAUTHORIZED, "Your account is locked.")
@@ -441,7 +450,13 @@ async fn unlock(
             (sid, Some(cookie))
         }
     };
-    users::Model::unlock_secrets(&ctx.db, user.id, &session_id, member.org.id).await?;
+    // Refused only when a removal committed after this request was let in.
+    if !users::Model::unlock_secrets(&ctx.db, user.id, &session_id, member.org.id).await? {
+        return plain(
+            StatusCode::FORBIDDEN,
+            "You no longer have access to this organisation.",
+        );
+    }
     login_events::Model::record(&ctx.db, &client, entry(action::UNLOCK, None)).await?;
     let mut response = plain(StatusCode::OK, "Unlocked")?;
     if let Some(cookie) = cookie {

@@ -1,10 +1,20 @@
 use chrono::{Duration, Local};
-use collab::{app::App, models::users};
-use loco_rs::testing::prelude::*;
+use collab::{
+    app::App,
+    models::{
+        access_tokens::{self, PersonalParams},
+        users,
+    },
+};
+use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ActiveValue, IntoActiveModel};
 use serial_test::serial;
 
-use super::prepare_data::{create_user, login, USER_EMAIL, USER_NAME, USER_PASSWORD};
+use super::{
+    mcp::RESOURCE,
+    multi_org::alice_in_two_orgs,
+    prepare_data::{create_user, login, USER_EMAIL, USER_NAME, USER_PASSWORD},
+};
 
 fn set_cookie_header(headers: &axum::http::HeaderMap) -> String {
     headers
@@ -252,6 +262,100 @@ async fn sign_out_everywhere_logs_in_the_created_org_too() {
             .collect();
         orgs.sort_unstable();
         assert_eq!(orgs, [alice.org_id, lumen.id]);
+    })
+    .await;
+}
+
+async fn token_in(ctx: &AppContext, org_id: i64, user_id: i64) -> String {
+    access_tokens::Model::create_personal(
+        &ctx.db,
+        org_id,
+        user_id,
+        &PersonalParams {
+            name: "Laptop".to_string(),
+        },
+        RESOURCE,
+    )
+    .await
+    .unwrap()
+    .1
+}
+
+async fn usable(ctx: &AppContext, token: &str) -> bool {
+    access_tokens::Model::find_usable(&ctx.db, token, RESOURCE)
+        .await
+        .unwrap()
+        .is_some()
+}
+
+/// Resets the password through the emailed link. Returns the password
+/// changed email.
+async fn reset_through_the_link(request: &TestServer, ctx: &AppContext, email: &str) -> String {
+    request
+        .post("/forgot")
+        .form(&serde_json::json!({ "email": email }))
+        .await;
+    let token = users::Model::find_by_email(&ctx.db, email)
+        .await
+        .unwrap()
+        .reset_token
+        .unwrap();
+    let res = request
+        .post(&format!("/reset/{token}"))
+        .form(&serde_json::json!({ "password": "new-password-1", "password_confirmation": "new-password-1" }))
+        .await;
+    assert_eq!(res.status_code(), 303);
+    ctx.mailer
+        .as_ref()
+        .unwrap()
+        .deliveries()
+        .messages
+        .iter()
+        .map(|m| m.replace("=\r\n", ""))
+        .rfind(|m| m.contains("password was changed") && m.contains(&format!("To: {email}")))
+        .expect("the password changed email")
+}
+
+#[tokio::test]
+#[serial]
+async fn a_password_reset_revokes_claude_tokens_in_every_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (_, alice, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let acme_token = token_in(&ctx, in_acme.organisation_id, alice).await;
+        let beta_token = token_in(&ctx, in_beta.organisation_id, alice).await;
+
+        reset_through_the_link(&request, &ctx, "alice@example.com").await;
+
+        assert!(!usable(&ctx, &acme_token).await);
+        assert!(!usable(&ctx, &beta_token).await);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_password_changed_email_says_to_reconnect_claude() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (_, alice, in_acme, _) = alice_in_two_orgs(&request, &ctx).await;
+        token_in(&ctx, in_acme.organisation_id, alice).await;
+
+        let email = reset_through_the_link(&request, &ctx, "alice@example.com").await;
+        assert!(email.contains(
+            "Claude was disconnected too. If you use it, connect it again from More, then Connect Claude."
+        ));
+        assert!(email.contains("Then tell an owner of each organisation you belong to."));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_password_changed_email_has_no_claude_line_without_tokens() {
+    request::<App, _, _>(|request, ctx| async move {
+        alice_in_two_orgs(&request, &ctx).await;
+        let email = reset_through_the_link(&request, &ctx, "alice@example.com").await;
+        assert!(!email.contains("Claude was disconnected"));
+        assert!(email.contains("Every device that was signed in has been signed out."));
     })
     .await;
 }

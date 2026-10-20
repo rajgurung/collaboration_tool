@@ -34,6 +34,10 @@ pub const ORG_HEADER: &str = "x-org-id";
 /// The hidden field `app.ts` adds to plain forms, for the same claim.
 pub const ORG_FIELD: &str = "_org";
 
+/// Set on a refusal when the tab's org is one this user was removed from,
+/// so `app.ts` shows the removal banner instead of the switch one.
+pub const ORG_GONE_HEADER: &str = "x-org-gone";
+
 /// Shown when the Claude Allow page is posted in another organisation.
 pub const SWITCHED_ORG: &str =
     "You switched organisation while this page was open. Start again from Claude.";
@@ -178,9 +182,26 @@ impl FromRequestParts<AppContext> for CurrentMember {
         ctx: &AppContext,
     ) -> std::result::Result<Self, Self::Rejection> {
         let PinnedMember(member) = PinnedMember::from_request_parts(parts, ctx).await?;
-        check_claim(parts, &member).map_err(|claim| stale_tab_refusal(&parts.headers, claim))?;
+        if let Err(claim) = check_claim(parts, &member) {
+            // Only picks the banner's words; the refusal is already decided.
+            let gone = removed_from(ctx, claim, member.user.id).await;
+            return Err(stale_tab_refusal(&parts.headers, claim, gone));
+        }
         Ok(member)
     }
+}
+
+/// Whether the claimed org is one this user was removed from. The user id is
+/// always the resolved member's, never one from the request, so a forged
+/// claim can only name an org the person was removed from themselves. An
+/// error counts as no.
+async fn removed_from(ctx: &AppContext, claim: OrgClaim, user_id: i64) -> bool {
+    let OrgClaim::Org(org_id) = claim else {
+        return false;
+    };
+    memberships::Model::in_org_for_user(&ctx.db, org_id, user_id)
+        .await
+        .is_ok_and(|m| m.is_some_and(|m| m.is_removed()))
 }
 
 /// [`CurrentMember`] without the claim check. Only for forms that pin their
@@ -263,6 +284,9 @@ async fn resolve_org(
         if user.is_super_admin {
             return Err(Box::new(redirect_response(&parts.headers, "/admin")));
         }
+        if let Some(home) = no_active_org(parts, ctx, user.id).await {
+            return Err(Box::new(home));
+        }
         return Err(Box::new(render(
             parts,
             StatusCode::FORBIDDEN,
@@ -280,6 +304,9 @@ async fn resolve_org(
             session_id,
             ..CurrentMember::from_membership(user, org, membership)
         });
+    }
+    if let Some(home) = no_active_org(parts, ctx, user.id).await {
+        return Err(Box::new(home));
     }
     let template = if membership.is_pending() {
         "tenancy/waiting.html"
@@ -340,23 +367,55 @@ fn check_claim(parts: &Parts, member: &CurrentMember) -> std::result::Result<(),
 
 /// Sends a stale tab to Home in the org it is really in, which names the org
 /// the tab was showing. Only a parsed `i64` from the request goes into the
-/// address, so it can't be turned into an open redirect.
-fn stale_tab_refusal(headers: &HeaderMap, claim: OrgClaim) -> Response {
+/// address, so it can't be turned into an open redirect. `gone` adds
+/// `X-Org-Gone` (see [`removed_from`]).
+fn stale_tab_refusal(headers: &HeaderMap, claim: OrgClaim, gone: bool) -> Response {
     let to = match claim {
         OrgClaim::Org(id) => format!("/dashboard?from={id}"),
         OrgClaim::Missing | OrgClaim::Garbage => "/dashboard?from=".to_string(),
     };
     // Raw `fetch` calls send the org header but not HX-Request, and need the
     // same answer: a redirect they can see instead of one they follow.
-    let mut response = if is_htmx(headers) || headers.contains_key(ORG_HEADER) {
+    let mut response = if wants_hx_redirect(headers) {
         (StatusCode::CONFLICT, [("HX-Redirect", to)]).into_response()
     } else {
         (StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response()
     };
+    no_store(&mut response, gone);
     response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
+}
+
+/// For HTMX and `fetch` calls when the user has no active organisation left:
+/// a 409 to Home, which then shows the waiting, removed or declined page.
+/// Without it, an open tab whose last org was removed gets 403s that HTMX
+/// doesn't show, and nothing on screen changes. `None` for plain page loads
+/// and forms, which get that page straight away.
+async fn no_active_org(parts: &Parts, ctx: &AppContext, user_id: i64) -> Option<Response> {
+    if !wants_hx_redirect(&parts.headers) {
+        return None;
+    }
+    let claim = parts
+        .extensions
+        .get::<OrgClaim>()
+        .copied()
+        .unwrap_or(OrgClaim::Missing);
+    let gone = removed_from(ctx, claim, user_id).await;
+    let mut response = (StatusCode::CONFLICT, [("HX-Redirect", "/dashboard")]).into_response();
+    no_store(&mut response, gone);
+    Some(response)
+}
+
+/// HTMX, or a raw `fetch` call (it sends the org header but not HX-Request).
+fn wants_hx_redirect(headers: &HeaderMap) -> bool {
+    is_htmx(headers) || headers.contains_key(ORG_HEADER)
+}
+
+fn no_store(response: &mut Response, gone: bool) {
+    let h = response.headers_mut();
+    h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    if gone {
+        h.insert(ORG_GONE_HEADER, HeaderValue::from_static("1"));
+    }
 }
 
 fn is_safe(method: &Method) -> bool {

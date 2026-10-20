@@ -101,12 +101,19 @@ function hasUnsavedWork(): boolean {
 }
 
 // Follows a refusal to Home, unless the tab holds unsaved work: then the
-// banner shows in place and the text stays where it is. Returns whether the
-// refusal was held.
+// banner shows in place and the text stays where it is. `gone` (the
+// refusal's X-Org-Gone) means this user was removed from the page's org, so
+// the banner says that and offers no way back. Returns whether the refusal
+// was held.
 let staleHome = "";
-function goHomeOrHold(home: string): boolean {
+function goHomeOrHold(home: string, gone: boolean): boolean {
   staleHome = home;
-  const shown = visibleBanner();
+  let shown = visibleBanner();
+  // The switch banner's "Back" would only fail now.
+  if (shown && gone && !shown.hasAttribute("data-gone")) {
+    shown.remove();
+    shown = null;
+  }
   if (shown) {
     // Already up: show it again rather than adding a second one.
     shown.scrollIntoView({ block: "nearest" });
@@ -120,7 +127,8 @@ function goHomeOrHold(home: string): boolean {
     window.location.href = home;
     return false;
   }
-  const banner = document.querySelector<HTMLTemplateElement>("#stale-banner-template")?.content.firstElementChild?.cloneNode(true);
+  const template = gone ? "#gone-banner-template" : "#stale-banner-template";
+  const banner = document.querySelector<HTMLTemplateElement>(template)?.content.firstElementChild?.cloneNode(true);
   if (!(banner instanceof HTMLElement)) {
     window.location.href = home;
     return false;
@@ -155,7 +163,7 @@ function placeBanner(banner: HTMLElement) {
 function staleRefusal(res: Response): boolean {
   const home = res.status === 409 ? res.headers.get("HX-Redirect") : null;
   if (!home) return false;
-  goHomeOrHold(home);
+  goHomeOrHold(home, res.headers.has("X-Org-Gone"));
   return true;
 }
 
@@ -164,7 +172,7 @@ function staleRefusal(res: Response): boolean {
 document.body.addEventListener("htmx:beforeOnLoad", (event) => {
   const xhr = (event as CustomEvent<{ xhr: XMLHttpRequest }>).detail.xhr;
   const home = xhr.status === 409 ? xhr.getResponseHeader("HX-Redirect") : null;
-  if (home && goHomeOrHold(home)) event.preventDefault();
+  if (home && goHomeOrHold(home, xhr.getResponseHeader("X-Org-Gone") !== null)) event.preventDefault();
 });
 
 // "Back to Acme": switch this browser back to the page's own org. A manual
@@ -639,6 +647,14 @@ if (document.querySelector('[hx-get^="/notifications/unread"]')) {
   events.addEventListener("open", () => {
     if (streamOpened) probeOrg();
     streamOpened = true;
+  });
+  // A refused reconnect (say, removed from your last org) ends it for good.
+  // Check once, so the tab moves without waiting for the badge poll.
+  let streamEnded = false;
+  events.addEventListener("error", () => {
+    if (events.readyState !== EventSource.CLOSED || streamEnded) return;
+    streamEnded = true;
+    probeOrg();
   });
   window.addEventListener("pagehide", () => events.close());
 }

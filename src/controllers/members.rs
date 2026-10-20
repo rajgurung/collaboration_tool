@@ -112,7 +112,7 @@ async fn index(
         .map(|(m, _)| {
             data!({
                 "kind": "success",
-                "message": format!("{} was removed and signed out.", m.username),
+                "message": format!("{} was removed.", m.username),
             })
         });
     let (pending, active): (Vec<_>, Vec<_>) = all

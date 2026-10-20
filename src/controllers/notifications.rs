@@ -7,7 +7,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use chrono::{DateTime, FixedOffset, Utc};
-use futures_util::stream::{self, Stream};
+use futures_util::stream::{self, Stream, StreamExt};
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, error::RecvError};
@@ -18,7 +18,7 @@ use crate::{
     models::{
         conversations, memberships, messages,
         notifications::{self, kind, Notice},
-        projects, task_assignees, task_notes, tasks,
+        projects, task_assignees, task_notes, tasks, users,
     },
     views::{layout::avatar_color, time},
 };
@@ -67,7 +67,7 @@ pub async fn send(
 ) -> Result<Vec<i64>> {
     let sent = notifications::Model::notify(&ctx.db, org_id, actor_id, recipients, notice).await?;
     if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
-        hub.publish(&sent);
+        hub.publish(org_id, &sent);
     }
     Ok(sent)
 }
@@ -540,8 +540,9 @@ async fn unread(
     ))
 }
 
-/// Server-sent events: one `notify` event whenever this person gets a new
-/// notification. The page then reloads its badges.
+/// Server-sent events for one organisation: one `notify` event whenever
+/// this person gets a new notification there. The page then reloads its
+/// badges.
 #[debug_handler]
 async fn stream(
     member: CurrentMember,
@@ -551,26 +552,60 @@ async fn stream(
         .shared_store
         .get::<NotifyHub>()
         .ok_or_else(|| Error::string("notify hub missing"))?;
-    Ok(Sse::new(events_for(hub.subscribe(), member.user.id))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(25))))
+    // Subscribe first, then check again: a close published between the
+    // extractor's checks and the subscribe would otherwise be missed.
+    let rx = hub.subscribe();
+    let events = if still_allowed(&ctx, &member).await {
+        events_for(rx, member.org.id, member.user.id, member.session_id).left_stream()
+    } else {
+        stream::empty().right_stream()
+    };
+    Ok(Sse::new(events).keep_alive(KeepAlive::new().interval(Duration::from_secs(25))))
 }
 
-/// The events for `me`. Ends when their sessions are ended, so a signed-out
-/// browser stops listening; its reconnect is then sent to sign in.
+/// Whether the stream's person still has the session and the membership
+/// the request was let in with, as for a chat socket. A super admin acting
+/// in an org has no membership there, so only the session is checked.
+async fn still_allowed(ctx: &AppContext, member: &CurrentMember) -> bool {
+    let current = users::Model::find_by_id(&ctx.db, member.user.id)
+        .await
+        .is_ok_and(|u| u.session_version == member.user.session_version);
+    current
+        && (member.acting
+            || memberships::Model::active_in(&ctx.db, member.org.id, member.user.id)
+                .await
+                .is_ok_and(|m| m.is_some()))
+}
+
+/// The events for `me` in `org_id`, on the sign-in `session_id`. Ends on a
+/// close that matches (see `CloseScope`), so a signed-out or removed browser
+/// stops listening; its reconnect then goes through the same checks.
 fn events_for(
     rx: broadcast::Receiver<NotifyEvent>,
+    org_id: i64,
     me: i64,
+    session_id: Option<String>,
 ) -> impl Stream<Item = std::result::Result<Event, Infallible>> {
     let notify = || Ok(Event::default().event("notify").data("1"));
-    stream::unfold(rx, move |mut rx| async move {
-        loop {
-            match rx.recv().await {
-                Ok(NotifyEvent::Changed(id)) if id == me => return Some((notify(), rx)),
-                Ok(NotifyEvent::SignedOut(id)) if id == me => return None,
-                Ok(_) => {}
-                // Missed events may include a sign-out: end the stream. The
-                // browser reconnects through the same checks.
-                Err(RecvError::Lagged(_) | RecvError::Closed) => return None,
+    stream::unfold(rx, move |mut rx| {
+        let session_id = session_id.clone();
+        async move {
+            loop {
+                match rx.recv().await {
+                    Ok(NotifyEvent::Changed {
+                        org_id: org,
+                        user_id,
+                    }) if org == org_id && user_id == me => return Some((notify(), rx)),
+                    Ok(NotifyEvent::Close(scope))
+                        if scope.closes(org_id, me, session_id.as_deref()) =>
+                    {
+                        return None
+                    }
+                    Ok(_) => {}
+                    // Missed events may include a close: end the stream. The
+                    // browser reconnects through the same checks.
+                    Err(RecvError::Lagged(_) | RecvError::Closed) => return None,
+                }
             }
         }
     })
@@ -587,18 +622,65 @@ pub fn routes() -> Routes {
 
 #[cfg(test)]
 mod tests {
-    use futures_util::StreamExt;
+    use std::sync::Arc;
 
     use super::*;
+    use crate::data::live::CloseScope;
+
+    /// Whether the stream has an event ready now, without waiting.
+    async fn has_next(
+        events: &mut (impl Stream<Item = std::result::Result<Event, Infallible>> + Unpin),
+    ) -> Option<bool> {
+        tokio::time::timeout(Duration::from_millis(50), events.next())
+            .await
+            .ok()
+            .map(|e| e.is_some())
+    }
 
     #[tokio::test]
-    async fn the_stream_ends_when_its_user_is_signed_out() {
+    async fn the_stream_forwards_only_its_own_orgs_notices() {
         let hub = NotifyHub::new();
-        let mut events = Box::pin(events_for(hub.subscribe(), 7));
-        hub.publish(&[8, 7]);
-        hub.sign_out(8);
-        assert!(events.next().await.is_some(), "a notice for 7");
-        hub.sign_out(7);
-        assert!(events.next().await.is_none(), "closed for 7");
+        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7, Some("a".to_string())));
+        hub.publish(2, &[7]);
+        hub.publish(1, &[8]);
+        assert_eq!(has_next(&mut events).await, None, "nothing for org 1");
+        hub.publish(1, &[7]);
+        assert_eq!(has_next(&mut events).await, Some(true));
+    }
+
+    #[tokio::test]
+    async fn the_stream_ends_on_removal_from_its_org_only() {
+        let hub = NotifyHub::new();
+        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7, Some("a".to_string())));
+        hub.close(CloseScope::Org {
+            org_id: 2,
+            user_id: 7,
+        });
+        hub.close(CloseScope::Org {
+            org_id: 1,
+            user_id: 8,
+        });
+        hub.close(CloseScope::Browser {
+            user_id: 7,
+            session_id: Arc::from("b"),
+        });
+        hub.publish(1, &[7]);
+        assert_eq!(has_next(&mut events).await, Some(true), "still open");
+        hub.close(CloseScope::Org {
+            org_id: 1,
+            user_id: 7,
+        });
+        assert_eq!(has_next(&mut events).await, Some(false), "closed");
+    }
+
+    #[tokio::test]
+    async fn the_stream_ends_when_the_account_is_signed_out() {
+        let hub = NotifyHub::new();
+        let mut events = Box::pin(events_for(hub.subscribe(), 1, 7, None));
+        hub.close(CloseScope::Account { user_id: 8 });
+        hub.publish(1, &[7]);
+        assert_eq!(has_next(&mut events).await, Some(true), "a notice for 7");
+        hub.close(CloseScope::Account { user_id: 7 });
+        assert_eq!(has_next(&mut events).await, Some(false), "closed for 7");
     }
 }

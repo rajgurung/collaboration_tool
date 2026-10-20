@@ -166,7 +166,9 @@ Rules:
 - Usernames: a letter, then letters or numbers, 3 to 30 characters, and never
   `everyone` (`src/models/users.rs:29`).
 - `session_version` goes into every session token. Adding 1 to it ends every
-  session at once, and ends any logins unlock.
+  session at once, and ends any logins unlock. Sign out everywhere, a
+  password reset and a lock add 1. Removal from an organisation doesn't: it
+  ends access to that org only.
 - A logins unlock (`secrets_unlocked_*`) counts for one sign-in, in one
   organisation, for 5 minutes.
 - `auth_attempts` never stores an email, only its SHA-256. Rows older than a

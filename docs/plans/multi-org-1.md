@@ -84,7 +84,17 @@ already scopes by `member.org.id`.
 4. Create another organisation.
 5. Org-scoped removal.
 6. Join with an existing account.
-7. Links and the Claude connector.
+7. Organisation in the address (replaces "Links and the Claude connector").
+
+**PR 7 replaced (Raj decided on 19 October).** Instead of keeping the current
+organisation in a per-browser cookie, every page will carry it in its address,
+for example `/o/acme-studio/tasks`. Each tab then holds its own organisation,
+so two companies can be open side by side and a tab can no longer write into
+another company by accident. Email, notification and Claude connector links
+name their organisation by construction, which covers the old PR 7 scope. It is
+a larger change (every route, link, form and redirect), so it runs as its own
+project, starting with a brief, after PRs 5 and 6. The `current_org` cookie
+then only remembers the last organisation for bare URLs like `/`.
 
 **Order (Raj decided on 19 October).** Org-scoped removal (5) comes before
 join with an existing account (6), as the reviewers recommended. Today removal
@@ -140,6 +150,16 @@ message or token typed for Acme would land in Beta. PR 3 must add:
 - The response is the same whether the email has an account or not.
 - A removed or declined member can't re-join as active.
 - The joiner sets their username for the new org.
+- A rejoin updates the existing removed or declined row. It never inserts a
+  second one; `(organisation_id, user_id)` is unique.
+- Approving a membership revokes every token and unused OAuth code that
+  `(org, user)` still has, and clears an unlock for that org, inside the
+  approval transaction (from the PR 5 security review).
+- `memberships::approve` becomes a conditional update (`WHERE status =
+  'pending'`, exactly one row changed), so a stale page can't turn a declined
+  or removed membership into active (from the PR 5 security review).
+- Once re-approved, open sessions regain the org without signing in again,
+  since removal no longer ends them (PR 5).
 
 **Org-scoped removal.**
 
@@ -149,6 +169,9 @@ message or token typed for Acme would land in Beta. PR 3 must add:
   version.
 - Decide who is told when an account lock (account-wide) is caused by one
   org's app passwords.
+- Planned in `docs/plans/multi-org-5.md`.
+- Follow-up: a super admin "sign out everywhere and lock" for a user, from
+  `/admin`, for suspected takeovers. Remove itself never signs people out.
 
 **Known account-wide effects (accepted).**
 

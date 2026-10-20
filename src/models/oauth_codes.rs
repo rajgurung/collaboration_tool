@@ -95,6 +95,22 @@ impl Model {
         Ok((row, code))
     }
 
+    /// The organisation and user a code was issued for, in any state, so a
+    /// caller can lock the membership before spending it.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn owner<C: ConnectionTrait>(db: &C, code: &str) -> ModelResult<Option<(i64, i64)>> {
+        Ok(Entity::find()
+            .select_only()
+            .column(Column::OrganisationId)
+            .column(Column::UserId)
+            .filter(Column::CodeHash.eq(access_tokens::hash(code)))
+            .into_tuple::<(i64, i64)>()
+            .one(db)
+            .await?)
+    }
+
     /// Marks the code used, in one statement, and returns it. `None` when the
     /// code is unknown, expired or already used. A second use of a code
     /// revokes everything issued from it.

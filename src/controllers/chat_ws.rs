@@ -40,6 +40,9 @@ struct Session {
     user_id: i64,
     /// The session version this socket was opened with.
     session_version: i32,
+    /// The sign-in this socket was opened with, for closing one browser's
+    /// sockets on a switch. `None` for cookies from before sign-in ids.
+    session_id: Option<String>,
     conversation_id: i64,
     conversation_kind: String,
     /// The thread's parent, on a thread page's socket.
@@ -90,6 +93,7 @@ async fn connect(
         org_id: member.org.id,
         user_id: member.user.id,
         session_version: member.user.session_version,
+        session_id: member.session_id,
         conversation_id: conversation.id,
         conversation_kind: conversation.kind,
         thread_id: query.thread,
@@ -98,13 +102,19 @@ async fn connect(
 }
 
 /// Whether the socket's viewer may still follow the conversation: same
-/// session version, and still one of its members (removal takes them out).
+/// session version, still an active member of the organisation, and still one
+/// of the conversation's members (removal takes them out). No skip for
+/// acting: a super admin acting elsewhere has no seat in any conversation, so
+/// `connect` already refused them.
 async fn still_allowed(session: &Session) -> bool {
     let db = &session.ctx.db;
     let current = users::Model::find_by_id(db, session.user_id)
         .await
         .is_ok_and(|u| u.session_version == session.session_version);
     current
+        && memberships::Model::active_in(db, session.org_id, session.user_id)
+            .await
+            .is_ok_and(|m| m.is_some())
         && conversations::Model::find_for_member(
             db,
             session.org_id,
@@ -117,7 +127,8 @@ async fn still_allowed(session: &Session) -> bool {
 
 async fn run(mut socket: WebSocket, session: Session) {
     let mut events = session.hub.subscribe();
-    // A sign-out between the checks in `connect` and subscribing would be missed.
+    // A close (sign-out, removal) between the checks in `connect` and
+    // subscribing would be missed.
     if !still_allowed(&session).await {
         let _ = socket.send(Message::Close(None)).await;
         return;
@@ -138,7 +149,9 @@ async fn run(mut socket: WebSocket, session: Session) {
                 _ => break,
             },
             event = events.recv() => match event {
-                Ok(ChatEvent::SignedOut { user_id }) if user_id == session.user_id => {
+                Ok(ChatEvent::Close(scope))
+                    if scope.closes(session.org_id, session.user_id, session.session_id.as_deref()) =>
+                {
                     let _ = socket.send(Message::Close(None)).await;
                     break;
                 }
@@ -197,9 +210,9 @@ async fn run(mut socket: WebSocket, session: Session) {
                         Err(err) => tracing::error!(error = %err, "could not render read receipts"),
                     }
                 }
-                // Someone else signed out.
-                Ok(ChatEvent::SignedOut { .. }) => {}
-                // Skipped events may include a sign-out. Close; the browser
+                // Someone else's sockets, or another org's or browser's.
+                Ok(ChatEvent::Close(_)) => {}
+                // Skipped events may include a close. Close; the browser
                 // reconnects through the same checks and reloads the feed.
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::warn!(skipped, user_id = session.user_id, "chat socket fell behind");
@@ -471,7 +484,7 @@ fn grows(sent: &mut HashMap<i64, i64>, parent_id: i64, count: i64) -> bool {
 /// broadcast for the whole process, so the conversation check, made first for
 /// every event, is what keeps another conversation's (or organisation's) HTML
 /// off this socket. Main-feed sockets take only main-feed events; a thread
-/// socket takes only its own thread's. Sign-outs are about a person, not a
+/// socket takes only its own thread's. Closes are about a person, not a
 /// conversation, and are matched before this.
 fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> bool {
     let id = match event {
@@ -491,7 +504,7 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
             conversation_id: id,
             ..
         } => *id,
-        ChatEvent::SignedOut { .. } => return false,
+        ChatEvent::Close(_) => return false,
     };
     if id != conversation_id {
         return false;
@@ -513,7 +526,7 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
             },
             Some(thread),
         ) => *message_id == thread || *parent_id == Some(thread),
-        (ChatEvent::SignedOut { .. }, _) => false,
+        (ChatEvent::Close(_), _) => false,
     }
 }
 
@@ -580,7 +593,7 @@ pub fn routes() -> Routes {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{controllers::chat::Receipt, views::layout::Person};
+    use crate::{controllers::chat::Receipt, data::live::CloseScope, views::layout::Person};
 
     fn update(message_id: i64, author_id: i64, dm: bool) -> ReceiptUpdate {
         ReceiptUpdate {
@@ -733,6 +746,10 @@ mod tests {
         }
     }
 
+    fn close() -> ChatEvent {
+        ChatEvent::Close(CloseScope::Account { user_id: 1 })
+    }
+
     /// Every event type, on the conversation the socket follows.
     fn every_event(conversation_id: i64) -> Vec<(&'static str, ChatEvent)> {
         vec![
@@ -772,8 +789,8 @@ mod tests {
             !wants(&reactions_event(7, 11, Some(10)), 7, None),
             "a reply's reactions"
         );
-        // Sign-outs are matched on the person before this check.
-        assert!(!wants(&ChatEvent::SignedOut { user_id: 1 }, 7, None));
+        // Closes are matched on the person before this check.
+        assert!(!wants(&close(), 7, None));
     }
 
     #[test]
@@ -799,7 +816,7 @@ mod tests {
         );
         assert!(!wants(&message_event(7), 7, thread), "main-feed message");
         assert!(!wants(&read_event(7), 7, thread), "receipts");
-        assert!(!wants(&ChatEvent::SignedOut { user_id: 1 }, 7, thread));
+        assert!(!wants(&close(), 7, thread));
     }
 
     #[test]

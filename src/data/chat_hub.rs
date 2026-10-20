@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
+use super::live::CloseScope;
 use crate::controllers::chat::{MessageView, ReactionRow, Receipt, ThreadLine};
 
 /// Enough buffered events for a burst; slower sockets skip ahead and the
@@ -47,9 +48,11 @@ pub enum ChatEvent {
         message: Box<MessageView>,
         line: Box<ThreadLine>,
     },
-    /// The user's sessions were ended (sign out everywhere, password reset,
-    /// removal), or they switched organisation. Their open sockets close.
-    SignedOut { user_id: i64 },
+    /// Some of a person's sockets close: every one on sign out everywhere, a
+    /// password reset or a lock (`Account`); those in one organisation on
+    /// removal (`Org`); those of one browser on a switch or a create
+    /// (`Browser`). See [`CloseScope`].
+    Close(CloseScope),
 }
 
 /// The current receipt for one message. In a group or channel it goes to

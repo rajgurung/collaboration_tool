@@ -4,12 +4,13 @@ use loco_rs::{auth::jwt, hash, prelude::*};
 use sea_orm::{sea_query::ExprTrait, TransactionSession};
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use uuid::Uuid;
 
 pub use super::_entities::users::{self, ActiveModel, Entity, Model};
 use crate::data::{
     chat_hub::{ChatEvent, ChatHub},
+    live::CloseScope,
     notify_hub::NotifyHub,
 };
 
@@ -431,16 +432,27 @@ impl Model {
     }
 
     /// Unlocks logins for [`UNLOCK_MINUTES`], for one sign-in and one
-    /// organisation only.
+    /// organisation only. Returns false, and unlocks nothing, unless the user
+    /// is an active member there. The membership is read `FOR SHARE`, so a
+    /// removal committing at the same time either runs first (and this is
+    /// refused) or after (and its `end_unlock_in` clears this).
     ///
     /// # Errors
     /// On database errors.
-    pub async fn unlock_secrets<C: ConnectionTrait>(
-        db: &C,
+    pub async fn unlock_secrets(
+        db: &DatabaseConnection,
         user_id: i64,
         session_id: &str,
         org_id: i64,
-    ) -> ModelResult<()> {
+    ) -> ModelResult<bool> {
+        let txn = db.begin().await?;
+        if super::memberships::Model::active_in_for_share(&txn, org_id, user_id)
+            .await?
+            .is_none()
+        {
+            txn.rollback().await?;
+            return Ok(false);
+        }
         let until = chrono::Utc::now() + Duration::minutes(UNLOCK_MINUTES);
         users::Entity::update_many()
             .col_expr(
@@ -456,9 +468,10 @@ impl Model {
                 Expr::value(Some(org_id)),
             )
             .filter(users::Column::Id.eq(user_id))
-            .exec(db)
+            .exec(&txn)
             .await?;
-        Ok(())
+        txn.commit().await?;
+        Ok(true)
     }
 
     /// Ends any unlock of logins, without ending sessions.
@@ -466,6 +479,43 @@ impl Model {
     /// # Errors
     /// On database errors.
     pub async fn end_unlock<C: ConnectionTrait>(db: &C, user_id: i64) -> ModelResult<()> {
+        Self::end_unlock_where(db, user_id, Condition::all()).await
+    }
+
+    /// Ends an unlock of logins only if it is for this organisation, so an
+    /// unlock in another of the person's organisations keeps running. For a
+    /// removal. One `UPDATE`.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn end_unlock_in<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        org_id: i64,
+    ) -> ModelResult<()> {
+        let only = Condition::all().add(users::Column::SecretsUnlockedOrgId.eq(org_id));
+        Self::end_unlock_where(db, user_id, only).await
+    }
+
+    /// Ends an unlock of logins only if this sign-in made it, so a switch in
+    /// one browser leaves an unlock in another alone. One `UPDATE`.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn end_unlock_for_session<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        session_id: &str,
+    ) -> ModelResult<()> {
+        let only = Condition::all().add(users::Column::SecretsUnlockedSid.eq(session_id));
+        Self::end_unlock_where(db, user_id, only).await
+    }
+
+    async fn end_unlock_where<C: ConnectionTrait>(
+        db: &C,
+        user_id: i64,
+        only: Condition,
+    ) -> ModelResult<()> {
         users::Entity::update_many()
             .col_expr(
                 users::Column::SecretsUnlockedUntil,
@@ -480,6 +530,7 @@ impl Model {
                 Expr::value(None::<i64>),
             )
             .filter(users::Column::Id.eq(user_id))
+            .filter(only)
             .exec(db)
             .await?;
         Ok(())
@@ -495,12 +546,13 @@ impl Model {
     /// session, and signs the person out everywhere. Only a password reset
     /// unlocks it. Their Claude tokens are revoked too, in every
     /// organisation, not only the one where it happened. Who is told is the
-    /// caller's job, and unchanged: that organisation's owners. Returns false
-    /// if it was already locked, so the owners are told once per lock.
+    /// caller's job: the owners of the organisation where it happened, and
+    /// the person. Returns how many Claude connections it ended, or `None`
+    /// if the account was already locked, so they are told once per lock.
     ///
     /// # Errors
     /// On database errors.
-    pub async fn lock_account(ctx: &AppContext, user_id: i64) -> ModelResult<bool> {
+    pub async fn lock_account(ctx: &AppContext, user_id: i64) -> ModelResult<Option<u64>> {
         let txn = ctx.db.begin().await?;
         let locked = users::Entity::update_many()
             .col_expr(
@@ -514,10 +566,10 @@ impl Model {
             .rows_affected
             == 1;
         Self::increment_session_version(&txn, user_id).await?;
-        super::access_tokens::Model::revoke_all_for_user(&txn, user_id).await?;
+        let revoked = super::access_tokens::Model::revoke_all_for_user(&txn, user_id).await?;
         txn.commit().await?;
         Self::close_live_connections(ctx, user_id);
-        Ok(locked)
+        Ok(locked.then_some(revoked))
     }
 
     /// Signs the user out everywhere: every session token stops working, and
@@ -566,8 +618,10 @@ impl Model {
         Ok(())
     }
 
-    /// Sets a new password from a reset link and ends every session, in one
-    /// transaction, then closes the user's live connections.
+    /// Sets a new password from a reset link, ends every session and revokes
+    /// the person's Claude tokens in every organisation, in one transaction,
+    /// then closes the user's live connections. Returns the user and how
+    /// many tokens were revoked, for the email.
     ///
     /// # Errors
     /// Validation errors for a bad password, or database errors.
@@ -575,25 +629,51 @@ impl Model {
         self,
         ctx: &AppContext,
         password: &str,
-    ) -> ModelResult<Self> {
+    ) -> ModelResult<(Self, u64)> {
         let txn = ctx.db.begin().await?;
         let user = self
             .into_active_model()
             .reset_password(&txn, password)
             .await?;
         Self::increment_session_version(&txn, user.id).await?;
+        let revoked = super::access_tokens::Model::revoke_all_for_user(&txn, user.id).await?;
         txn.commit().await?;
         Self::close_live_connections(ctx, user.id);
-        Ok(user)
+        Ok((user, revoked))
     }
 
-    /// Closes the user's open chat sockets and notification streams.
+    /// Closes every open chat socket and notification stream of the user,
+    /// in every organisation: sign out everywhere, a reset and a lock.
     pub fn close_live_connections(ctx: &AppContext, user_id: i64) {
+        Self::close(ctx, CloseScope::Account { user_id });
+    }
+
+    /// Closes the user's chat sockets and notification streams in one
+    /// organisation, on every device: a removal.
+    pub fn close_in_org(ctx: &AppContext, org_id: i64, user_id: i64) {
+        Self::close(ctx, CloseScope::Org { org_id, user_id });
+    }
+
+    /// Closes the chat sockets and notification streams of one browser's
+    /// sign-in: a switch or a create. With no sign-in id (a cookie from
+    /// before sign-in ids) it closes all of them, as before.
+    pub fn close_in_browser(ctx: &AppContext, user_id: i64, session_id: Option<&str>) {
+        let scope = match session_id {
+            Some(sid) => CloseScope::Browser {
+                user_id,
+                session_id: Arc::from(sid),
+            },
+            None => CloseScope::Account { user_id },
+        };
+        Self::close(ctx, scope);
+    }
+
+    fn close(ctx: &AppContext, scope: CloseScope) {
         if let Some(hub) = ctx.shared_store.get::<ChatHub>() {
-            hub.publish(ChatEvent::SignedOut { user_id });
+            hub.publish(ChatEvent::Close(scope.clone()));
         }
         if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
-            hub.sign_out(user_id);
+            hub.close(scope);
         }
     }
 }

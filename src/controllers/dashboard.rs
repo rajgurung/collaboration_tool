@@ -29,8 +29,8 @@ struct HomeQuery {
 }
 
 /// The card shown after a stale tab was sent here. It names the old org only
-/// when you are an active member of it, so a hand-made `?from=` reveals
-/// nothing.
+/// when you are an active member of it, or were removed from it (then it says
+/// so, with no way back), so a hand-made `?from=` reveals nothing new.
 async fn stale_notice(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -46,13 +46,19 @@ async fn stale_notice(
         return None;
     }
     // An error only changes the wording: the refusal has already happened.
-    let shown = match memberships::Model::active_in(&ctx.db, id, member.user.id).await {
-        Ok(Some(_)) => organisations::Model::find_by_id(&ctx.db, id).await.ok(),
-        _ => None,
+    // Always this member's own rows, never anyone else's.
+    let removed = match memberships::Model::in_org_for_user(&ctx.db, id, member.user.id).await {
+        Ok(Some(m)) if m.is_active() => false,
+        Ok(Some(m)) if m.is_removed() => true,
+        _ => return Some(nameless),
     };
-    Some(match shown {
-        Some(org) => serde_json::json!({ "id": org.id, "name": org.name }),
-        None => nameless,
+    let Ok(org) = organisations::Model::find_by_id(&ctx.db, id).await else {
+        return Some(nameless);
+    };
+    Some(if removed {
+        serde_json::json!({ "id": null, "name": org.name, "removed": true })
+    } else {
+        serde_json::json!({ "id": org.id, "name": org.name })
     })
 }
 

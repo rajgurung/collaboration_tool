@@ -14,6 +14,7 @@ use crate::{
 static password_changed: Dir<'_> = include_dir!("src/mailers/security/password_changed");
 static login_seen: Dir<'_> = include_dir!("src/mailers/security/login_seen");
 static account_locked: Dir<'_> = include_dir!("src/mailers/security/account_locked");
+static your_account_locked: Dir<'_> = include_dir!("src/mailers/security/your_account_locked");
 static member_password_changed: Dir<'_> =
     include_dir!("src/mailers/security/member_password_changed");
 
@@ -21,11 +22,16 @@ pub struct SecurityMailer {}
 
 impl SecurityMailer {
     /// Tells someone their password was changed, so a reset they did not ask
-    /// for does not go unnoticed.
+    /// for does not go unnoticed. `claude_disconnected` adds how to connect
+    /// Claude again, when the reset revoked a token.
     ///
     /// # Errors
     /// When the email cannot be rendered or handed off.
-    pub async fn password_changed(ctx: &AppContext, user: &users::Model) -> Result<()> {
+    pub async fn password_changed(
+        ctx: &AppContext,
+        user: &users::Model,
+        claude_disconnected: bool,
+    ) -> Result<()> {
         let settings = Settings::from_context(ctx)?;
         let args = mailer::Args {
             from: Some(settings.mail_from.clone()),
@@ -34,6 +40,7 @@ impl SecurityMailer {
                 "name": user.name,
                 "email": user.email,
                 "forgot_url": format!("{}/forgot", settings.app_url),
+                "claude_disconnected": claude_disconnected,
             }),
             ..Default::default()
         };
@@ -62,17 +69,49 @@ impl SecurityMailer {
         Self::to_owners(ctx, org, None, &login_seen, locals).await
     }
 
-    /// Tells every owner that someone's account was locked after too many
-    /// wrong app passwords.
+    /// Tells every owner of the organisation where it happened that
+    /// someone's account was locked after too many wrong app passwords. The
+    /// locked person is skipped: an owner who locked themselves gets
+    /// [`Self::your_account_locked`] only.
     ///
     /// # Errors
     /// When an email cannot be rendered or handed off.
     pub async fn account_locked(
         ctx: &AppContext,
         org: &organisations::Model,
+        user_id: i64,
         who: &str,
     ) -> Result<()> {
-        Self::to_owners(ctx, org, None, &account_locked, json!({ "who": who })).await
+        let locals = json!({ "who": who });
+        Self::to_owners(ctx, org, Some(user_id), &account_locked, locals).await
+    }
+
+    /// Tells the person their account was locked, in which organisation,
+    /// and how to unlock it. The link is the plain "Forgot password" page,
+    /// never a reset token. `claude_disconnected` says so, when the lock
+    /// revoked a token.
+    ///
+    /// # Errors
+    /// When the email cannot be rendered or handed off.
+    pub async fn your_account_locked(
+        ctx: &AppContext,
+        org: &organisations::Model,
+        user: &users::Model,
+        claude_disconnected: bool,
+    ) -> Result<()> {
+        let settings = Settings::from_context(ctx)?;
+        let args = mailer::Args {
+            from: Some(settings.mail_from.clone()),
+            to: user.email.clone(),
+            locals: json!({
+                "name": user.name,
+                "org": org.name,
+                "forgot_url": format!("{}/forgot", settings.app_url),
+                "claude_disconnected": claude_disconnected,
+            }),
+            ..Default::default()
+        };
+        deliver(ctx, &settings, &your_account_locked, args).await
     }
 
     /// Tells the other owners that the password of someone who can see

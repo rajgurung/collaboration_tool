@@ -6,7 +6,7 @@
 {% endblock topbar %}
 {% block content %}
 <div class="flex max-w-2xl flex-col gap-3.5">
-  {% if just_removed %}<p role="status" class="alert alert-success m-0">{{ former.username }} has been removed and signed out.</p>{% endif %}
+  {% if just_removed %}<p role="status" class="alert alert-success m-0">{{ former.username }} has been removed.</p>{% endif %}
   {% if rows %}
   <div class="mx-1 flex flex-col gap-1.5">
     <h1 class="m-0 text-2xl font-extrabold tracking-tight">Change these at the source</h1>

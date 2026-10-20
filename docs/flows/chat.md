@@ -47,8 +47,10 @@ sequenceDiagram
 Rules:
 
 - The socket checks the session, the membership and the `Origin` before it
-  upgrades (`src/controllers/chat_ws.rs:58`). It checks the session version
-  and membership again when it starts (`still_allowed`, `:102`).
+  upgrades (`src/controllers/chat_ws.rs:58`). It checks the session version,
+  the active membership in the org and the conversation seat again when it
+  starts (`still_allowed`), after subscribing, so a close published between
+  the two is never missed.
 - Every message sent on the socket checks membership again
   (`receive`, `src/controllers/chat_ws.rs:241`).
 - `ChatHub` is one `tokio` broadcast channel for the whole process. Each
@@ -57,8 +59,10 @@ Rules:
   (`docs/deploy.md`).
 - A socket that falls behind closes. The browser reconnects through the same
   checks and reloads the feed from `GET /chat/<id>/feed`.
-- When the user is signed out everywhere, removed or locked, a `SignedOut`
-  event closes their sockets.
+- A `Close` event closes sockets by scope (`src/data/live.rs`): every org's
+  on sign out everywhere, a password reset or a lock (`Account`); only that
+  org's, on every device, on removal (`Org`); only that browser's on a switch
+  or a create (`Browser`, by sign-in id).
 - The socket needs no stale-tab check. Its org is fixed at upgrade, and the
   upgrade only succeeds for a conversation in the cookie's org, the one the
   page names. A switch closes the socket and its reconnect is refused. The

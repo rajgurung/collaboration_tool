@@ -1,9 +1,10 @@
 //! Session versions: every session cookie carries the user's version, and
-//! bumping it (sign out everywhere, a password reset, removal) ends them all.
+//! bumping it (sign out everywhere, a password reset, a lock) ends them all.
 use collab::{
     app::App,
     data::{
         chat_hub::{ChatEvent, ChatHub},
+        live::CloseScope,
         notify_hub::{NotifyEvent, NotifyHub},
     },
     models::users,
@@ -68,11 +69,12 @@ async fn sign_out_everywhere_ends_other_sessions_but_keeps_this_one() {
         assert!(page.contains("Signed out on every other device."));
 
         // Open chat sockets and notification streams are told to close.
+        let everywhere = CloseScope::Account { user_id: alice.id };
         assert!(matches!(
             chat.try_recv().unwrap(),
-            ChatEvent::SignedOut { user_id } if user_id == alice.id
+            ChatEvent::Close(scope) if scope == everywhere
         ));
-        assert_eq!(notify.try_recv().unwrap(), NotifyEvent::SignedOut(alice.id));
+        assert_eq!(notify.try_recv().unwrap(), NotifyEvent::Close(everywhere));
 
         let again = users::Model::find_by_id(&ctx.db, alice.id).await.unwrap();
         assert_eq!(again.session_version, alice.session_version + 1);

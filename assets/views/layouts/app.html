@@ -63,6 +63,17 @@
     </div>
   </div>
 </template>
+{# The same place, when this user was removed from this page's org: no way back. #}
+<template id="gone-banner-template">
+  <div class="notice stale-banner" role="status" data-stale-banner data-gone>
+    <span class="notice-icon">{{<icon name="rotate-ccw" class="h-[18px] w-[18px]"/>}}</span>
+    <div class="notice-body">
+      <p class="notice-title">You no longer have access to {{ org.name }}.</p>
+      <p class="meta m-0 text-[14px]">Copy anything you need from this tab, then go to Home.</p>
+      <div class="notice-actions"><button type="button" class="btn btn-secondary btn-tall" data-stale-home>Go to Home</button></div>
+    </div>
+  </div>
+</template>
 {% endif %}
 
 {% block tabbar %}

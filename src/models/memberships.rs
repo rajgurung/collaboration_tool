@@ -357,10 +357,14 @@ impl Model {
 
     /// Removes an active member. The rules are checked in a transaction that
     /// locks the organisation's owners: nobody removes themselves, only an
-    /// owner removes an owner, and the last owner stays. Removal ends the
-    /// person's sessions and live connections, revokes their Claude tokens,
-    /// takes them out of every conversation and stops mention emails to them.
-    /// Login activity records who removed whom.
+    /// owner removes an owner, and the last owner stays. Removal ends access
+    /// to this organisation only: it revokes the person's Claude tokens here,
+    /// ends an unlock of logins made here, takes them out of every
+    /// conversation here and stops mention emails from here, then closes
+    /// their chat sockets and notification streams for this organisation on
+    /// every device. Their sessions, and everything in their other
+    /// organisations, are untouched; `CurrentMember` stops serving this one
+    /// on the next request. Login activity records who removed whom.
     ///
     /// # Errors
     /// `EntityNotFound` when `id` is not in this organisation, `Message` when
@@ -410,7 +414,16 @@ impl Model {
         membership.removed_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
         membership.removed_by_id = ActiveValue::Set(Some(remover_id));
         let membership = membership.update(&txn).await?;
-        users::Model::increment_session_version(&txn, user_id).await?;
+        // The account row before the tokens, the order a password reset, a
+        // lock and a token refresh use, so they wait for each other instead
+        // of deadlocking. FOR NO KEY UPDATE, so inserts elsewhere that point
+        // at this user (their FOR KEY SHARE checks) don't wait on it, and
+        // nor does `removed_by_id` in a removal the other way round.
+        users::Entity::find_by_id(user_id)
+            .lock(sea_orm::sea_query::LockType::NoKeyUpdate)
+            .one(&txn)
+            .await?;
+        users::Model::end_unlock_in(&txn, user_id, org_id).await?;
         access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
         conversation_members::Model::remove_everywhere(&txn, org_id, user_id).await?;
         notifications::Model::stop_emails(&txn, org_id, user_id).await?;
@@ -427,7 +440,8 @@ impl Model {
         )
         .await?;
         txn.commit().await?;
-        users::Model::close_live_connections(ctx, user_id);
+        users::Model::close_in_org(ctx, org_id, user_id);
+        tracing::info!(org_id, user_id, remover_id, "removed member");
         Ok(membership)
     }
 
@@ -498,6 +512,47 @@ impl Model {
             .in_tenant(org_id)
             .filter(Column::UserId.eq(user_id))
             .filter(Column::Status.eq(status::ACTIVE))
+            .one(db)
+            .await?)
+    }
+
+    /// [`Self::active_in`], reading the row `FOR SHARE`: it waits for a
+    /// removal of this membership that is committing, then sees `removed`.
+    /// Other readers never wait. For minting tokens and unlocking logins,
+    /// inside their transaction.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn active_in_for_share<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<Option<Self>> {
+        // Locks the row whatever its status, then checks it, so a removal
+        // that commits while this waits is seen.
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::UserId.eq(user_id))
+            .lock_shared()
+            .one(db)
+            .await?
+            .filter(Self::is_active))
+    }
+
+    /// This user's membership in the organisation in any status, for naming
+    /// an organisation they were removed from. Always pass the signed-in
+    /// user's own id, never one from the request.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn in_org_for_user<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<Option<Self>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::UserId.eq(user_id))
             .one(db)
             .await?)
     }
