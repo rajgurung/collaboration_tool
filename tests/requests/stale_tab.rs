@@ -245,7 +245,7 @@ async fn the_exempt_lists_match_real_routes() {
         }
         // The two PinnedMember routes, and only those, skip the check while
         // taking a member. A third needs a deliberate change here.
-        let pinned: Vec<_> = EXEMPT[13..].iter().map(|(_, uri)| *uri).collect();
+        let pinned: Vec<_> = EXEMPT[14..].iter().map(|(_, uri)| *uri).collect();
         assert_eq!(pinned, ["/oauth/authorize", "/settings/claude/tokens"]);
     })
     .await;
