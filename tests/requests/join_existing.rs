@@ -954,6 +954,79 @@ async fn approval_emails_stop_at_twenty_a_day_per_org() {
     .await;
 }
 
+/// Asks `who` into Beta as `name` straight on the model, and returns the row.
+async fn pending_in(ctx: &AppContext, org_id: i64, user_id: i64, name: &str) -> i64 {
+    let org = organisations::Model::find_by_id(&ctx.db, org_id)
+        .await
+        .unwrap();
+    let outcome = memberships::Model::request_to_join(
+        &ctx.db,
+        &org,
+        user_id,
+        &memberships::JoinParams {
+            name: name.to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    match outcome {
+        memberships::JoinOutcome::Requested(m) => m.id,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn rejoining_again_and_again_stops_the_emails() {
+    request::<App, _, _>(|request, ctx| async move {
+        let w = world(&request, &ctx).await;
+        for cycle in 1..=5 {
+            let id = pending_in(&ctx, w.beta, w.alice_id, "alice").await;
+            let res = manage(&request, &w.bob, "approve", id).await;
+            assert!(toast(&res).contains("alice approved."), "cycle {cycle}");
+            manage(&request, &w.bob, "remove", id).await;
+        }
+        assert_eq!(
+            approval_emails(&ctx).len(),
+            3,
+            "at most 3 a day to one person, however often the row is approved"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn declining_rejoined_rows_does_not_reset_the_org_count() {
+    request::<App, _, _>(|request, ctx| async move {
+        let w = world(&request, &ctx).await;
+        let mut people = Vec::new();
+        for n in 1..=20 {
+            let user = create_user(&ctx, &format!("p{n}@example.com"), &format!("person{n}")).await;
+            let id = pending_in(&ctx, w.beta, user.id, &format!("person{n}")).await;
+            manage(&request, &w.bob, "approve", id).await;
+            people.push((user.id, id));
+        }
+        assert_eq!(approval_emails(&ctx).len(), 20);
+        // Five of them are removed, ask again and are declined.
+        for (user_id, id) in &people[..5] {
+            manage(&request, &w.bob, "remove", *id).await;
+            let again = pending_in(&ctx, w.beta, *user_id, &format!("back{user_id}")).await;
+            assert_eq!(again, *id);
+            manage(&request, &w.bob, "reject", *id).await;
+        }
+        let newcomer = create_user(&ctx, "late@example.com", "late").await;
+        let id = pending_in(&ctx, w.beta, newcomer.id, "late").await;
+        manage(&request, &w.bob, "approve", id).await;
+        assert_eq!(approval_emails(&ctx).len(), 20, "still at the org's limit");
+        assert_eq!(
+            row(&ctx, w.beta, newcomer.id).await.unwrap().status,
+            "active"
+        );
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn a_join_request_emails_and_notifies_nobody() {

@@ -7,14 +7,10 @@ use serde_json::json;
 use super::deliver;
 use crate::{
     data::settings::Settings,
-    models::{memberships, organisations, users},
+    models::{auth_attempts, organisations, users},
 };
 
 static approved: Dir<'_> = include_dir!("src/mailers/membership/approved");
-
-/// At most this many approval emails per organisation in any 24 hours, so a
-/// busy or misused organisation can't send a stream of mail through the app.
-pub const APPROVAL_EMAILS_PER_DAY: u64 = 20;
 
 pub struct MembershipMailer {}
 
@@ -23,7 +19,9 @@ impl MembershipMailer {
     /// organisation name, as names are free text anyone can type; the body
     /// names it, escaped. It never names the approver. Until links can name
     /// an organisation it links to Home and says to choose it from the menu.
-    /// Over [`APPROVAL_EMAILS_PER_DAY`] nothing is sent.
+    /// Each one is recorded first and counted
+    /// (`auth_attempts::Model::begin_approval_email`): over 20 for the
+    /// organisation or 3 for the person in 24 hours, nothing is sent.
     ///
     /// # Errors
     /// When the count fails or the email cannot be rendered or handed off.
@@ -33,9 +31,8 @@ impl MembershipMailer {
         org: &organisations::Model,
         username: &str,
     ) -> Result<()> {
-        let since = chrono::Utc::now() - chrono::Duration::hours(24);
-        if memberships::Model::approved_since(&ctx.db, org.id, since).await?
-            > APPROVAL_EMAILS_PER_DAY
+        if !auth_attempts::Model::begin_approval_email(&ctx.db, &user.email, user.id, org.id)
+            .await?
         {
             tracing::info!(org_id = org.id, "approval email limit reached");
             return Ok(());

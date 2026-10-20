@@ -483,27 +483,6 @@ impl Model {
         }
     }
 
-    /// How many people were let into the organisation since `since`, for
-    /// the approval email limit. Declines record their date in the same
-    /// column, and an owner's own row has a date but no approver, so both
-    /// are left out.
-    ///
-    /// # Errors
-    /// On database errors.
-    pub async fn approved_since<C: ConnectionTrait>(
-        db: &C,
-        org_id: i64,
-        since: chrono::DateTime<chrono::Utc>,
-    ) -> ModelResult<u64> {
-        Ok(Entity::find()
-            .in_tenant(org_id)
-            .filter(Column::ApprovedAt.gt(since))
-            .filter(Column::ApprovedById.is_not_null())
-            .filter(Column::Status.ne(status::REJECTED))
-            .count(db)
-            .await?)
-    }
-
     /// Every membership in the organisation with its user, oldest first.
     ///
     /// # Errors

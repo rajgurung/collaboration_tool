@@ -179,7 +179,7 @@ sequenceDiagram
     M->>DB: end a Beta logins unlock, revoke Beta tokens and codes, clear Beta logins shared by name
     M->>DB: add to #general and back to their Beta DMs
     C-->>A: toast "alice approved."
-    C->>C: email the person (at most 20 a day per org, failures only logged)
+    C->>C: email the person (at most 20 a day per org and 3 per person, failures only logged)
 ```
 
 Rules:
