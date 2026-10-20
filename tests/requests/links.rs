@@ -501,13 +501,17 @@ const BARE_TEMPLATES: [&str; 4] = [
 ];
 
 /// Rust lines that may hold a bare tenant path, each for a reason.
-const BARE_RUST: [(&str, &str); 15] = [
+const BARE_RUST: [(&str, &str); 20] = [
     // PR 2: mailers keep their links until email links name their org.
     ("src/mailers/", ""),
     // Org-relative paths stored or built by models, prefixed when shown.
     ("src/models/guide.rs", ""),
     ("src/models/saved_views.rs", ""),
-    ("src/controllers/notifications.rs", "link"),
+    ("src/controllers/notifications.rs", "let link = format!(\"/"),
+    (
+        "src/controllers/notifications.rs",
+        "link: format!(\"/roadmap?lane=",
+    ),
     (
         "src/controllers/chat.rs",
         "format!(\"/chat/{conversation_id}/threads/{parent_id}\")",
@@ -520,7 +524,29 @@ const BARE_RUST: [(&str, &str); 15] = [
     ("src/controllers/auth.rs", "\"/more?signed_out=1\""),
     ("src/controllers/auth.rs", "\"/dashboard\","),
     // Refusals and fallbacks with no org to name.
-    ("src/extractors/current_member.rs", "\"/dashboard"),
+    // Bare Home when the claim check runs without an address (`?from=`
+    // for the bare refusal), for not-a-member over HTMX, and when no org is
+    // left. Then the bare address picks the org.
+    (
+        "src/extractors/current_member.rs",
+        "\"/dashboard\".to_string()",
+    ),
+    (
+        "src/extractors/current_member.rs",
+        "map_or(\"/dashboard\", |pq|",
+    ),
+    (
+        "src/extractors/current_member.rs",
+        "format!(\"/dashboard?from={id}\")",
+    ),
+    (
+        "src/extractors/current_member.rs",
+        "\"/dashboard?from=\".to_string()",
+    ),
+    (
+        "src/extractors/current_member.rs",
+        "(\"HX-Redirect\", \"/dashboard\")",
+    ),
     ("src/initializers/view_engine.rs", "\"/dashboard\""),
     ("src/views/links.rs", ""),
     // `enter_org` builds the address with `org_path` itself.
@@ -532,7 +558,15 @@ fn no_hand_built_tenant_paths() {
     let mut bad = Vec::new();
 
     // A path in quotes, or right after a `{% ... %}` tag inside an attribute.
-    let literal = regex::Regex::new(&format!(r#"(?:["']|%\}})/{SECTION}\b"#)).unwrap();
+    let literal = regex::Regex::new(&format!(r#"(?:["']|%\}}|\}}\}})/{SECTION}\b"#)).unwrap();
+    for caught in [
+        r#"href="/tasks""#,
+        "{% endif %}/tasks",
+        "{{ base }}/tasks/1",
+        "'/chat'",
+    ] {
+        assert!(literal.is_match(caught), "the grep misses {caught}");
+    }
     for (path, text) in sources("assets/views", "html") {
         if BARE_TEMPLATES.iter().any(|b| path.starts_with(b)) {
             continue;
