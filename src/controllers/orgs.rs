@@ -12,6 +12,7 @@ use crate::{
             append_cookie, cleared_acting_org_cookie, current_org_cookie, redirect_response,
         },
     },
+    initializers::org_path::PathOrg,
     models::{
         memberships,
         organisations::{self, NewOrgParams, AT_CAP, MAX_ORGS_CREATED},
@@ -68,6 +69,8 @@ fn from_org(headers: &HeaderMap) -> Option<i64> {
 /// switch someone.
 #[debug_handler]
 async fn switch(
+    // First, so `/o/{slug}/orgs/{id}/switch` is a 404 before anything else.
+    path_org: Option<Extension<PathOrg>>,
     CurrentUser(user): CurrentUser,
     // After `CurrentUser`, which sets it.
     session_id: Option<Extension<SessionId>>,
@@ -75,6 +78,9 @@ async fn switch(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response> {
+    if path_org.is_some() {
+        return Err(Error::NotFound);
+    }
     // A 404 for every refusal, so it does not reveal whether the org exists.
     if memberships::Model::active_in(&ctx.db, id, user.id)
         .await?

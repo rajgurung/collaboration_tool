@@ -15,6 +15,25 @@ async fn index(
     format::render().view(&v, "home/index.html", data!({}))
 }
 
+/// App addresses name organisations, so crawlers stay out. `/join/` is left
+/// open on purpose: a crawler has to fetch a join page to see its `noindex`.
+const ROBOTS: &str =
+    "User-agent: *\nDisallow: /o/\nDisallow: /oauth/\nDisallow: /admin\nDisallow: /mcp\n";
+
+#[debug_handler]
+async fn robots() -> Response {
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; charset=utf-8",
+        )],
+        ROBOTS,
+    )
+        .into_response()
+}
+
 pub fn routes() -> Routes {
-    Routes::new().add("/", get(index))
+    Routes::new()
+        .add("/", get(index))
+        .add("/robots.txt", get(robots))
 }
