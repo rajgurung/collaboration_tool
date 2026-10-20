@@ -1,6 +1,6 @@
 # Organisation in the address 1: routes, links and bare addresses
 
-Status: Reviewed; waiting on Raj (staff: approve with changes, applied; security: approve with changes, applied) · PR 1 of 3 · Owner: Raj · 20 October 2026
+Status: Approved by Raj 20 October 2026 (recommendations, except one PR instead of 1a/1b/1c) (staff: approve with changes, applied; security: approve with changes, applied) · PR 1 of 3 · Owner: Raj · 20 October 2026
 
 Brief: `docs/briefs/org-in-the-address.md`, approved by Raj on 20 October with
 all 9 questions as recommended. Mockup: `docs/designs/org-in-the-address.html`,
