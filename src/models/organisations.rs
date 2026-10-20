@@ -334,7 +334,11 @@ fn slugify(name: &str) -> String {
 /// The base slug, then `base-2`, `base-3`... The base is cut so the result
 /// stays within [`SLUG_MAX`], whatever the number.
 fn numbered(base: &str, n: u32) -> String {
-    let suffix = if n == 1 { String::new() } else { format!("-{n}") };
+    let suffix = if n == 1 {
+        String::new()
+    } else {
+        format!("-{n}")
+    };
     let room = SLUG_MAX.saturating_sub(suffix.len());
     let cut: String = base.chars().take(room).collect();
     format!("{}{suffix}", cut.trim_end_matches('-'))

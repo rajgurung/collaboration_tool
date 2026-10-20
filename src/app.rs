@@ -178,6 +178,9 @@ impl Hooks for App {
             // current-org buffers its body.
             Box::new(initializers::origin_check::OriginCheckInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
+            // Last, so it is outermost: it rewrites `/o/{slug}/...` before
+            // routing, and routing happens inside it.
+            Box::new(initializers::org_path::OrgPathInitializer),
         ])
     }
 

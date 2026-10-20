@@ -10,10 +10,26 @@ pub const SLUG_MAX: usize = 60;
 #[must_use]
 pub fn is_slug(s: &str) -> bool {
     (1..=SLUG_MAX).contains(&s.len())
-        && s
-            .bytes()
+        && s.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
+
+/// The first path segment of every route that works inside an organisation.
+/// Only these are reachable under `/o/{slug}/`.
+pub const TENANT_SECTIONS: [&str; 12] = [
+    "dashboard",
+    "tasks",
+    "chat",
+    "documents",
+    "members",
+    "more",
+    "notifications",
+    "roadmap",
+    "meetings",
+    "settings",
+    "guide",
+    "orgs",
+];
 
 /// `/o/{slug}{path}`, for a path inside the organisation such as `/tasks/58`.
 /// Fails closed: a bad slug, or a path that doesn't start with one `/` or
@@ -50,8 +66,16 @@ mod tests {
         assert!(!is_slug(&"a".repeat(SLUG_MAX + 1)));
         assert!(is_slug("acme-studio-2"));
         for bad in [
-            "Acme", "acme studio", "acme_studio", "acme.studio", "acme/x", "acme%2F", "café", "a\n",
-            "a?b", "a#b",
+            "Acme",
+            "acme studio",
+            "acme_studio",
+            "acme.studio",
+            "acme/x",
+            "acme%2F",
+            "café",
+            "a\n",
+            "a?b",
+            "a#b",
         ] {
             assert!(!is_slug(bad), "{bad:?}");
         }
