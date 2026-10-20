@@ -124,6 +124,13 @@ Limits:
 - The person revokes the connection.
 - The person is removed from the organisation: all their tokens there are
   revoked (`src/models/access_tokens.rs:316`).
-- The account locks after 5 wrong app passwords: tokens are revoked.
+- The account locks after 5 wrong app passwords: tokens are revoked in every
+  organisation.
+- The person resets their password: tokens are revoked in every
+  organisation, and the email says how to connect Claude again.
+- Minting a token (`create_personal`, `exchange_code`, `refresh`) reads the
+  membership `FOR SHARE`, so one racing a removal waits and is refused. A
+  refresh also reads the user row `FOR SHARE`, so it waits for a reset or a
+  lock.
 - Every call checks membership and the lock, so a token stops working at
   once even before revocation.

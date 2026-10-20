@@ -80,7 +80,7 @@ sequenceDiagram
     O->>DB: copy the time zone, mark the welcome pop-up seen
     O->>DB: COMMIT
     C-->>P: current_org = new org, acting_org cleared, redirect to /dashboard?created=1
-    Note over C: ends any logins unlock, closes chat sockets and streams
+    Note over C: ends this browser's logins unlock, closes its chat sockets and streams
 ```
 
 Rules:
@@ -190,6 +190,12 @@ What each state sees on any app page (`src/extractors/current_member.rs:277`):
 | `removed` | `tenancy/removed.html` | 403 |
 | no membership | `tenancy/no_org.html` (super admins go to `/admin`) | 403 |
 
+That is for page loads and plain forms. An HTMX or `fetch` call from a tab
+(it sends `HX-Request` or `X-Org-Id`) gets a 409 with `HX-Redirect:
+/dashboard` instead, plus `X-Org-Gone: 1` when the org it claims is one this
+user was removed from. HTMX would not show a 403, so without this a tab whose
+last org was removed would just stop responding.
+
 There is no route that moves `rejected` or `removed` back to `pending` or
 `active`.
 
@@ -222,8 +228,12 @@ organisation").
   does not reveal whether the org exists.
 - It sets `current_org` (`HttpOnly`, `SameSite=Lax`, 7 days like the session)
   and clears `acting_org`.
-- It ends any logins unlock and closes the user's chat sockets and
-  notification streams on every device. They reconnect in the new org.
+- It ends this sign-in's logins unlock (`end_unlock_for_session`) and
+  closes this browser's chat sockets and notification streams
+  (`close_in_browser`, matched by sign-in id). They reconnect in the new
+  org. The person's other browsers keep their own `current_org`, so their
+  sockets and unlocks are left alone. A cookie from before sign-in ids has
+  none, so it ends every unlock and closes every socket, as before.
 - It lands on `/dashboard?switched=1`, a constant: it ignores any `next`.
   Home then shows "You're now in Northwind Bakery", named from the org the
   request resolved, never from the URL.
@@ -276,12 +286,22 @@ left on the old org must not write into the new one.
 - Home then shows a notice: "This tab was showing Acme Studio. You're now in
   Northwind Bakery." It names the old org, with "Back to Acme Studio", only
   if you are an active member there. Nothing was saved.
+- When the claimed org is one this user was removed from, the refusal also
+  carries `X-Org-Gone: 1`, and Home says "You no longer have access to Beta.
+  You're now in Acme." and "An owner or admin removed you. Nothing from this
+  tab was saved.", with no Back. Both look up the signed-in user's own
+  membership (`in_org_for_user`), never one named by the request, so a
+  forged `X-Org-Id` or `?from=` can only name an org the person was removed
+  from themselves. Pending, declined, someone else's or a deleted org gets
+  the nameless notice.
 - A tab holding typed text or an upload does not move. It shows one banner
   in place, keeps the text, and offers "Back to Acme Studio" (which switches
-  the browser back without leaving the page) and "Go to Home".
+  the browser back without leaving the page) and "Go to Home". After a
+  removal the banner says "You no longer have access to Beta." and offers
+  only "Go to Home"; it replaces a switch banner already up.
 - `app.ts` also asks `GET /orgs/current` when the chat socket closes, when
-  the notification stream comes back, on a back or forward load and before
-  each upload, so a stale tab moves within seconds.
+  the notification stream comes back or ends for good, on a back or forward
+  load and before each upload, so a stale tab moves within seconds.
 - The check runs when a request starts. An upload already in flight when a
   switch happens finishes into the org the page showed. The person is still
   a member there, so it is not a cross-org write.
@@ -293,22 +313,65 @@ that skips the check.
 
 ### Removing a member
 
-`POST /members/<id>/remove` (`src/models/memberships.rs:268`). In one
-transaction that locks the organisation's owners:
+`POST /members/<id>/remove` (`memberships::Model::remove`). Removal ends
+access to this organisation only. The person stays signed in, and their
+other organisations are untouched. In one transaction that locks the
+organisation's owners:
 
 - Only owners and admins can remove. Nobody removes themselves.
 - Only an owner can remove an owner, and the last owner cannot be removed.
 - Only `active` members can be removed.
 - The membership becomes `removed`, with `removed_at` and `removed_by_id`.
-- Their `session_version` goes up, so every session ends.
-- Their Claude tokens in this organisation are revoked.
+- An unlock of logins they hold for this organisation ends
+  (`end_unlock_in`). An unlock for another org keeps running.
+- Their Claude tokens and unused OAuth codes in this organisation are
+  revoked.
 - They are taken out of every conversation in the organisation.
-- Unsent mention emails to them are cancelled.
-- A `member_removed` row is written to the login activity log.
+- Unsent mention emails from this organisation are cancelled.
+- A `member_removed` row is written to this organisation's login activity
+  log.
+- Their `session_version` is not touched.
 
-After the commit, their open chat sockets and notification streams close. The
-remover is then shown "Change these at the source": the logins the removed
-person saw, copied, changed or could see (`src/controllers/members.rs:299`).
+After the commit, only their chat sockets and notification streams for this
+organisation close, on every device (`close_in_org`). A log line "removed
+member" has numbers only. No email or notification is sent. The remover is
+then shown "Change these at the source": the logins the removed person saw,
+copied, changed or could see (`src/controllers/members.rs:299`).
+
+What stops this organisation being served is the per-request `active_in`
+check in `CurrentMember` and `bearer.rs`, plus `still_allowed` for chat
+sockets and the stream's own re-check. Minting a token or unlocking logins
+reads the membership `FOR SHARE`, so one that races the removal waits for it
+and is refused.
+
+What the person sees:
+
+- Still in another org: their tabs for this one move to Home there within
+  seconds (the socket or stream closes, `app.ts` probes `/orgs/current`, the
+  refusal carries `X-Org-Gone`), with the removal notice. A tab holding typed
+  text shows the removal banner instead.
+- This was their only active org: the next request shows "You were removed
+  from Beta", still signed in. Open tabs get there through the 409 above.
+- A fresh page load with the old `current_org` cookie lands in their other
+  org with no notice, and the cookie is cleared.
+
+```mermaid
+sequenceDiagram
+    actor B as Bob (owner of Beta)
+    participant M as memberships model
+    participant DB as Postgres
+    participant H as ChatHub and NotifyHub
+    actor A as Alice (in Acme and Beta)
+    B->>M: POST /members/<alice in Beta>/remove
+    M->>DB: BEGIN, lock Beta's owners and Alice's Beta row
+    M->>DB: status removed, end a Beta unlock, revoke Beta tokens and codes
+    M->>DB: leave Beta conversations, stop Beta emails, log member_removed
+    M->>DB: COMMIT
+    M->>H: Close(Org { Beta, Alice })
+    H-->>A: Beta sockets and streams close, on every device
+    Note over A: Acme sockets, streams, sessions, tokens and unlocks stay
+    A->>M: next Beta request: CurrentMember falls back to Acme, refuses the Beta claim
+```
 
 A super admin acting inside another organisation cannot remove anyone
 (`require_own_membership`).
@@ -390,6 +453,7 @@ sequenceDiagram
     A->>U: reset_password_everywhere
     U->>U: new hash, clear token, clear locked_at
     U->>U: session_version + 1
+    U->>U: revoke Claude tokens and codes in every org
     A->>M: "password changed" email
     A->>M: owners told, if this person can see any login password
     A-->>P: redirect to /login?reset=1
@@ -404,6 +468,10 @@ Rules:
 - A reset is the only way out of a lock (`src/models/users.rs:684`).
 - The reset ends every session and closes live connections. It also clears
   failed sign-in and app-password counts for that email.
+- It revokes the person's Claude tokens and unused codes in every
+  organisation, in the same transaction. When it revoked at least one, the
+  email adds "Claude was disconnected too. If you use it, connect it again
+  from More, then Connect Claude."
 - Owners are emailed when the person can see at least one login's password,
   because someone who took over their email could now see those passwords
   (`src/controllers/auth.rs:250`).
@@ -429,10 +497,11 @@ Files: `src/controllers/auth.rs:181` (forgot) and `:222` (reset),
 flowchart LR
     A[session_version + 1] --> B[every old JWT fails CurrentUser]
     A --> C[logins unlock cleared]
-    A --> D[ChatHub SignedOut: sockets close]
-    A --> E[NotifyHub sign_out: SSE streams end]
+    A --> D[ChatHub Close Account: sockets close]
+    A --> E[NotifyHub Close Account: SSE streams end]
 ```
 
-The same bump happens on a password reset, on removal from an organisation
-and when an account locks (`src/models/users.rs`, `increment_session_version`
-and `close_live_connections`).
+The same bump happens on a password reset and when an account locks
+(`src/models/users.rs`, `increment_session_version` and
+`close_live_connections`). Removal from an organisation does not bump it: it
+closes only that org's sockets and streams (see "Removing a member").

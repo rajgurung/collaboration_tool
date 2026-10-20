@@ -33,8 +33,17 @@ Rules:
 - The SSE stream sends only the event name `notify` with data `1`. The page
   then fetches the count. Keep-alive every 25 seconds
   (`src/controllers/notifications.rs:546`).
-- The stream ends when the person is signed out everywhere, or when it falls
-  behind. The browser reconnects through `CurrentMember` again.
+- The stream follows one organisation, the one `CurrentMember` resolved. A
+  notice in another of the person's orgs doesn't ping it; the badge only
+  counts this org anyway, and polls every 60 seconds as a fallback.
+- After subscribing, the stream checks the session version and the active
+  membership again (the membership part is skipped for an acting super
+  admin), so a close published meanwhile is never missed.
+- The stream ends when the person is signed out everywhere, a password reset
+  or a lock (every org), when they are removed from its org, when this
+  browser switches org, or when it falls behind. The browser reconnects
+  through `CurrentMember` again. A refused reconnect ends it for good, and
+  `app.ts` then asks `/orgs/current` once, so the tab moves.
 - `NotifyHub` is in memory, like `ChatHub`. The app must run as one instance.
 
 ## The bell
