@@ -158,8 +158,8 @@ sequenceDiagram
     M->>DB: lock the (Beta, me) row, then my user row
     M->>DB: refuse a locked account, a 6th waiting request, a username taken in Beta
     M->>DB: insert pending member (welcomed), or set a removed or declined row back to pending
-    J-->>P: 303 /dashboard?requested=Beta (clears acting_org)
-    P->>J: GET /dashboard?requested=Beta
+    J-->>P: 303 /dashboard?requested={Beta id} (clears acting_org)
+    P->>J: GET /dashboard?requested={Beta id}
     J-->>P: Home in Acme, "You've asked to join Beta."
 ```
 
