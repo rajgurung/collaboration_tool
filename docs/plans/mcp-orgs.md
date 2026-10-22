@@ -794,6 +794,10 @@ change:
   today's table sizes (give the counts). `lock_timeout` 5s. It rolls back
   with `cargo loco db down`; a code-only revert is also safe.
 - Project delete is a hard delete. Nothing restores it.
+- After a code-only revert (no `db down`), run
+  `DELETE FROM notifications WHERE kind = 'connector';` so the old code
+  doesn't show the bell notices as "Someone ...". The `down` migration does
+  this itself.
 
 ## Out of scope (later)
 
