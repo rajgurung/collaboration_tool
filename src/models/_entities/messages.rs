@@ -16,6 +16,8 @@ pub struct Model {
     pub conversation_id: i64,
     pub user_id: i64,
     pub parent_id: Option<i64>,
+    pub document_id: Option<i64>,
+    pub has_photo: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -28,6 +30,14 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Conversations,
+    #[sea_orm(
+        belongs_to = "super::documents::Entity",
+        from = "Column::DocumentId",
+        to = "super::documents::Column::Id",
+        on_update = "Cascade",
+        on_delete = "SetNull"
+    )]
+    Documents,
     #[sea_orm(
         belongs_to = "Entity",
         from = "Column::ParentId",
@@ -59,6 +69,12 @@ pub enum Relation {
 impl Related<super::conversations::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Conversations.def()
+    }
+}
+
+impl Related<super::documents::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Documents.def()
     }
 }
 

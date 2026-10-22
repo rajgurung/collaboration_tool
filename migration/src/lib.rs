@@ -42,6 +42,7 @@ mod m20261013_145508_add_parent_id_to_messages;
 mod m20261015_142719_note_reactions;
 mod m20261019_124040_memberships_one_per_org;
 mod m20261019_124111_add_secrets_unlocked_org_id_to_users;
+mod m20261022_120000_add_photo_to_messages;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -88,6 +89,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_142719_note_reactions::Migration),
             Box::new(m20261019_124040_memberships_one_per_org::Migration),
             Box::new(m20261019_124111_add_secrets_unlocked_org_id_to_users::Migration),
+            Box::new(m20261022_120000_add_photo_to_messages::Migration),
             // inject-above (do not remove this comment)
         ]
     }
