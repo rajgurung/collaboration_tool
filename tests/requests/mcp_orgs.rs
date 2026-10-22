@@ -1030,3 +1030,57 @@ want more, then try again in a minute."
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn made_with_claude_shows_and_the_grant_never_does() {
+    request::<App, _, _>(|request, ctx| async move {
+        let raj = setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let grant = grant_of(&ctx, &token).await.to_string();
+        let project = claude_project(&request, &token, "Spring range").await;
+        let task = claude_task(&request, &token, "Order incense").await;
+        let web_project = projects::Model::create(
+            &ctx.db,
+            org_id(&ctx, HIMALAYAN).await,
+            &projects::ProjectParams {
+                name: "Web project".to_string(),
+                lane: "now".to_string(),
+                status: "Active".to_string(),
+                accent: "#ffb454".to_string(),
+                owner_id: String::new(),
+                summary: String::new(),
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .id;
+        let web = web_task(&ctx, "Web task", Some(web_project)).await;
+        let get = |path: String| {
+            let request = &request;
+            let raj = &raj;
+            async move {
+                request
+                    .get(&raj.at(&path))
+                    .as_member(raj)
+                    .add_header("HX-Request", "true")
+                    .await
+                    .text()
+            }
+        };
+        for (path, made) in [
+            (format!("/tasks/{task}"), true),
+            (format!("/roadmap/projects/{project}/edit"), true),
+            (format!("/tasks/{web}"), false),
+            (format!("/roadmap/projects/{web_project}/edit"), false),
+            ("/tasks".to_string(), false),
+            ("/roadmap".to_string(), false),
+        ] {
+            let html = get(path.clone()).await;
+            assert_eq!(html.contains("Made with Claude"), made, "{path}");
+            assert!(!html.contains(&grant), "{path}");
+        }
+    })
+    .await;
+}

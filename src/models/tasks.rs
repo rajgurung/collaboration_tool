@@ -220,6 +220,22 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
+    /// How many tasks a project has.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn count_in_project<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        project_id: i64,
+    ) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::ProjectId.eq(project_id))
+            .count(db)
+            .await?)
+    }
+
     /// How many tasks this Claude connection made after `since`, for the
     /// brake on bulk creates.
     ///

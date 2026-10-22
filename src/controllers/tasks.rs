@@ -928,6 +928,8 @@ async fn sheet_data(
                 "project": project.as_ref().map(|p| p.name.clone()).unwrap_or_default(),
                 "accent": project.as_ref().map_or_else(|| "#9a968d".to_string(), |p| p.accent.clone()),
                 "people": people,
+                // A bool only: the grant itself never reaches a page.
+                "made_with_claude": task.claude_grant_id.is_some(),
             },
             "statuses": statuses,
             "notes": notes,

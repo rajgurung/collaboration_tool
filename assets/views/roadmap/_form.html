@@ -6,6 +6,7 @@
   <div>
     <h2 class="m-0 text-xl font-semibold">{% if project_id %}Edit project{% else %}New project{% endif %}</h2>
     <p class="meta mt-1 mb-0 text-sm">A workstream on the roadmap, with one owner.</p>
+    {% if project and project.made_with_claude %}<p class="made-with-claude meta mt-1 mb-0 text-sm">{{<icon name="sparkles" class="h-3.5 w-3.5"/>}}Made with Claude</p>{% endif %}
   </div>
   {{<text_field name="name" label="Name" value={form.name} error={errors.name | default(value="")}/>}}
   <div class="grid gap-4 sm:grid-cols-3">
@@ -44,6 +45,13 @@
     {% if errors.summary %}<span class="field-error">{{ errors.summary }}</span>{% endif %}
   </label>
   <div class="flex justify-end gap-2">
+    {% if project and me.can_manage %}
+    {% set n = project.task_count %}
+    {% if n == 0 %}{% set confirm = "Delete “" ~ project.name ~ "”? This can't be undone." %}
+    {% elif n == 1 %}{% set confirm = "Delete “" ~ project.name ~ "” and its 1 task? Its notes go with it. This can't be undone." %}
+    {% else %}{% set confirm = "Delete “" ~ project.name ~ "” and its " ~ n ~ " tasks? Their notes go with them. This can't be undone." %}{% endif %}
+    <button type="button" class="btn-text-danger mr-auto" hx-post="{{ org_url(path="/roadmap/projects/" ~ project_id ~ "/delete") }}" hx-confirm="{{ confirm }}">Delete project</button>
+    {% endif %}
     <button type="button" class="btn btn-secondary" data-dialog-close>Cancel</button>
     <button type="submit" class="btn btn-primary">{% if project_id %}Save project{% else %}Add project{% endif %}</button>
   </div>
