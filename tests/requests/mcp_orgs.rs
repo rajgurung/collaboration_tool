@@ -543,6 +543,15 @@ async fn the_update_notice_shows_until_a_write_names_the_org() {
         )
         .await;
         assert!(error);
+        // Nor does one that names it but is invalid.
+        let (error, _) = tool(
+            &request,
+            &old,
+            "create_task",
+            json!({ "organisation": HIMALAYAN, "title": "x".repeat(141) }),
+        )
+        .await;
+        assert!(error);
         let (_, list) = tool(&request, &old, "list_projects", json!({})).await;
         assert_eq!(list["notice"], NOTICE);
 

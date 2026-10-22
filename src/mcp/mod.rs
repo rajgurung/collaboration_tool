@@ -258,12 +258,6 @@ fn finish(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> 
     result(parts, outcome, true)
 }
 
-/// The same for a write tool, without the notice: a write that succeeded
-/// named its organisation, so this connection already has the new tools.
-fn finish_write(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> {
-    result(parts, outcome, false)
-}
-
 fn result(parts: &Parts, outcome: Outcome, notice: bool) -> Result<CallToolResult, ErrorData> {
     let member = parts.extensions.get::<CurrentMember>();
     match outcome {
@@ -533,7 +527,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateProject>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish_write(&parts, self.create_project_for(&parts, input).await)
+        self.finish_write(&parts, self.create_project_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -580,7 +575,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish_write(&parts, self.create_task_for(&parts, input).await)
+        self.finish_write(&parts, self.create_task_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -592,7 +588,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<UpdateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish_write(&parts, self.update_task_for(&parts, input).await)
+        self.finish_write(&parts, self.update_task_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -604,7 +601,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<AddTaskNote>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish_write(&parts, self.add_task_note_for(&parts, input).await)
+        self.finish_write(&parts, self.add_task_note_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -616,7 +614,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<DeleteTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish_write(&parts, self.delete_task_for(&parts, input).await)
+        self.finish_write(&parts, self.delete_task_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -628,25 +627,44 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<DeleteProject>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish_write(&parts, self.delete_project_for(&parts, input).await)
+        self.finish_write(&parts, self.delete_project_for(&parts, input).await)
+            .await
     }
 }
 
 impl CollabServer {
     /// The member and connection for a write, once its `organisation` is the
-    /// connected one. The first write that names it ends the update notice.
-    async fn writer(
-        &self,
+    /// connected one.
+    fn writer(
         parts: &Parts,
         organisation: Option<&str>,
     ) -> Result<(CurrentMember, McpConnection), Fail> {
         let member = member(parts)?;
         let connection = connection(parts)?;
         check_org(&member, organisation)?;
-        if connection.update_notice {
-            claude_update_notices::Model::written(&self.ctx.db, connection.grant_id).await?;
-        }
         Ok((member, connection))
+    }
+
+    /// A write tool's result, without the update notice. A write that went
+    /// through named its organisation, so this connection has the new tools:
+    /// that ends the notice. A refused or invalid write leaves it.
+    async fn finish_write(
+        &self,
+        parts: &Parts,
+        outcome: Outcome,
+    ) -> Result<CallToolResult, ErrorData> {
+        if let (Ok(_), Some(connection)) = (&outcome, parts.extensions.get::<McpConnection>()) {
+            if connection.update_notice {
+                // The change is saved; failing to record it only keeps the
+                // notice a little longer.
+                if let Err(err) =
+                    claude_update_notices::Model::written(&self.ctx.db, connection.grant_id).await
+                {
+                    tracing::error!(error = %err, "could not end the update notice");
+                }
+            }
+        }
+        result(parts, outcome, false)
     }
 
     async fn list_projects_for(&self, parts: &Parts) -> Outcome {
@@ -673,7 +691,7 @@ impl CollabServer {
     }
 
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
-        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
         let db = &self.ctx.db;
         let recent =
             projects::Model::count_made_by(db, connection.grant_id, a_minute_ago()).await?;
@@ -787,7 +805,7 @@ impl CollabServer {
     }
 
     async fn create_task_for(&self, parts: &Parts, input: CreateTask) -> Outcome {
-        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
         let recent =
             tasks::Model::count_made_by(&self.ctx.db, connection.grant_id, a_minute_ago()).await?;
         if recent >= TASKS_PER_MINUTE {
@@ -817,7 +835,7 @@ impl CollabServer {
     }
 
     async fn update_task_for(&self, parts: &Parts, input: UpdateTask) -> Outcome {
-        let (member, _) = self.writer(parts, input.organisation.as_deref()).await?;
+        let (member, _) = Self::writer(parts, input.organisation.as_deref())?;
         let db = &self.ctx.db;
         let task = tasks::Model::find_in_org(db, member.org.id, input.task_id).await?;
         let current = task_assignees::Model::for_task(db, member.org.id, task.id).await?;
@@ -849,7 +867,7 @@ impl CollabServer {
     }
 
     async fn add_task_note_for(&self, parts: &Parts, input: AddTaskNote) -> Outcome {
-        let (member, _) = self.writer(parts, input.organisation.as_deref()).await?;
+        let (member, _) = Self::writer(parts, input.organisation.as_deref())?;
         let task = tasks::Model::find_in_org(&self.ctx.db, member.org.id, input.task_id).await?;
         let note = task_notes::Model::create(
             &self.ctx.db,
@@ -869,7 +887,7 @@ impl CollabServer {
     }
 
     async fn delete_task_for(&self, parts: &Parts, input: DeleteTask) -> Outcome {
-        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
         let removed = tasks::Model::remove_made_by(
             &self.ctx.db,
             member.org.id,
@@ -892,7 +910,7 @@ impl CollabServer {
     }
 
     async fn delete_project_for(&self, parts: &Parts, input: DeleteProject) -> Outcome {
-        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
         let removed = projects::Model::remove_made_by(
             &self.ctx.db,
             member.org.id,
