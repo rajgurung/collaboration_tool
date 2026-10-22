@@ -13,6 +13,7 @@ impl MigrationTrait for Migration {
         m.get_connection()
             .execute_unprepared(
                 r#"
+SET LOCAL lock_timeout = '5s';
 ALTER TABLE messages
   ADD COLUMN document_id bigint NULL
   REFERENCES documents (id) ON DELETE SET NULL ON UPDATE CASCADE,
