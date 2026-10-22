@@ -287,6 +287,10 @@ async fn project_with_work(
     assignee: i64,
 ) -> (i64, Vec<i64>) {
     let project = project_in(ctx, "acme", "Spring range").await;
+    // The assignee owns it, so a new task also sends a `project` notice.
+    let mut owned: projects::ActiveModel = project.clone().into();
+    owned.owner_id = ActiveValue::Set(Some(assignee));
+    owned.update(&ctx.db).await.unwrap();
     for (title, who) in [
         ("Order incense", assignee.to_string()),
         ("Shoot photos", String::new()),
@@ -382,7 +386,19 @@ async fn owners_and_admins_delete_a_project_with_its_tasks() {
 
         // The edit form offers it, with the count in the confirm.
         let (project, task_ids) = project_with_work(&request, &ctx, &owner, carol).await;
-        assert_eq!(left_of(&ctx, project, &task_ids).await, [1, 2, 1, 1, 1]);
+        assert_eq!(left_of(&ctx, project, &task_ids).await, [1, 2, 1, 1, 2]);
+        let kinds = |ctx: loco_rs::app::AppContext| async move {
+            notifications::Entity::find()
+                .filter(notifications::Column::UserId.eq(carol))
+                .all(&ctx.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|n| n.kind)
+                .collect::<Vec<_>>()
+        };
+        let before = kinds(ctx.clone()).await;
+        assert!(before.contains(&"project".to_string()), "{before:?}");
         let form = request
             .get(&owner.at(&format!("/roadmap/projects/{project}/edit")))
             .as_member(&owner)
@@ -405,6 +421,8 @@ This can&#39;t be undone.\""
         assert!(trigger.contains("Project deleted") && trigger.contains("roadmap-changed"));
         assert!(trigger.contains("close-dialogs"));
         assert_eq!(left_of(&ctx, project, &task_ids).await, [0, 0, 0, 0, 0]);
+        let after = kinds(ctx.clone()).await;
+        assert!(!after.contains(&"project".to_string()), "{after:?}");
         assert_eq!(
             note_reactions::Entity::find().count(&ctx.db).await.unwrap(),
             0
@@ -451,7 +469,7 @@ async fn members_cannot_delete_projects() {
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 403);
-        assert_eq!(left_of(&ctx, project, &task_ids).await, [1, 2, 1, 1, 1]);
+        assert_eq!(left_of(&ctx, project, &task_ids).await, [1, 2, 1, 1, 2]);
     })
     .await;
 }
