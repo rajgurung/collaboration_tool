@@ -1084,3 +1084,65 @@ async fn made_with_claude_shows_and_the_grant_never_does() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn the_settings_page_names_the_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let raj = setup(&request, &ctx).await;
+        token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        token_in(&ctx, "raj@example.com", "softly").await;
+        let page = request
+            .get(&raj.at("/settings/claude"))
+            .as_member(&raj)
+            .await
+            .text();
+        assert!(page.contains("Connected to Himalayan Ritual · 1"), "{page}");
+        assert!(page.contains("Personal token · Himalayan Ritual · Connected"));
+        assert!(
+            !page.contains("Laptop softly"),
+            "only this org's connections"
+        );
+        assert!(page.contains(
+            "Each connection reaches one organisation. To use Claude in another organisation, \
+connect again and pick it on the Allow page."
+        ));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_bell_notice_reads_as_from_the_app() {
+    request::<App, _, _>(|request, ctx| async move {
+        let raj = setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        made_before_release(&ctx, &token, 0).await;
+        claude_update_notices::Model::announce(&ctx.db)
+            .await
+            .unwrap();
+        let page = request
+            .get(&raj.at("/notifications"))
+            .as_member(&raj)
+            .await
+            .text();
+        assert!(page.contains("Claude connector updated."), "{page}");
+        assert!(page.contains("If Claude says a write needs an organisation, restart it."));
+        assert!(!page.contains("Someone"));
+        let id = notifications::Entity::find()
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        let res = request
+            .post(&raj.at(&format!("/notifications/{id}/open")))
+            .as_member(&raj)
+            .await;
+        assert_eq!(
+            res.headers()["location"],
+            "/o/himalayan-ritual/settings/claude"
+        );
+    })
+    .await;
+}
