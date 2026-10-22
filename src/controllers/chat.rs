@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
-use axum::http::HeaderMap;
+use axum::{extract::DefaultBodyLimit, http::HeaderMap};
 use chrono::{DateTime, FixedOffset, Utc};
 use chrono_tz::Tz;
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    extractors::{current_member::CurrentMember, session::redirect_response},
+    controllers::documents::UPLOAD_BODY_LIMIT,
+    extractors::{
+        current_member::{forbidden, CurrentMember},
+        session::redirect_response,
+    },
     models::{
         conversation_members::{self, ReadMark},
         conversations::{self, kind, GroupParams},
@@ -226,6 +230,10 @@ pub struct MessageView {
     pub thread: Option<ThreadLine>,
     /// Offers "Reply in thread": top-level messages in the main feed only.
     pub can_reply: bool,
+    /// The photo's document, shown from `/documents/files/{id}`.
+    pub photo: Option<i64>,
+    /// The message had a photo that was since deleted from Documents.
+    pub photo_removed: bool,
 }
 
 impl MessageView {
@@ -269,6 +277,8 @@ impl MessageView {
             parent_id: message.parent_id,
             thread: None,
             can_reply: message.parent_id.is_none(),
+            photo: message.document_id,
+            photo_removed: message.has_photo && message.document_id.is_none(),
         }
     }
 
@@ -478,10 +488,11 @@ pub async fn list_items(
                             .unwrap_or_else(|| FORMER_MEMBER.to_string())
                     };
                     let body: String = m.body.chars().take(80).collect();
-                    if c.kind == kind::DM && m.user_id != me {
-                        body
-                    } else {
-                        format!("{who}: {body}")
+                    match (c.kind == kind::DM && m.user_id != me, m.photo_only()) {
+                        (true, true) => "Sent a photo".to_string(),
+                        (true, false) => body,
+                        (false, true) => format!("{who} sent a photo"),
+                        (false, false) => format!("{who}: {body}"),
                     }
                 }),
                 time: last
@@ -702,6 +713,60 @@ async fn send(
                 .empty()
         }
     }
+}
+
+/// Posts a photo, with an optional caption, to a channel. Groups and DMs are
+/// private, and Documents is open to every member, so photos stay out of
+/// them. The new message reaches the page over the socket, like any other.
+#[debug_handler]
+async fn send_photo(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    Path(id): Path<i64>,
+    mut multipart: Multipart,
+) -> Result<Response> {
+    member.require_own_membership()?;
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    if conversation.kind != kind::CHANNEL {
+        return Err(forbidden(messages::CHANNELS_ONLY));
+    }
+    let (name, bytes, caption) =
+        match super::documents::read_upload(&mut multipart, Some("body")).await {
+            Ok(read) => read,
+            Err(message) => return refuse(&message),
+        };
+    let result =
+        messages::Model::create_photo(&ctx, &conversation, member.user.id, &caption, &name, bytes)
+            .await;
+    let message = match result {
+        Ok(message) => message,
+        Err(ModelError::Message(message)) => return refuse(&message),
+        Err(err) => {
+            let errors = field_errors(&err).ok_or(err)?;
+            return refuse(&errors.values().next().cloned().unwrap_or_default());
+        }
+    };
+    super::chat_ws::publish(&ctx, member.org.id, &message).await?;
+    super::notifications::message_sent(&ctx, member.org.id, &conversation, &message).await?;
+    let names = names(&ctx, member.org.id).await?;
+    let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
+    view.read_receipts = true;
+    format::render().view(
+        &v,
+        "chat/_message.html",
+        member.fragment(data!({ "message": view })),
+    )
+}
+
+/// A refusal as an error toast, with the text in the body for `fetch` callers.
+fn refuse(message: &str) -> Result<Response> {
+    format::render()
+        .status(422)
+        .header("HX-Reswap", "none")
+        .header("HX-Trigger", toast("error", message))
+        .text(message)
 }
 
 /// The message list on its own, for reloading after a reconnect.
@@ -1110,6 +1175,10 @@ pub fn routes() -> Routes {
         .add("/chat/dms", post(start_dm))
         .add("/chat/{id}", get(show))
         .add("/chat/{id}/messages", post(send))
+        .add(
+            "/chat/{id}/photos",
+            post(send_photo).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
         .add("/chat/{id}/feed", get(feed))
         .add("/chat/{id}/messages/{message_id}/reactions", post(react))
         .add("/chat/{id}/messages/{message_id}/actions", get(actions))
