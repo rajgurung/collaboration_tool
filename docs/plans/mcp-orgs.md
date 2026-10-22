@@ -912,6 +912,9 @@ marker that dies with time, not data to protect.
   true, `written_at` is set. One cheap update, once per grant.
 - Tool errors don't carry it. The missing-organisation refusal (B) says
   the same thing, and other errors are about the input.
+- Write results don't carry it either: a write that succeeded named its
+  organisation, so the connection already has the new tools. (Found in the
+  Claude Code hand check: the notice on that write's own result confused it.)
 - After 14 days the code is dead; a later PR drops the table and the code.
 
 ### B. The missing-organisation refusal is written for Claude to relay

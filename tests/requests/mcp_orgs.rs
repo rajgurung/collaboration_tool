@@ -535,7 +535,18 @@ async fn the_update_notice_shows_until_a_write_names_the_org() {
         let (_, list) = tool(&request, &old, "list_projects", json!({})).await;
         assert_eq!(list["notice"], NOTICE);
 
-        claude_task(&request, &old, "New schema").await;
+        let (error, task) = tool(
+            &request,
+            &old,
+            "create_task",
+            json!({ "organisation": HIMALAYAN, "title": "New schema" }),
+        )
+        .await;
+        assert!(!error, "{task}");
+        assert!(
+            task.get("notice").is_none(),
+            "a write that names the org has the new tools"
+        );
         let (_, list) = tool(&request, &old, "list_tasks", json!({})).await;
         assert!(list.get("notice").is_none(), "{list}");
     })

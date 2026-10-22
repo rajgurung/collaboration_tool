@@ -922,7 +922,7 @@ async fn deny_without_an_org_still_goes_back_with_access_denied() {
     .await;
 }
 
-/// The organisations on the picker, in order, as `(id, name, checked)`.
+/// The organisations on the picker, in order, as `(id, checked)`.
 fn picker(html: &str) -> Vec<(String, bool)> {
     html.split(r#"<input type="radio" name="org_id" value=""#)
         .skip(1)
@@ -1036,7 +1036,7 @@ async fn the_query_string_cannot_pick_the_org() {
             picker(&html)[0],
             (in_acme.organisation_id.to_string(), true)
         );
-        assert_eq!(picker(&html)[1].1, false);
+        assert!(!picker(&html)[1].1);
     })
     .await;
 }

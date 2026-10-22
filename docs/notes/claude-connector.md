@@ -92,7 +92,7 @@ parallel calls, a second connection or waiting a minute get past it.
 Connections that existed when writes started needing `organisation` have a
 row in `claude_update_notices`, filled by the migration. For up to 14 days,
 until the connection makes a write that names its org, every successful
-result carries a `notice` asking Claude to tell the user to restart.
+read result carries a `notice` asking Claude to tell the user to restart.
 On the first start after the deploy, each person with such a connection got
 one bell notice per org (kind `connector`, no email). A later PR can drop
 the table and the code.

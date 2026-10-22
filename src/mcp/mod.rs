@@ -252,9 +252,19 @@ fn tool_field(field: &str) -> &str {
 
 type Outcome = Result<Value, Fail>;
 
-/// Turns a tool's outcome into its result. Every success names the connected
-/// organisation, and carries the update notice while it is due.
+/// Turns a read tool's outcome into its result. Every success names the
+/// connected organisation, and carries the update notice while it is due.
 fn finish(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> {
+    result(parts, outcome, true)
+}
+
+/// The same for a write tool, without the notice: a write that succeeded
+/// named its organisation, so this connection already has the new tools.
+fn finish_write(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> {
+    result(parts, outcome, false)
+}
+
+fn result(parts: &Parts, outcome: Outcome, notice: bool) -> Result<CallToolResult, ErrorData> {
     let member = parts.extensions.get::<CurrentMember>();
     match outcome {
         Ok(mut value) => {
@@ -263,10 +273,11 @@ fn finish(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> 
                     "organisation".into(),
                     json!({ "name": member.org.name, "slug": member.org.slug }),
                 );
-                if parts
-                    .extensions
-                    .get::<McpConnection>()
-                    .is_some_and(|c| c.update_notice)
+                if notice
+                    && parts
+                        .extensions
+                        .get::<McpConnection>()
+                        .is_some_and(|c| c.update_notice)
                 {
                     object.insert("notice".into(), json!(update_notice(member)));
                 }
@@ -483,7 +494,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateProject>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(&parts, self.create_project_for(&parts, input).await)
+        finish_write(&parts, self.create_project_for(&parts, input).await)
     }
 
     #[tool(
@@ -530,7 +541,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(&parts, self.create_task_for(&parts, input).await)
+        finish_write(&parts, self.create_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -542,7 +553,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<UpdateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(&parts, self.update_task_for(&parts, input).await)
+        finish_write(&parts, self.update_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -554,7 +565,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<AddTaskNote>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(&parts, self.add_task_note_for(&parts, input).await)
+        finish_write(&parts, self.add_task_note_for(&parts, input).await)
     }
 
     #[tool(
@@ -566,7 +577,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<DeleteTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(&parts, self.delete_task_for(&parts, input).await)
+        finish_write(&parts, self.delete_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -578,7 +589,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<DeleteProject>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(&parts, self.delete_project_for(&parts, input).await)
+        finish_write(&parts, self.delete_project_for(&parts, input).await)
     }
 }
 
