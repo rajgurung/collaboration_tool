@@ -32,7 +32,8 @@ INSERT INTO claude_update_notices (grant_id, organisation_id, user_id)
 SELECT DISTINCT ON (grant_id) grant_id, organisation_id, user_id
   FROM access_tokens
  WHERE revoked_at IS NULL
-   AND (kind = 'personal' OR refresh_expires_at > now())
+   AND ((kind = 'personal' AND (expires_at IS NULL OR expires_at > now()))
+        OR refresh_expires_at > now())
  ORDER BY grant_id, id;
 ALTER TABLE projects ADD COLUMN claude_grant_id uuid NULL;
 ALTER TABLE tasks ADD COLUMN claude_grant_id uuid NULL;
