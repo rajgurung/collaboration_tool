@@ -1166,6 +1166,7 @@ async fn start_dm(
 }
 
 pub fn routes() -> Routes {
+    let photos = post(send_photo).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT));
     Routes::new()
         .add("/chat", get(index))
         .add("/chat/unread", get(unread))
@@ -1175,10 +1176,7 @@ pub fn routes() -> Routes {
         .add("/chat/dms", post(start_dm))
         .add("/chat/{id}", get(show))
         .add("/chat/{id}/messages", post(send))
-        .add(
-            "/chat/{id}/photos",
-            post(send_photo).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
-        )
+        .add("/chat/{id}/photos", photos)
         .add("/chat/{id}/feed", get(feed))
         .add("/chat/{id}/messages/{message_id}/reactions", post(react))
         .add("/chat/{id}/messages/{message_id}/actions", get(actions))
