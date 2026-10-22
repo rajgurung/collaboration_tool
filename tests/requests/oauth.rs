@@ -700,6 +700,58 @@ async fn a_super_admin_acting_elsewhere_is_asked_to_leave_first() {
     .await;
 }
 
+/// The admin is also a real member of Beta and posts Beta's id while acting
+/// in Acme. The acting page still comes first: no org is looked at.
+#[tokio::test]
+#[serial]
+async fn an_acting_super_admin_cannot_pick_their_own_org_either() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Beta", "bob", "bob@example.com").await;
+        let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+            .await
+            .unwrap();
+        let beta = organisations::Model::find_by_slug(&ctx.db, "beta")
+            .await
+            .unwrap();
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let admin_user =
+            collab::models::users::Model::find_by_email(&ctx.db, "gurungraj26@gmail.com")
+                .await
+                .unwrap();
+        memberships::ActiveModel {
+            user_id: ActiveValue::Set(admin_user.id),
+            username: ActiveValue::Set("raj".to_string()),
+            role: ActiveValue::Set(memberships::role::MEMBER.to_string()),
+            status: ActiveValue::Set(memberships::status::ACTIVE.to_string()),
+            approved_at: ActiveValue::Set(Some(chrono::Utc::now().into())),
+            ..Default::default()
+        }
+        .set_tenant(beta.id)
+        .unwrap()
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
+        let client_id = register(&request, CLAUDE).await;
+
+        let mut fields = authorize_fields(&client_id, CLAUDE);
+        fields.push(("decision", "allow".to_string()));
+        fields.push(("org_id", beta.id.to_string()));
+        let pairs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let res = request
+            .post("/oauth/authorize")
+            .add_header("cookie", acting)
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(form_body(&pairs))
+            .await;
+        assert_eq!(res.status_code(), 403, "{}", res.text());
+        assert!(res.text().contains("Leave Acme first"));
+        assert!(no_codes(&ctx).await);
+    })
+    .await;
+}
+
 #[tokio::test]
 #[serial]
 async fn login_next_survives_a_failed_login_and_refuses_other_places() {
