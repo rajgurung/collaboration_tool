@@ -1,6 +1,6 @@
 # Claude connector for people in more than one organisation
 
-Status: Draft, review changes applied (staff: approve with changes; security: approve with changes) · One PR · Owner: Raj · 22 October 2026
+Status: Approved by Raj 22 October 2026, with additions A to D below · One PR · Owner: Raj
 
 No brief. This plan follows an incident. Raj's Claude used the Collab MCP
 connector and created 9 projects and 37 tasks for "Softly" inside Himalayan
@@ -157,9 +157,10 @@ in `src/mcp/mod.rs`, called first in every write `*_for`, the two deletes
 included, before `Team::load` or any id lookup. It makes no database call:
 it compares against `member.org.slug`, already loaded by the bearer gate.
 
-- Missing or blank: `Fail::Refused("Say which organisation this is for.
-  This connection is {name} ({slug}). Check with the user that {name} is
-  where they mean, then repeat the call with organisation: \"{slug}\".")`
+- Missing or blank: `Fail::Refused("Collab was updated. Tell the user:
+  writes now name their organisation. This connection is {name} ({slug}).
+  Retry with organisation: \"{slug}\", and restart Claude to refresh its
+  tools.")` (addition B). No grace period: a write without it is refused.
 - Given, after `trim()` and ASCII lowercase, equal to `member.org.slug`: ok.
 - Anything else: `Fail::Refused("This connection is {name} ({slug}), not
   {given}. Nothing was changed. To work in {given}, the user needs a
@@ -858,7 +859,114 @@ Staff and security both approved with changes. All applied.
 - **Task brake** raised from 20 to 60 a minute. Projects stay at 5 (4b,
   question 6).
 
-## Questions for Raj
+## Additions after approval (22 October 2026)
+
+Raj approved every recommendation in "Questions for Raj", with no grace
+period: a write missing `organisation` is refused. One organisation per
+connection. Four additions, all in this PR.
+
+### A. Update notice in tool results
+
+Connections made before this release get a notice in every successful tool
+result until they have made one write that passes `organisation`, and for
+at most 14 days:
+
+```json
+"notice": "Tell the user once: the Collab connector was updated. Each write now names its organisation (this connection is Himalayan Ritual (himalayan-ritual)). Restart Claude, or reconnect the connector, to load the new tools."
+```
+
+**Where it is recorded: a small table, not a column on `access_tokens`.**
+New table `claude_update_notices`, keyed by `grant_id`, in the same
+migration as 3a:
+
+```sql
+CREATE TABLE claude_update_notices (
+  grant_id uuid PRIMARY KEY,
+  organisation_id bigint NOT NULL,
+  user_id bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  announced_at timestamptz NULL,
+  written_at timestamptz NULL
+);
+INSERT INTO claude_update_notices (grant_id, organisation_id, user_id)
+SELECT DISTINCT ON (grant_id) grant_id, organisation_id, user_id
+  FROM access_tokens
+ WHERE revoked_at IS NULL
+   AND (kind = 'personal' OR refresh_expires_at > now())
+ ORDER BY grant_id, id;
+```
+
+Why a table: a grant is many token rows (one per refresh), so a column on
+`access_tokens` would have to be copied onto every new row by `issue`, and
+pruning would lose it. A row per grant is set once by the migration, needs
+no change to token code, and is easy to set up in tests. "Made before this
+release" means "has a row". `created_at` is the migration time, so the 14
+days count from the deploy. No foreign keys, like `claude_grant_id`: it is a
+marker that dies with time, not data to protect.
+
+- The bearer gate reads the row by primary key and sets
+  `McpConnection.update_notice: bool` (row exists, `written_at` NULL,
+  `created_at` within 14 days). `finish` adds `"notice"` next to
+  `"organisation"` on success.
+- After `check_org` passes in a write, and only when `update_notice` is
+  true, `written_at` is set. One cheap update, once per grant.
+- Tool errors don't carry it. The missing-organisation refusal (B) says
+  the same thing, and other errors are about the input.
+- After 14 days the code is dead; a later PR drops the table and the code.
+
+### B. The missing-organisation refusal is written for Claude to relay
+
+"Collab was updated. Tell the user: writes now name their organisation.
+This connection is {name} ({slug}). Retry with organisation: \"{slug}\",
+and restart Claude to refresh its tools." A wrong organisation keeps the
+mismatch wording from section 2.
+
+### C. A one-time bell notice
+
+On the first server start after the deploy, every person with a live
+Claude connection gets one bell notification in that connection's org:
+"Claude connector updated." with the line "If Claude says a write needs an
+organisation, restart it.", linking to `/o/{slug}/settings/claude`. No
+email (only mentions are emailed).
+
+- Guard: `claude_update_notices.announced_at`. A new initializer's
+  `before_run` calls `claude_update_notices::Model::announce`, which in one
+  statement sets `announced_at` on rows where it is NULL, `RETURNING` the
+  org and user, then sends one notice per (org, user). A second start, or a
+  second instance, finds nothing to announce. Skipped in tests, which call
+  `announce` directly.
+- New notification kind `connector`. The list shows it with no actor name
+  ("Collab Tool" avatar) and a plug icon.
+- Only active members get it (joined to `memberships`, status active).
+
+### D. `/settings/claude` names the organisation
+
+Each connection row says which organisation it reaches ("Connector ·
+Himalayan Ritual · Connected ..."). Under the list: "Each connection
+reaches one organisation. To use Claude in another organisation, connect
+again and pick it on the Allow page." The page already lists only this
+org's connections, so the name says which one you are looking at.
+
+### Tests for A to D
+
+- `the_update_notice_shows_until_a_write_names_the_org`: a grant with a
+  row gets `notice` on reads and on a refused write; after a write with
+  `organisation` it is gone. A grant without a row never sees it.
+- `the_update_notice_stops_after_14_days`: row backdated 15 days, no notice.
+- `the_bell_notice_is_sent_once`: two grants for one person in one org and
+  one in another org: `announce` sends one notice per org, with the link and
+  the `connector` kind; a second `announce` sends nothing. A row for a
+  person no longer active sends nothing.
+- `the_settings_page_names_the_org` and the "connect again" line.
+- `a_write_without_organisation_is_a_tool_error_not_a_protocol_error`
+  checks the exact B wording.
+
+### Rollback for A to D
+
+`down` drops `claude_update_notices` and deletes notifications of kind
+`connector` (old code would show them as "Someone ...").
+
+## Questions for Raj (answered: all recommendations approved)
 
 Each with a recommendation.
 
