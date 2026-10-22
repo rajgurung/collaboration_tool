@@ -17,8 +17,7 @@ pub type ClaudeUpdateNotices = Entity;
 pub const NOTICE_DAYS: i64 = 14;
 
 /// The bell notice: headline, then the line under it.
-pub const BELL: &str =
-    "Claude connector updated.\nIf Claude says a write needs an organisation, restart it.";
+pub const BELL: &str = "Claude connector updated\nIf Claude can't save a change, restart Claude.";
 
 impl ActiveModelBehavior for ActiveModel {}
 
