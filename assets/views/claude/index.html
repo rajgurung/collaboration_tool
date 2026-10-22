@@ -72,7 +72,7 @@
         <form method="post" action="{{ org_url(path="/settings/claude/grants/" ~ (c.grant_id) ~ "/revoke") }}"><button type="submit" class="btn btn-danger">Revoke</button></form>
       </div>
       {% else %}
-      <p class="empty">Nothing is connected to {{ org.name }} yet. For another organisation, connect again and pick it.</p>
+      <p class="empty">Nothing is connected to {{ org.name }} yet.<br>For another organisation, connect again and pick it.</p>
       {% endfor %}
     </div>
   </section>
