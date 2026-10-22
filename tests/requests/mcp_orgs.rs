@@ -634,7 +634,10 @@ async fn the_bell_notice_is_sent_once() {
             assert_eq!(n.user_id, raj.id);
             assert_eq!(n.link, "/settings/claude");
             assert_eq!(n.actor_id, None);
-            assert!(n.body.starts_with("Claude connector updated.\n"));
+            assert_eq!(
+                n.body,
+                "Claude connector updated\nIf Claude can't save a change, restart Claude."
+            );
             assert!(n.emailed_at.is_none());
         }
 
@@ -1129,15 +1132,11 @@ async fn the_settings_page_names_the_org() {
             .await
             .text();
         assert!(page.contains("Connected to Himalayan Ritual · 1"), "{page}");
-        assert!(page.contains("Personal token · Himalayan Ritual · Connected"));
+        assert!(page.contains("Personal token · Connected"));
         assert!(
             !page.contains("Laptop softly"),
             "only this org's connections"
         );
-        assert!(page.contains(
-            "Each connection reaches one organisation. To use Claude in another organisation, \
-connect again and pick it on the Allow page."
-        ));
     })
     .await;
 }
@@ -1157,8 +1156,8 @@ async fn the_bell_notice_reads_as_from_the_app() {
             .as_member(&raj)
             .await
             .text();
-        assert!(page.contains("Claude connector updated."), "{page}");
-        assert!(page.contains("If Claude says a write needs an organisation, restart it."));
+        assert!(page.contains("Claude connector updated"), "{page}");
+        assert!(page.contains("If Claude can&#39;t save a change, restart Claude."));
         assert!(!page.contains("Someone"));
         let id = notifications::Entity::find()
             .one(&ctx.db)

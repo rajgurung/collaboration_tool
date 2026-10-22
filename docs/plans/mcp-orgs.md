@@ -933,8 +933,8 @@ mismatch wording from section 2.
 
 On the first server start after the deploy, every person with a live
 Claude connection gets one bell notification in that connection's org:
-"Claude connector updated." with the line "If Claude says a write needs an
-organisation, restart it.", linking to `/o/{slug}/settings/claude`. No
+"Claude connector updated" with the line "If Claude can't save a change,
+restart Claude.", linking to `/o/{slug}/settings/claude`. No
 email (only mentions are emailed).
 
 - Guard: `claude_update_notices.announced_at`. A new initializer's
@@ -949,11 +949,11 @@ email (only mentions are emailed).
 
 ### D. `/settings/claude` names the organisation
 
-Each connection row says which organisation it reaches ("Connector ·
-Himalayan Ritual · Connected ..."). Under the list: "Each connection
-reaches one organisation. To use Claude in another organisation, connect
-again and pick it on the Allow page." The page already lists only this
-org's connections, so the name says which one you are looking at.
+The list heading is "Connected to {org} · n" (the page lists only this org's
+connections). The connector URL card says the address is the same for every
+organisation and you choose one when you press Allow. The empty state reads
+"Nothing is connected to {org} yet. For another organisation, connect again
+and pick it." (Designer review: no org name on each row, no footnote.)
 
 ### Tests for A to D
 

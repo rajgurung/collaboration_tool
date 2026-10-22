@@ -67,15 +67,14 @@
         {{<icon name={"lock" if c.personal else "plug"} class="h-5 w-5 shrink-0"/>}}
         <div class="min-w-0 flex-1">
           <p class="truncate-1 m-0 font-medium">{{ c.name }}</p>
-          <p class="meta m-0">{% if c.personal %}Personal token{% else %}Connector{% endif %} · {{ org.name }} · Connected {{ c.connected }} · {% if c.last_used %}Last used {{ c.last_used }}{% else %}Not used yet{% endif %}</p>
+          <p class="meta m-0">{% if c.personal %}Personal token{% else %}Connector{% endif %} · Connected {{ c.connected }} · {% if c.last_used %}Last used {{ c.last_used }}{% else %}Not used yet{% endif %}</p>
         </div>
         <form method="post" action="{{ org_url(path="/settings/claude/grants/" ~ (c.grant_id) ~ "/revoke") }}"><button type="submit" class="btn btn-danger">Revoke</button></form>
       </div>
       {% else %}
-      <p class="empty">Nothing is connected to {{ org.name }} yet.</p>
+      <p class="empty">Nothing is connected to {{ org.name }} yet. For another organisation, connect again and pick it.</p>
       {% endfor %}
     </div>
-    <p class="meta m-0 text-sm">Each connection reaches one organisation. To use Claude in another organisation, connect again and pick it on the Allow page.</p>
   </section>
 </div>
 {% endblock content %}
