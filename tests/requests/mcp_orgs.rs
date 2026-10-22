@@ -1252,3 +1252,43 @@ async fn an_org_name_reaches_claude_on_one_line_and_quoted() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn a_delete_refreshes_the_bells_it_emptied() {
+    request::<App, _, _>(|request, ctx| async move {
+        use collab::data::notify_hub::{NotifyEvent, NotifyHub};
+        setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let kreepa = user(&ctx, "kreepa@example.com").await;
+        let (_, task) = tool(
+            &request,
+            &token,
+            "create_task",
+            json!({ "organisation": HIMALAYAN, "title": "Assigned", "assignees": ["kreepa"] }),
+        )
+        .await;
+        let mut events = ctx.shared_store.get::<NotifyHub>().unwrap().subscribe();
+        let (error, result) = delete(
+            &request,
+            &token,
+            "delete_task",
+            "task_id",
+            task["id"].as_i64().unwrap(),
+        )
+        .await;
+        assert!(!error, "{result}");
+        let mut seen = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            seen.push(event);
+        }
+        assert!(
+            seen.contains(&NotifyEvent::Changed {
+                org_id: org_id(&ctx, HIMALAYAN).await,
+                user_id: kreepa,
+            }),
+            "{seen:?}"
+        );
+    })
+    .await;
+}
