@@ -45,10 +45,6 @@ pub const ORG_FIELD: &str = "_org";
 /// switch one.
 pub const ORG_GONE_HEADER: &str = "x-org-gone";
 
-/// Shown when the Claude Allow page is posted in another organisation.
-pub const SWITCHED_ORG: &str =
-    "You switched organisation while this page was open. Start again from Claude.";
-
 /// Shown when the personal token form is posted in another organisation.
 pub const SWITCHED_ORG_TOKEN: &str = "You switched organisation while this page was open. Check the organisation, then create the token again.";
 

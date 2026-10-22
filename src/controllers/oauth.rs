@@ -12,16 +12,23 @@ use serde::Deserialize;
 use crate::{
     data::settings::Settings,
     extractors::{
-        current_member::{CurrentMember, PinnedMember, SWITCHED_ORG},
+        current_member::{CurrentMember, PinnedMember},
         current_user::CurrentUser,
     },
     models::{
         access_tokens::{self, CodeExchange, Issued, SCOPE},
+        memberships,
         oauth_clients::{self, RegisterError, RegisterParams},
         oauth_codes::{self, Consent},
     },
     views::headers::guarded,
 };
+
+/// Shown when the organisation posted from the Allow page can't be used: not
+/// a number, never joined, left, or pending. One message for all, so the page
+/// never says whether an organisation exists.
+const CANT_CONNECT: &str =
+    "You can't connect Claude to that organisation. Choose another organisation.";
 
 /// Registration bodies are small; refuse anything bigger before parsing.
 const REGISTER_BODY_LIMIT: usize = 8 * 1024;
@@ -131,8 +138,9 @@ struct AuthorizeParams {
     resource: Option<String>,
     /// The button pressed on the consent page: "allow" or anything else.
     decision: Option<String>,
-    /// The organisation the consent page was shown for. A string, checked by
-    /// hand, so a bad value gets the "you switched" page.
+    /// The organisation chosen on the consent page. A string, checked by
+    /// hand against the person's active memberships. Ignored on the GET, so a
+    /// link can't choose it.
     org_id: Option<String>,
 }
 
@@ -286,8 +294,8 @@ async fn authorize_page(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     user: Option<CurrentUser>,
-    // PinnedMember: the page stays bare and picks the last org (PR 3 adds a
-    // picker). A plain GET was never claim-checked anyway.
+    // PinnedMember: the page stays bare and starts on the last used org. A
+    // plain GET was never claim-checked anyway.
     member: std::result::Result<PinnedMember, Response>,
     uri: axum::http::Uri,
     Query(params): Query<AuthorizeParams>,
@@ -315,14 +323,47 @@ async fn authorize_page(
     if member.acting {
         return acting_page(&v, &member);
     }
-    Ok(guarded(format::render().view(
-        &v,
+    allow_page(&ctx, &v, &approved, &member, None).await
+}
+
+/// The Allow page. With two or more active organisations it asks which one,
+/// starting on the last used; with one, that one is a hidden field.
+async fn allow_page(
+    ctx: &AppContext,
+    v: &TeraView,
+    approved: &Approved,
+    member: &CurrentMember,
+    error: Option<&str>,
+) -> Result<Response> {
+    let mut orgs: Vec<serde_json::Value> =
+        memberships::Model::for_user_with_orgs(&ctx.db, member.user.id)
+            .await?
+            .into_iter()
+            .filter(|(m, _)| m.is_active())
+            .map(|(m, org)| {
+                serde_json::json!({
+                    "id": org.id,
+                    "name": org.name,
+                    "role": m.role,
+                    "username": m.username,
+                    "last": org.id == member.org.id,
+                })
+            })
+            .collect();
+    // The last used first; the rest keep the switcher's order.
+    orgs.sort_by_key(|o| o["last"] != true);
+    let picker = orgs.len() > 1;
+    let status = if error.is_some() { 400 } else { 200 };
+    Ok(guarded(format::render().status(status).view(
+        v,
         "oauth/authorize.html",
         data!({
             "client_name": approved.client.client_name,
             "org": { "name": member.org.name },
             "username": member.username,
             "back_to": oauth_clients::redirect_host(&approved.redirect_uri),
+            "orgs": if picker { orgs } else { Vec::new() },
+            "error": error,
             "fields": {
                 "response_type": "code",
                 "client_id": approved.client.client_id,
@@ -332,7 +373,7 @@ async fn authorize_page(
                 "state": approved.state,
                 "scope": SCOPE,
                 "resource": approved.resource,
-                "org_id": member.org.id,
+                "org_id": if picker { None } else { Some(member.org.id) },
             },
         }),
     )?))
@@ -363,14 +404,24 @@ async fn authorize(
             &[("error", "access_denied")],
         );
     }
-    if !member.shown_for_this_org(params.org_id.as_deref()) {
-        return refused_page(&v, SWITCHED_ORG);
-    }
+    // The chosen org, if this person is active there. The session's user is
+    // the only one ever looked up.
+    let chosen = match params
+        .org_id
+        .as_deref()
+        .and_then(|id| id.parse::<i64>().ok())
+    {
+        Some(org_id) => memberships::Model::active_in(&ctx.db, org_id, member.user.id).await?,
+        None => None,
+    };
+    let Some(chosen) = chosen else {
+        return allow_page(&ctx, &v, &approved, &member, Some(CANT_CONNECT)).await;
+    };
     let (_, code) = oauth_codes::Model::issue(
         &ctx.db,
         &Consent {
             client: &approved.client,
-            org_id: member.org.id,
+            org_id: chosen.organisation_id,
             user_id: member.user.id,
             redirect_uri: &approved.redirect_uri,
             code_challenge: &approved.code_challenge,
