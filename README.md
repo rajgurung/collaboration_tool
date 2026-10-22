@@ -43,6 +43,8 @@ Claude can read and change your projects, tasks and task notes, as you. It can't
 - **claude.ai and the Claude apps:** Settings → Connectors → Add custom connector, paste `https://collab.zen-scale.io/mcp`, press Connect, then Allow.
 - **Claude Code:** `claude mcp add --transport http collab https://collab.zen-scale.io/mcp`, then sign in when asked.
 
+Each connection works in one organisation. If you're in more than one, the Allow page asks which. To use Claude in another organisation, connect again and pick it there. Every change Claude makes names its organisation, and is refused if that isn't the connected one.
+
 In Collab Tool, More → Connect Claude has the details, personal tokens, and a Revoke button for every connection. How it works: [docs/notes/claude-connector.md](docs/notes/claude-connector.md).
 
 ## How it's built
