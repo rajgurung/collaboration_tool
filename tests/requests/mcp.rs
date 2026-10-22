@@ -277,7 +277,7 @@ async fn initialize_and_list_the_tools() {
         assert_eq!(body["result"]["protocolVersion"], "2025-11-25");
         let instructions = body["result"]["instructions"].as_str().unwrap();
         assert!(
-            instructions.contains("Connected to Acme (acme)"),
+            instructions.contains("Connected to \"Acme\" (acme)"),
             "{instructions}"
         );
 

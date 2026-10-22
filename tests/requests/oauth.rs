@@ -1093,7 +1093,7 @@ async fn allow_binds_the_chosen_org() {
         .json();
         let instructions = body["result"]["instructions"].as_str().unwrap();
         assert!(
-            instructions.starts_with("Connected to Beta (beta) as alice."),
+            instructions.starts_with("Connected to \"Beta\" (beta) as alice."),
             "{instructions}"
         );
     })

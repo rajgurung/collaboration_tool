@@ -271,7 +271,7 @@ fn result(parts: &Parts, outcome: Outcome, notice: bool) -> Result<CallToolResul
             if let (Some(member), Some(object)) = (member, value.as_object_mut()) {
                 object.insert(
                     "organisation".into(),
-                    json!({ "name": member.org.name, "slug": member.org.slug }),
+                    json!({ "name": clean_name(&member.org.name), "slug": member.org.slug }),
                 );
                 if notice
                     && parts
@@ -288,7 +288,7 @@ fn result(parts: &Parts, outcome: Outcome, notice: bool) -> Result<CallToolResul
         }
         Err(Fail::Refused(message)) => Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
         Err(Fail::NotFound) => {
-            let place = member.map_or("this organisation", |m| m.org.name.as_str());
+            let place = member.map_or_else(|| "this organisation".to_string(), org_label);
             Ok(CallToolResult::error(vec![ContentBlock::text(format!(
                 "Not found in {place}."
             ))]))
@@ -300,12 +300,51 @@ fn result(parts: &Parts, outcome: Outcome, notice: bool) -> Result<CallToolResul
     }
 }
 
+/// Unicode format characters (category Cf): invisible, and able to make
+/// text read differently from what it is.
+fn is_format(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}'
+        | '\u{0890}'..='\u{0891}' | '\u{08E2}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}'
+        | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{110BD}' | '\u{110CD}'
+        | '\u{13430}'..='\u{1343F}' | '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}'
+        | '\u{E0001}' | '\u{E0020}'..='\u{E007F}')
+}
+
+/// An organisation name as it may reach the model: one line, no invisible
+/// characters, no double quotes (it is shown inside them), at most 80
+/// characters. Owners choose names, so they are treated like any input.
+fn clean_name(name: &str) -> String {
+    let spaced: String = name
+        .chars()
+        .filter(|c| !is_format(*c))
+        .map(|c| match c {
+            '"' => '\'',
+            c if c.is_control() || c.is_whitespace() => ' ',
+            c => c,
+        })
+        .collect();
+    spaced
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(80)
+        .collect()
+}
+
+/// The connected organisation as every message names it: `"Name" (slug)`.
+fn org_label(member: &CurrentMember) -> String {
+    format!("\"{}\" ({})", clean_name(&member.org.name), member.org.slug)
+}
+
 /// The server's instructions for this connection: which organisation it
 /// reaches, then the fixed text.
 fn instructions(member: &CurrentMember) -> String {
-    let (name, slug) = (&member.org.name, &member.org.slug);
+    let (org, slug) = (org_label(member), &member.org.slug);
     format!(
-        "Connected to {name} ({slug}) as {}. Every tool reads and writes only there. Write \
+        "Connected to {org} as {}. Every tool reads and writes only there. Write \
 tools need `organisation: \"{slug}\"`. If the user means another organisation, stop and tell \
 them this connection can't reach it; they can connect again and pick that organisation. \
 {INSTRUCTIONS}",
@@ -352,10 +391,10 @@ fn a_minute_ago() -> chrono::DateTime<chrono::Utc> {
 /// The brake's refusal, naming the organisation so the run can be checked.
 fn paused(member: &CurrentMember, limit: u64, what: &str) -> Fail {
     Fail::Refused(format!(
-        "Paused: this connection has made {limit} {what} in {} ({}) in the last minute. Confirm \
+        "Paused: this connection has made {limit} {what} in {} in the last minute. Confirm \
 with the user that this is the right organisation and that they want more, then try again in a \
 minute.",
-        member.org.name, member.org.slug
+        org_label(member)
     ))
 }
 
@@ -364,23 +403,23 @@ minute.",
 fn update_notice(member: &CurrentMember) -> String {
     format!(
         "Tell the user once: the Collab connector was updated. Each write now names its \
-organisation (this connection is {} ({})). Restart Claude, or reconnect the connector, to load \
+organisation (this connection is {}). Restart Claude, or reconnect the connector, to load \
 the new tools.",
-        member.org.name, member.org.slug
+        org_label(member)
     )
 }
 
 /// Refuses a write whose `organisation` isn't the connected one. Only ever
 /// refuses: the organisation always comes from the token. No database call.
 fn check_org(member: &CurrentMember, given: Option<&str>) -> Result<(), Fail> {
-    let (name, slug) = (&member.org.name, &member.org.slug);
+    let (org, slug) = (org_label(member), &member.org.slug);
     let given = given
         .map(|g| g.trim().to_ascii_lowercase())
         .unwrap_or_default();
     if given.is_empty() {
         return Err(Fail::Refused(format!(
             "Collab was updated. Tell the user: writes now name their organisation. This \
-connection is {name} ({slug}). Retry with organisation: \"{slug}\", and restart Claude to \
+connection is {org}. Retry with organisation: \"{slug}\", and restart Claude to \
 refresh its tools."
         )));
     }
@@ -394,7 +433,7 @@ refresh its tools."
         "a different organisation".to_string()
     };
     Err(Fail::Refused(format!(
-        "This connection is {name} ({slug}), not {other}. Nothing was changed. To work in \
+        "This connection is {org}, not {other}. Nothing was changed. To work in \
 {other}, the user needs a connection for that organisation: connect again and pick it."
     )))
 }
@@ -948,9 +987,9 @@ impl ServerHandler for CollabServer {
                 let description = tool.description.as_deref().unwrap_or_default();
                 tool.description = Some(
                     format!(
-                        "{description} Connected to {} ({slug}): pass organisation \"{slug}\".",
-                        member.org.name,
-                        slug = member.org.slug
+                        "{description} Connected to {}: pass organisation \"{}\".",
+                        org_label(&member),
+                        member.org.slug
                     )
                     .into(),
                 );
