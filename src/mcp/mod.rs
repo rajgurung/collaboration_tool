@@ -8,8 +8,14 @@ use axum::http::request::Parts;
 use loco_rs::{app::AppContext, model::ModelError};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, tool::Extension, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
-    schemars, tool, tool_handler, tool_router, ErrorData, ServerHandler,
+    model::{
+        CacheScope, CallToolResult, ContentBlock, DiscoverResult, Implementation,
+        InitializeRequestParams, InitializeResult, ListToolsResult, PaginatedRequestParams,
+        ProtocolVersion, ResultType, ServerCapabilities, ServerConfig,
+    },
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
@@ -33,6 +39,13 @@ Task statuses are todo, progress, blocked and done; priorities are high, medium 
 project's status is free text such as \"Active\" or \"Planned\". People are referred to by \
 username; \"me\" means the person you are acting for. Changes notify teammates exactly as they \
 would in the web app.";
+/// Tools that change something. Each takes `organisation`.
+const WRITE_TOOLS: [&str; 4] = [
+    "create_project",
+    "create_task",
+    "update_task",
+    "add_task_note",
+];
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
 
@@ -199,6 +212,32 @@ fn finish(outcome: Outcome) -> Result<CallToolResult, ErrorData> {
             Err(ErrorData::internal_error("Something went wrong.", None))
         }
     }
+}
+
+/// The server's instructions for this connection: which organisation it
+/// reaches, then the fixed text.
+fn instructions(member: &CurrentMember) -> String {
+    let (name, slug) = (&member.org.name, &member.org.slug);
+    format!(
+        "Connected to {name} ({slug}) as {}. Every tool reads and writes only there. Write \
+tools need `organisation: \"{slug}\"`. If the user means another organisation, stop and tell \
+them this connection can't reach it; they can add a second connection for it. {INSTRUCTIONS}",
+        member.username
+    )
+}
+
+/// The member for a protocol request (not a tool call). Never missing on
+/// `/mcp`; if it is, the request fails rather than answering without an org.
+fn context_member(context: &RequestContext<RoleServer>) -> Result<CurrentMember, ErrorData> {
+    context
+        .extensions
+        .get::<Parts>()
+        .and_then(|parts| parts.extensions.get::<CurrentMember>())
+        .cloned()
+        .ok_or_else(|| {
+            tracing::error!("no member on an /mcp request");
+            ErrorData::internal_error("Something went wrong.", None)
+        })
 }
 
 fn member(parts: &Parts) -> Result<CurrentMember, Fail> {
@@ -585,6 +624,69 @@ impl CollabServer {
 
 #[tool_handler]
 impl ServerHandler for CollabServer {
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        let member = context_member(&context)?;
+        context.peer.set_peer_info(request.clone());
+        let mut result = self.negotiate_initialize(&request)?;
+        result.instructions = Some(instructions(&member));
+        Ok(result)
+    }
+
+    async fn discover(
+        &self,
+        context: RequestContext<RoleServer>,
+    ) -> Result<DiscoverResult, ErrorData> {
+        let member = context_member(&context)?;
+        // `from_server_info` keeps rmcp's private cache scope: the text differs
+        // per connection.
+        let mut result = DiscoverResult::from_server_info(
+            self.supported_protocol_versions().into_owned(),
+            self.get_info(),
+        );
+        result.instructions = Some(instructions(&member));
+        Ok(result)
+    }
+
+    /// The generated list, with the connected org named in each write tool.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let member = context_member(&context)?;
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let mut tools = self.tool_router.list_all();
+        for tool in &mut tools {
+            if WRITE_TOOLS.contains(&tool.name.as_ref()) {
+                let description = tool.description.as_deref().unwrap_or_default();
+                tool.description = Some(
+                    format!(
+                        "{description} Connected to {} ({slug}): pass organisation \"{slug}\".",
+                        member.org.name,
+                        slug = member.org.slug
+                    )
+                    .into(),
+                );
+            }
+        }
+        // The descriptions differ per connection, so no shared cache may
+        // hold them.
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Private),
+        })
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
