@@ -206,7 +206,7 @@ async fn create(
     headers: HeaderMap,
     Form(params): Form<ProjectParams>,
 ) -> Result<Response> {
-    let result = projects::Model::create(&ctx.db, member.org.id, &params).await;
+    let result = projects::Model::create(&ctx.db, member.org.id, &params, None).await;
     if let Ok(project) = &result {
         super::notifications::project_saved(&ctx, &member, None, project).await?;
     }

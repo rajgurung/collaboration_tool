@@ -201,6 +201,7 @@ async fn removing_someone_locks_them_out_of_everything() {
                 due_on: String::new(),
                 status: String::new(),
             },
+            None,
         )
         .await
         .unwrap();

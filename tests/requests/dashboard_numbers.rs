@@ -26,6 +26,7 @@ async fn add_task(
             due_on: String::new(),
             status: String::new(),
         },
+        None,
     )
     .await
     .unwrap();
@@ -54,6 +55,7 @@ async fn dashboard_numbers_follow_the_tasks() {
                 owner_id: alice.id.to_string(),
                 summary: String::new(),
             },
+            None,
         )
         .await
         .unwrap();

@@ -22,15 +22,15 @@ use serde_json::{json, Value};
 
 use crate::{
     controllers::notifications::{self, TaskBefore},
-    extractors::current_member::CurrentMember,
+    extractors::{bearer::McpConnection, current_member::CurrentMember},
     models::{
-        memberships,
+        claude_update_notices, memberships,
         projects::{self, Progress, ProjectParams, ACCENTS},
         task_assignees,
         task_notes::{self, NoteParams},
         tasks::{self, TaskParams},
     },
-    views::{forms::field_errors, time},
+    views::{forms::field_errors, links::is_slug, time},
 };
 
 const INSTRUCTIONS: &str = "Collab Tool is a small team's workspace. Tasks usually belong to a \
@@ -77,6 +77,11 @@ where
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateProject {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "Project name, up to 80 characters.")]
     pub name: String,
     #[schemars(description = "Roadmap lane: now, next or later.")]
@@ -113,6 +118,11 @@ pub struct TaskId {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateTask {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "What needs doing, up to 140 characters.")]
     pub title: String,
     #[schemars(description = "Project id. Leave out for a chore with no project.")]
@@ -129,6 +139,11 @@ pub struct CreateTask {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateTask {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "The task's id.")]
     pub task_id: i64,
     #[schemars(description = "New title, up to 140 characters.")]
@@ -151,6 +166,11 @@ pub struct UpdateTask {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddTaskNote {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "The task's id.")]
     pub task_id: i64,
     #[schemars(
@@ -163,6 +183,8 @@ pub struct AddTaskNote {
 enum Fail {
     /// Something the caller can fix; returned as a tool error.
     Refused(String),
+    /// No such item in the connected organisation; a tool error naming it.
+    NotFound,
     /// Our fault; logged and returned as an internal error.
     Broken(String),
 }
@@ -178,7 +200,7 @@ impl From<ModelError> for Fail {
             return Self::Refused(message);
         }
         match err {
-            ModelError::EntityNotFound => Self::Refused("Not found in your organisation.".into()),
+            ModelError::EntityNotFound => Self::NotFound,
             other => Self::Broken(other.to_string()),
         }
     }
@@ -201,12 +223,36 @@ fn tool_field(field: &str) -> &str {
 
 type Outcome = Result<Value, Fail>;
 
-fn finish(outcome: Outcome) -> Result<CallToolResult, ErrorData> {
+/// Turns a tool's outcome into its result. Every success names the connected
+/// organisation, and carries the update notice while it is due.
+fn finish(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> {
+    let member = parts.extensions.get::<CurrentMember>();
     match outcome {
-        Ok(value) => Ok(CallToolResult::success(vec![ContentBlock::text(
-            value.to_string(),
-        )])),
+        Ok(mut value) => {
+            if let (Some(member), Some(object)) = (member, value.as_object_mut()) {
+                object.insert(
+                    "organisation".into(),
+                    json!({ "name": member.org.name, "slug": member.org.slug }),
+                );
+                if parts
+                    .extensions
+                    .get::<McpConnection>()
+                    .is_some_and(|c| c.update_notice)
+                {
+                    object.insert("notice".into(), json!(update_notice(member)));
+                }
+            }
+            Ok(CallToolResult::success(vec![ContentBlock::text(
+                value.to_string(),
+            )]))
+        }
         Err(Fail::Refused(message)) => Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
+        Err(Fail::NotFound) => {
+            let place = member.map_or("this organisation", |m| m.org.name.as_str());
+            Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "Not found in {place}."
+            ))]))
+        }
         Err(Fail::Broken(err)) => {
             tracing::error!(error = %err, "MCP tool failed");
             Err(ErrorData::internal_error("Something went wrong.", None))
@@ -221,7 +267,8 @@ fn instructions(member: &CurrentMember) -> String {
     format!(
         "Connected to {name} ({slug}) as {}. Every tool reads and writes only there. Write \
 tools need `organisation: \"{slug}\"`. If the user means another organisation, stop and tell \
-them this connection can't reach it; they can add a second connection for it. {INSTRUCTIONS}",
+them this connection can't reach it; they can connect again and pick that organisation. \
+{INSTRUCTIONS}",
         member.username
     )
 }
@@ -246,6 +293,56 @@ fn member(parts: &Parts) -> Result<CurrentMember, Fail> {
         .get::<CurrentMember>()
         .cloned()
         .ok_or_else(|| Fail::Broken("no member on an /mcp request".into()))
+}
+
+/// The connection behind the request. Never missing on `/mcp`; if it is,
+/// creates and deletes fail rather than treat the call as the web app's.
+fn connection(parts: &Parts) -> Result<McpConnection, Fail> {
+    parts
+        .extensions
+        .get::<McpConnection>()
+        .copied()
+        .ok_or_else(|| Fail::Broken("no connection on an /mcp request".into()))
+}
+
+/// What a connection made before this release is told until it reloads its
+/// tools.
+fn update_notice(member: &CurrentMember) -> String {
+    format!(
+        "Tell the user once: the Collab connector was updated. Each write now names its \
+organisation (this connection is {} ({})). Restart Claude, or reconnect the connector, to load \
+the new tools.",
+        member.org.name, member.org.slug
+    )
+}
+
+/// Refuses a write whose `organisation` isn't the connected one. Only ever
+/// refuses: the organisation always comes from the token. No database call.
+fn check_org(member: &CurrentMember, given: Option<&str>) -> Result<(), Fail> {
+    let (name, slug) = (&member.org.name, &member.org.slug);
+    let given = given
+        .map(|g| g.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if given.is_empty() {
+        return Err(Fail::Refused(format!(
+            "Collab was updated. Tell the user: writes now name their organisation. This \
+connection is {name} ({slug}). Retry with organisation: \"{slug}\", and restart Claude to \
+refresh its tools."
+        )));
+    }
+    if &given == slug {
+        return Ok(());
+    }
+    // Echo only slug-shaped input, so no free text reaches the model.
+    let other = if is_slug(&given) {
+        given
+    } else {
+        "a different organisation".to_string()
+    };
+    Err(Fail::Refused(format!(
+        "This connection is {name} ({slug}), not {other}. Nothing was changed. To work in \
+{other}, the user needs a connection for that organisation: connect again and pick it."
+    )))
 }
 
 /// The team as `(user_id, username)`, for turning usernames into ids and back.
@@ -331,7 +428,7 @@ impl CollabServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.list_projects_for(&parts).await)
+        finish(&parts, self.list_projects_for(&parts).await)
     }
 
     #[tool(
@@ -343,7 +440,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateProject>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.create_project_for(&parts, input).await)
+        finish(&parts, self.create_project_for(&parts, input).await)
     }
 
     #[tool(
@@ -354,7 +451,7 @@ impl CollabServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.list_members_for(&parts).await)
+        finish(&parts, self.list_members_for(&parts).await)
     }
 
     #[tool(
@@ -366,7 +463,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<ListTasks>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.list_tasks_for(&parts, input).await)
+        finish(&parts, self.list_tasks_for(&parts, input).await)
     }
 
     #[tool(
@@ -378,7 +475,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<TaskId>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.get_task_for(&parts, input).await)
+        finish(&parts, self.get_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -390,7 +487,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.create_task_for(&parts, input).await)
+        finish(&parts, self.create_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -402,7 +499,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<UpdateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.update_task_for(&parts, input).await)
+        finish(&parts, self.update_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -414,11 +511,27 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<AddTaskNote>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.add_task_note_for(&parts, input).await)
+        finish(&parts, self.add_task_note_for(&parts, input).await)
     }
 }
 
 impl CollabServer {
+    /// The member and connection for a write, once its `organisation` is the
+    /// connected one. The first write that names it ends the update notice.
+    async fn writer(
+        &self,
+        parts: &Parts,
+        organisation: Option<&str>,
+    ) -> Result<(CurrentMember, McpConnection), Fail> {
+        let member = member(parts)?;
+        let connection = connection(parts)?;
+        check_org(&member, organisation)?;
+        if connection.update_notice {
+            claude_update_notices::Model::written(&self.ctx.db, connection.grant_id).await?;
+        }
+        Ok((member, connection))
+    }
+
     async fn list_projects_for(&self, parts: &Parts) -> Outcome {
         let member = member(parts)?;
         let db = &self.ctx.db;
@@ -443,7 +556,7 @@ impl CollabServer {
     }
 
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
-        let member = member(parts)?;
+        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
         let db = &self.ctx.db;
         let team = Team::load(&self.ctx, &member).await?;
         let owner_id = match input.owner.as_deref().filter(|o| !o.trim().is_empty()) {
@@ -461,7 +574,8 @@ impl CollabServer {
             owner_id,
             summary: input.summary.unwrap_or_default(),
         };
-        let project = projects::Model::create(db, member.org.id, &params).await?;
+        let project =
+            projects::Model::create(db, member.org.id, &params, Some(connection.grant_id)).await?;
         notifications::project_saved(&self.ctx, &member, None, &project).await?;
         Ok(json!({
             "id": project.id,
@@ -551,7 +665,7 @@ impl CollabServer {
     }
 
     async fn create_task_for(&self, parts: &Parts, input: CreateTask) -> Outcome {
-        let member = member(parts)?;
+        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
         let team = Team::load(&self.ctx, &member).await?;
         let params = TaskParams {
             title: input.title,
@@ -564,13 +678,19 @@ impl CollabServer {
             due_on: input.due_on.unwrap_or_default(),
             status: input.status.unwrap_or_default(),
         };
-        let task = tasks::Model::create(&self.ctx.db, member.org.id, &params).await?;
+        let task = tasks::Model::create(
+            &self.ctx.db,
+            member.org.id,
+            &params,
+            Some(connection.grant_id),
+        )
+        .await?;
         notifications::task_saved(&self.ctx, &member, None, &task).await?;
         show_task(&self.ctx, &member, &team, &task).await
     }
 
     async fn update_task_for(&self, parts: &Parts, input: UpdateTask) -> Outcome {
-        let member = member(parts)?;
+        let (member, _) = self.writer(parts, input.organisation.as_deref()).await?;
         let db = &self.ctx.db;
         let task = tasks::Model::find_in_org(db, member.org.id, input.task_id).await?;
         let current = task_assignees::Model::for_task(db, member.org.id, task.id).await?;
@@ -602,7 +722,7 @@ impl CollabServer {
     }
 
     async fn add_task_note_for(&self, parts: &Parts, input: AddTaskNote) -> Outcome {
-        let member = member(parts)?;
+        let (member, _) = self.writer(parts, input.organisation.as_deref()).await?;
         let task = tasks::Model::find_in_org(&self.ctx.db, member.org.id, input.task_id).await?;
         let note = task_notes::Model::create(
             &self.ctx.db,

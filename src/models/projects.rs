@@ -129,7 +129,9 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
-    /// Adds a project at the end of its organisation's list.
+    /// Adds a project at the end of its organisation's list. `claude_grant` is
+    /// the Claude connection making it, `None` from the web app. It is an
+    /// argument, not a form field, so no form can set it.
     ///
     /// # Errors
     /// Validation errors, or database errors.
@@ -137,6 +139,7 @@ impl Model {
         db: &C,
         org_id: i64,
         params: &ProjectParams,
+        claude_grant: Option<Uuid>,
     ) -> ModelResult<Self> {
         ValidatorTrait::validate(params)?;
         let owner_id = params.owner(db, org_id).await?;
@@ -148,6 +151,7 @@ impl Model {
             .map_or(0, |p| p.sort_order);
         let mut project = ActiveModel {
             sort_order: ActiveValue::Set(last + 1),
+            claude_grant_id: ActiveValue::Set(claude_grant),
             ..Default::default()
         }
         .set_tenant(org_id)?;

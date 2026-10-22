@@ -23,6 +23,7 @@ pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> proj
             owner_id: String::new(),
             summary: String::new(),
         },
+        None,
     )
     .await
     .unwrap()

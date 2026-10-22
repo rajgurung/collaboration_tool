@@ -34,6 +34,7 @@ async fn task_in(ctx: &AppContext, org_id: i64, title: &str) -> tasks::Model {
             due_on: String::new(),
             status: String::new(),
         },
+        None,
     )
     .await
     .unwrap()

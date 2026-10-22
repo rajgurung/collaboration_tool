@@ -147,7 +147,9 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
-    /// Adds a task and its assignees together.
+    /// Adds a task and its assignees together. `claude_grant` is the Claude
+    /// connection making it, `None` from the web app (see
+    /// [`super::projects::Model::create`]).
     ///
     /// # Errors
     /// Validation errors, or database errors.
@@ -155,6 +157,7 @@ impl Model {
         db: &DatabaseConnection,
         org_id: i64,
         params: &TaskParams,
+        claude_grant: Option<Uuid>,
     ) -> ModelResult<Self> {
         let checked = params.check(db, org_id).await?;
         let txn = db.begin().await?;
@@ -176,6 +179,7 @@ impl Model {
             due_on: ActiveValue::Set(checked.due_on),
             sort_order: ActiveValue::Set(last + 1),
             project_id: ActiveValue::Set(checked.project_id),
+            claude_grant_id: ActiveValue::Set(claude_grant),
             ..Default::default()
         }
         .set_tenant(org_id)?

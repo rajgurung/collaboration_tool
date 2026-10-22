@@ -1,7 +1,7 @@
 //! The gate for `/mcp`: an `Authorization: Bearer` token (OAuth or personal)
 //! that is live, for this server, and belongs to someone who is still an
-//! active member of the token's organisation. The member goes into the
-//! request extensions, where the MCP tools read it.
+//! active member of the token's organisation. The member and the connection
+//! go into the request extensions, where the MCP tools read them.
 use axum::{
     extract::{Request, State},
     http::{header, HeaderMap, StatusCode},
@@ -12,8 +12,18 @@ use loco_rs::prelude::*;
 use super::current_member::CurrentMember;
 use crate::{
     data::settings::Settings,
-    models::{access_tokens, memberships, organisations, users},
+    models::{access_tokens, claude_update_notices, memberships, organisations, users},
 };
+
+/// The Claude connection a bearer token belongs to. Never in a tool result.
+#[derive(Clone, Copy, Debug)]
+pub struct McpConnection {
+    /// The same for the life of the connection, across token refreshes.
+    pub grant_id: Uuid,
+    /// The connection predates writes naming their organisation, and hasn't
+    /// made one yet: tool results tell Claude to reload its tools.
+    pub update_notice: bool,
+}
 
 /// Route layer for `/mcp`, added with `from_fn_with_state`.
 pub async fn require_bearer(
@@ -29,8 +39,9 @@ pub async fn require_bearer(
         return challenge(&settings, false);
     };
     match authenticate(&ctx, &settings, &token).await {
-        Ok(Some(member)) => {
+        Ok(Some((member, connection))) => {
             req.extensions_mut().insert(member);
+            req.extensions_mut().insert(connection);
             next.run(req).await
         }
         Ok(None) => challenge(&settings, true),
@@ -49,7 +60,7 @@ async fn authenticate(
     ctx: &AppContext,
     settings: &Settings,
     token: &str,
-) -> Result<Option<CurrentMember>> {
+) -> Result<Option<(CurrentMember, McpConnection)>> {
     let Some(row) = access_tokens::Model::find_usable(&ctx.db, token, &settings.mcp_url()).await?
     else {
         return Ok(None);
@@ -70,7 +81,14 @@ async fn authenticate(
     };
     let org = organisations::Model::find_by_id(&ctx.db, row.organisation_id).await?;
     row.touch(&ctx.db).await?;
-    Ok(Some(CurrentMember::from_membership(user, org, membership)))
+    let connection = McpConnection {
+        grant_id: row.grant_id,
+        update_notice: claude_update_notices::Model::due(&ctx.db, row.grant_id).await?,
+    };
+    Ok(Some((
+        CurrentMember::from_membership(user, org, membership),
+        connection,
+    )))
 }
 
 /// 401 that tells the client where to find out how to sign in (RFC 9728).

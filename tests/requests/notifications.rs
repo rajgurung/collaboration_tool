@@ -936,6 +936,7 @@ async fn acme_task(ctx: &AppContext, title: &str, assignees: Vec<i64>) -> tasks:
             due_on: String::new(),
             status: String::new(),
         },
+        None,
     )
     .await
     .unwrap()

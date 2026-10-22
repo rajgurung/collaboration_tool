@@ -19,6 +19,10 @@ pub struct Model {
     pub sort_order: i64,
     pub organisation_id: i64,
     pub owner_id: Option<i64>,
+    /// The Claude connection that made it; `None` for the web app. Never
+    /// serialized, so no uuid reaches a page.
+    #[serde(skip)]
+    pub claude_grant_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

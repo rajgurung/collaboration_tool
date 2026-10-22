@@ -741,7 +741,7 @@ async fn create(
     headers: HeaderMap,
     axum_extra::extract::Form(params): axum_extra::extract::Form<TaskParams>,
 ) -> Result<Response> {
-    let result = tasks::Model::create(&ctx.db, member.org.id, &params).await;
+    let result = tasks::Model::create(&ctx.db, member.org.id, &params, None).await;
     if let Ok(task) = &result {
         notifications::task_saved(&ctx, &member, None, task).await?;
     }

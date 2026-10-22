@@ -36,6 +36,7 @@ pub fn field_error(field: &str, message: &str) -> ModelError {
 }
 pub mod access_tokens;
 pub mod auth_attempts;
+pub mod claude_update_notices;
 pub mod documents;
 pub mod folders;
 pub mod guide;
