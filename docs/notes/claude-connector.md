@@ -87,7 +87,7 @@ paused with a message naming the org. Per connection, so a refresh doesn't
 reset it. A guard against a run in the wrong org, not a security control:
 parallel calls, a second connection or waiting a minute get past it.
 
-## The update notice (until 6 November 2026)
+## The update notice (for 14 days after the deploy)
 
 Connections that existed when writes started needing `organisation` have a
 row in `claude_update_notices`, filled by the migration. For up to 14 days,
