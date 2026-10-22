@@ -275,6 +275,11 @@ async fn initialize_and_list_the_tools() {
         let body = res.json();
         assert_eq!(body["result"]["serverInfo"]["name"], "Collab Tool");
         assert_eq!(body["result"]["protocolVersion"], "2025-11-25");
+        let instructions = body["result"]["instructions"].as_str().unwrap();
+        assert!(
+            instructions.contains("Connected to Acme (acme)"),
+            "{instructions}"
+        );
 
         let body = rpc(&request, &token, "tools/list", json!({})).await.json();
         let mut names: Vec<&str> = body["result"]["tools"]
@@ -290,6 +295,8 @@ async fn initialize_and_list_the_tools() {
                 "add_task_note",
                 "create_project",
                 "create_task",
+                "delete_project",
+                "delete_task",
                 "get_task",
                 "list_members",
                 "list_projects",
@@ -309,6 +316,15 @@ async fn initialize_and_list_the_tools() {
             .find(|t| t["name"] == "list_tasks")
             .unwrap();
         assert_eq!(list["annotations"]["readOnlyHint"], true);
+        for name in ["delete_task", "delete_project"] {
+            let delete = body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["name"] == name)
+                .unwrap();
+            assert_eq!(delete["annotations"]["destructiveHint"], true, "{name}");
+        }
     })
     .await;
 }

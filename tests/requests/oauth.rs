@@ -13,7 +13,7 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    mcp::{rpc, RESOURCE},
+    mcp::{rpc, tool, RESOURCE},
     multi_org::{alice_in_two_orgs, with_org},
     prepare_data::{sign_up_member, AsMember, USER_PASSWORD},
 };
@@ -590,6 +590,42 @@ async fn refresh_rotates_and_reuse_revokes_the_grant() {
         )
         .await;
         assert_eq!(status, 400);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_record_survives_a_token_refresh() {
+    request::<App, _, _>(|request, _ctx| async move {
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let client_id = register(&request, CLAUDE).await;
+        let code = code_for(&request, &alice, &client_id).await;
+        let (_, first) = exchange(&request, &client_id, &code).await;
+        let (error, task) = tool(
+            &request,
+            first["access_token"].as_str().unwrap(),
+            "create_task",
+            json!({ "organisation": "acme", "title": "Made before the refresh" }),
+        )
+        .await;
+        assert!(!error, "{task}");
+
+        let (status, second) = refresh(
+            &request,
+            &client_id,
+            first["refresh_token"].as_str().unwrap(),
+        )
+        .await;
+        assert_eq!(status, 200, "{second}");
+        let (error, result) = tool(
+            &request,
+            second["access_token"].as_str().unwrap(),
+            "delete_task",
+            json!({ "organisation": "acme", "task_id": task["id"] }),
+        )
+        .await;
+        assert!(!error, "the same connection, a new access token: {result}");
     })
     .await;
 }

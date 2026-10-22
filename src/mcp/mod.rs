@@ -22,13 +22,14 @@ use serde_json::{json, Value};
 
 use crate::{
     controllers::notifications::{self, TaskBefore},
+    data::notify_hub::NotifyHub,
     extractors::{bearer::McpConnection, current_member::CurrentMember},
     models::{
         claude_update_notices, memberships,
         projects::{self, Progress, ProjectParams, ACCENTS},
         task_assignees,
         task_notes::{self, NoteParams},
-        tasks::{self, TaskParams},
+        tasks::{self, Refusal, Removed, TaskParams},
     },
     views::{forms::field_errors, links::is_slug, time},
 };
@@ -40,12 +41,18 @@ project's status is free text such as \"Active\" or \"Planned\". People are refe
 username; \"me\" means the person you are acting for. Changes notify teammates exactly as they \
 would in the web app.";
 /// Tools that change something. Each takes `organisation`.
-const WRITE_TOOLS: [&str; 4] = [
+const WRITE_TOOLS: [&str; 6] = [
     "create_project",
     "create_task",
     "update_task",
     "add_task_note",
+    "delete_task",
+    "delete_project",
 ];
+/// The brake on bulk creates, per connection per minute. A guard against a
+/// run in the wrong organisation, not a security control.
+const PROJECTS_PER_MINUTE: u64 = 5;
+const TASKS_PER_MINUTE: u64 = 60;
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
 
@@ -179,6 +186,28 @@ pub struct AddTaskNote {
     pub body: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteTask {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
+    #[schemars(description = "The task's id.")]
+    pub task_id: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteProject {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
+    #[schemars(description = "The project's id.")]
+    pub project_id: i64,
+}
+
 /// Why a tool call did not go through.
 enum Fail {
     /// Something the caller can fix; returned as a tool error.
@@ -303,6 +332,20 @@ fn connection(parts: &Parts) -> Result<McpConnection, Fail> {
         .get::<McpConnection>()
         .copied()
         .ok_or_else(|| Fail::Broken("no connection on an /mcp request".into()))
+}
+
+fn a_minute_ago() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now() - chrono::Duration::seconds(60)
+}
+
+/// The brake's refusal, naming the organisation so the run can be checked.
+fn paused(member: &CurrentMember, limit: u64, what: &str) -> Fail {
+    Fail::Refused(format!(
+        "Paused: this connection has made {limit} {what} in {} ({}) in the last minute. Confirm \
+with the user that this is the right organisation and that they want more, then try again in a \
+minute.",
+        member.org.name, member.org.slug
+    ))
 }
 
 /// What a connection made before this release is told until it reloads its
@@ -513,6 +556,30 @@ impl CollabServer {
     ) -> Result<CallToolResult, ErrorData> {
         finish(&parts, self.add_task_note_for(&parts, input).await)
     }
+
+    #[tool(
+        description = "Delete a task this connection created in the last 24 hours, to undo a mistake. Its notes and assignees go with it. Anything else must be deleted in Collab Tool.",
+        annotations(destructive_hint = true, open_world_hint = false)
+    )]
+    async fn delete_task(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(input): Parameters<DeleteTask>,
+    ) -> Result<CallToolResult, ErrorData> {
+        finish(&parts, self.delete_task_for(&parts, input).await)
+    }
+
+    #[tool(
+        description = "Delete a project this connection created in the last 24 hours, with its tasks, to undo a mistake. Refused if anyone else has added tasks or notes to it.",
+        annotations(destructive_hint = true, open_world_hint = false)
+    )]
+    async fn delete_project(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(input): Parameters<DeleteProject>,
+    ) -> Result<CallToolResult, ErrorData> {
+        finish(&parts, self.delete_project_for(&parts, input).await)
+    }
 }
 
 impl CollabServer {
@@ -558,6 +625,11 @@ impl CollabServer {
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
         let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
         let db = &self.ctx.db;
+        let recent =
+            projects::Model::count_made_by(db, connection.grant_id, a_minute_ago()).await?;
+        if recent >= PROJECTS_PER_MINUTE {
+            return Err(paused(&member, PROJECTS_PER_MINUTE, "projects"));
+        }
         let team = Team::load(&self.ctx, &member).await?;
         let owner_id = match input.owner.as_deref().filter(|o| !o.trim().is_empty()) {
             Some(name) => team.id(&member, name)?.to_string(),
@@ -666,6 +738,11 @@ impl CollabServer {
 
     async fn create_task_for(&self, parts: &Parts, input: CreateTask) -> Outcome {
         let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let recent =
+            tasks::Model::count_made_by(&self.ctx.db, connection.grant_id, a_minute_ago()).await?;
+        if recent >= TASKS_PER_MINUTE {
+            return Err(paused(&member, TASKS_PER_MINUTE, "tasks"));
+        }
         let team = Team::load(&self.ctx, &member).await?;
         let params = TaskParams {
             title: input.title,
@@ -739,6 +816,79 @@ impl CollabServer {
             "body": note.body,
             "at": time::local(note.created_at, member.tz()).to_rfc3339(),
         }))
+    }
+
+    async fn delete_task_for(&self, parts: &Parts, input: DeleteTask) -> Outcome {
+        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let removed = tasks::Model::remove_made_by(
+            &self.ctx.db,
+            member.org.id,
+            input.task_id,
+            connection.grant_id,
+            member.user.id,
+        )
+        .await?
+        .map_err(|refusal| {
+            Fail::Refused(
+                match refusal {
+                    Refusal::NotMadeHere => "Only tasks this connection created in the last 24 hours can be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                    Refusal::OthersTasks | Refusal::OthersContent => "Someone else has added notes or reactions to this task, so it can't be deleted from Claude.",
+                }
+                .into(),
+            )
+        })?;
+        self.after_delete(&member, &connection, "task", &removed);
+        Ok(json!({ "deleted": { "id": removed.id, "title": removed.name } }))
+    }
+
+    async fn delete_project_for(&self, parts: &Parts, input: DeleteProject) -> Outcome {
+        let (member, connection) = self.writer(parts, input.organisation.as_deref()).await?;
+        let removed = projects::Model::remove_made_by(
+            &self.ctx.db,
+            member.org.id,
+            input.project_id,
+            connection.grant_id,
+            member.user.id,
+        )
+        .await?
+        .map_err(|refusal| {
+            Fail::Refused(
+                match refusal {
+                    Refusal::NotMadeHere => "Only projects this connection created in the last 24 hours can be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                    Refusal::OthersTasks => "Someone else has tasks in this project, so it can't be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                    Refusal::OthersContent => "Someone else has added notes or reactions to tasks in this project, so it can't be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                }
+                .into(),
+            )
+        })?;
+        self.after_delete(&member, &connection, "project", &removed);
+        Ok(json!({
+            "deleted": { "id": removed.id, "name": removed.name, "tasks": removed.tasks }
+        }))
+    }
+
+    /// The log is the only record once the rows are gone. The bells of people
+    /// whose notifications went with it refresh.
+    fn after_delete(
+        &self,
+        member: &CurrentMember,
+        connection: &McpConnection,
+        what: &str,
+        removed: &Removed,
+    ) {
+        tracing::info!(
+            user_id = member.user.id,
+            org_id = member.org.id,
+            what,
+            id = removed.id,
+            tasks = removed.tasks,
+            acting = member.acting,
+            grant_id = %connection.grant_id,
+            "Claude deleted a {what}"
+        );
+        if let Some(hub) = self.ctx.shared_store.get::<NotifyHub>() {
+            hub.publish(member.org.id, &removed.notified);
+        }
     }
 }
 
@@ -814,5 +964,97 @@ impl ServerHandler for CollabServer {
                     .with_title("Collab Tool"),
             )
             .with_instructions(INSTRUCTIONS)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::Request;
+    use loco_rs::testing::prelude::*;
+    use sea_orm::{EntityTrait, PaginatorTrait};
+    use serial_test::serial;
+
+    use super::{CollabServer, CreateTask, CurrentMember, DeleteTask, Fail};
+    use crate::{
+        app::App,
+        models::{
+            memberships,
+            organisations::{self, SignupParams},
+            tasks::{self, TaskParams},
+        },
+    };
+
+    /// The bearer gate always adds the connection. If it ever didn't, creates
+    /// and deletes must fail, never act as the web app (a NULL grant).
+    #[tokio::test]
+    #[serial]
+    async fn no_connection_means_no_delete_and_no_create() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = boot.app_context;
+        let (user, org) = organisations::Model::sign_up(
+            &ctx.db,
+            &SignupParams {
+                organisation_name: "Acme".to_string(),
+                name: "alice".to_string(),
+                email: "alice@example.com".to_string(),
+                password: "correct-horse".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let membership = memberships::Model::active_in(&ctx.db, org.id, user.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let (mut parts, ()) = Request::new(()).into_parts();
+        parts.extensions.insert(CurrentMember::from_membership(
+            user,
+            org.clone(),
+            membership,
+        ));
+        let params = |title: &str| TaskParams {
+            title: title.to_string(),
+            project_id: String::new(),
+            assignee_ids: vec![],
+            priority: "medium".to_string(),
+            due_on: String::new(),
+            status: String::new(),
+        };
+        let web = tasks::Model::create(&ctx.db, org.id, &params("Web"), None)
+            .await
+            .unwrap();
+        let server = CollabServer::new(ctx.clone());
+
+        let deleted = server
+            .delete_task_for(
+                &parts,
+                DeleteTask {
+                    organisation: Some(org.slug.clone()),
+                    task_id: web.id,
+                },
+            )
+            .await;
+        assert!(matches!(deleted, Err(Fail::Broken(_))));
+        let created = server
+            .create_task_for(
+                &parts,
+                CreateTask {
+                    organisation: Some(org.slug.clone()),
+                    title: "From Claude".to_string(),
+                    project_id: None,
+                    status: None,
+                    priority: None,
+                    due_on: None,
+                    assignees: None,
+                },
+            )
+            .await;
+        assert!(matches!(created, Err(Fail::Broken(_))));
+        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
+        assert!(tasks::Entity::find_by_id(web.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_some());
     }
 }

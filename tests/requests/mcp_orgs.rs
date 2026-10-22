@@ -4,7 +4,8 @@ use collab::{
     app::App,
     models::{
         access_tokens::{self, PersonalParams},
-        claude_update_notices, memberships, notifications, organisations, projects, task_notes,
+        claude_update_notices, memberships, note_reactions, notifications, organisations, projects,
+        task_notes::{self, NoteParams},
         tasks, users,
     },
 };
@@ -19,11 +20,13 @@ use super::{
     tasks::task_form,
 };
 
-const WRITE_TOOLS: [&str; 4] = [
+const WRITE_TOOLS: [&str; 6] = [
     "create_project",
     "create_task",
     "update_task",
     "add_task_note",
+    "delete_task",
+    "delete_project",
 ];
 const HIMALAYAN: &str = "himalayan-ritual";
 
@@ -222,8 +225,9 @@ async fn claude_task(request: &TestServer, token: &str, title: &str) -> i64 {
     task["id"].as_i64().unwrap()
 }
 
-/// Arguments for each write tool, apart from `organisation`.
-fn write_args(task_id: i64) -> [(&'static str, Value); 4] {
+/// Arguments for each write tool, apart from `organisation`. The deletes
+/// come last, so the task is still there for the others.
+fn write_args(task_id: i64, project_id: i64) -> [(&'static str, Value); 6] {
     [
         (
             "create_project",
@@ -238,7 +242,22 @@ fn write_args(task_id: i64) -> [(&'static str, Value); 4] {
             "add_task_note",
             json!({ "task_id": task_id, "body": "Hello" }),
         ),
+        ("delete_task", json!({ "task_id": task_id })),
+        ("delete_project", json!({ "project_id": project_id })),
     ]
+}
+
+/// A project made through the tool, in Himalayan Ritual. Returns its id.
+async fn claude_project(request: &TestServer, token: &str, name: &str) -> i64 {
+    let (error, project) = tool(
+        request,
+        token,
+        "create_project",
+        json!({ "organisation": HIMALAYAN, "name": name, "lane": "now", "status": "Active" }),
+    )
+    .await;
+    assert!(!error, "{project}");
+    project["id"].as_i64().unwrap()
 }
 
 #[tokio::test]
@@ -271,6 +290,7 @@ async fn every_result_names_the_org() {
         setup(&request, &ctx).await;
         let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
         let task = claude_task(&request, &token, "Order incense").await;
+        let project = claude_project(&request, &token, "Spring range").await;
         let org = json!({ "name": "Himalayan Ritual", "slug": HIMALAYAN });
         let mut calls = vec![
             ("list_projects", json!({})),
@@ -278,7 +298,7 @@ async fn every_result_names_the_org() {
             ("list_tasks", json!({})),
             ("get_task", json!({ "task_id": task })),
         ];
-        for (name, mut args) in write_args(task) {
+        for (name, mut args) in write_args(task, project) {
             args["organisation"] = json!(HIMALAYAN);
             calls.push((name, args));
         }
@@ -308,8 +328,9 @@ async fn a_write_for_another_org_is_refused() {
         setup(&request, &ctx).await;
         let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
         let task = claude_task(&request, &token, "Order incense").await;
+        let project = claude_project(&request, &token, "Spring range").await;
         let before = counts(&ctx).await;
-        for (name, mut args) in write_args(task) {
+        for (name, mut args) in write_args(task, project) {
             args["organisation"] = json!("softly");
             let (error, message) = tool(&request, &token, name, args).await;
             assert!(error, "{name}");
@@ -348,8 +369,9 @@ async fn a_write_without_organisation_is_a_tool_error_not_a_protocol_error() {
         setup(&request, &ctx).await;
         let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
         let task = claude_task(&request, &token, "Order incense").await;
+        let project = claude_project(&request, &token, "Spring range").await;
         let before = counts(&ctx).await;
-        for (name, args) in write_args(task) {
+        for (name, args) in write_args(task, project) {
             for args in [args.clone(), {
                 let mut blank = args;
                 blank["organisation"] = json!("  ");
@@ -597,6 +619,414 @@ async fn the_bell_notice_is_sent_once() {
                 .unwrap(),
             2
         );
+    })
+    .await;
+}
+
+async fn user(ctx: &AppContext, email: &str) -> i64 {
+    users::Model::find_by_email(&ctx.db, email)
+        .await
+        .unwrap()
+        .id
+}
+
+async fn task_row(ctx: &AppContext, id: i64) -> Option<tasks::Model> {
+    tasks::Entity::find_by_id(id).one(&ctx.db).await.unwrap()
+}
+
+/// A note on a task, by `author` (or by no one, as when the author's account
+/// was deleted).
+async fn note_on(ctx: &AppContext, task_id: i64, author: Option<i64>) -> task_notes::Model {
+    let task = task_row(ctx, task_id).await.unwrap();
+    let note = task_notes::Model::create(
+        &ctx.db,
+        &task,
+        author.unwrap_or(user(ctx, "raj@example.com").await),
+        &NoteParams {
+            body: "A note".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    if author.is_some() {
+        return note;
+    }
+    let mut orphan: task_notes::ActiveModel = note.into();
+    orphan.author_id = ActiveValue::Set(None);
+    orphan.update(&ctx.db).await.unwrap()
+}
+
+async fn react(ctx: &AppContext, note: &task_notes::Model, user_id: i64) {
+    note_reactions::Model::set(&ctx.db, note, user_id, "👍", true)
+        .await
+        .unwrap();
+}
+
+/// Moves a task or project's `created_at` this far into the past.
+async fn backdate_task(ctx: &AppContext, id: i64, seconds: i64) {
+    let row = task_row(ctx, id).await.unwrap();
+    let at = row.created_at - chrono::Duration::seconds(seconds);
+    let mut row: tasks::ActiveModel = row.into();
+    row.created_at = ActiveValue::Set(at);
+    row.update(&ctx.db).await.unwrap();
+}
+
+async fn backdate_project(ctx: &AppContext, id: i64, seconds: i64) {
+    let row = projects::Entity::find_by_id(id)
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let at = row.created_at - chrono::Duration::seconds(seconds);
+    let mut row: projects::ActiveModel = row.into();
+    row.created_at = ActiveValue::Set(at);
+    row.update(&ctx.db).await.unwrap();
+}
+
+/// A task made in the web app, in Himalayan Ritual.
+async fn web_task(ctx: &AppContext, title: &str, project_id: Option<i64>) -> i64 {
+    tasks::Model::create(
+        &ctx.db,
+        org_id(ctx, HIMALAYAN).await,
+        &tasks::TaskParams {
+            title: title.to_string(),
+            project_id: project_id.map(|id| id.to_string()).unwrap_or_default(),
+            assignee_ids: vec![],
+            priority: "medium".to_string(),
+            due_on: String::new(),
+            status: String::new(),
+        },
+        None,
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+async fn delete(
+    request: &TestServer,
+    token: &str,
+    name: &str,
+    key: &str,
+    id: i64,
+) -> (bool, Value) {
+    tool(
+        request,
+        token,
+        name,
+        json!({ "organisation": HIMALAYAN, key: id }),
+    )
+    .await
+}
+
+/// A notification for Raj in this org, linking to this task.
+async fn notice_in(ctx: &AppContext, slug: &str, task_id: i64) -> i64 {
+    notifications::ActiveModel {
+        user_id: ActiveValue::Set(user(ctx, "raj@example.com").await),
+        kind: ActiveValue::Set("note".to_string()),
+        body: ActiveValue::Set("added a note".to_string()),
+        link: ActiveValue::Set(format!("/tasks?open={task_id}")),
+        ..Default::default()
+    }
+    .set_tenant(org_id(ctx, slug).await)
+    .unwrap()
+    .insert(&ctx.db)
+    .await
+    .unwrap()
+    .id
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_task_rules() {
+    request::<App, _, _>(|request, ctx| async move {
+        setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let second = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let kreepa = user(&ctx, "kreepa@example.com").await;
+        let raj = user(&ctx, "raj@example.com").await;
+        let not_made_here = "Only tasks this connection created in the last 24 hours can be \
+deleted from Claude. Ask the user to delete it in Collab Tool.";
+        let others = "Someone else has added notes or reactions to this task, so it can't be \
+deleted from Claude.";
+
+        let theirs = claude_task(&request, &second, "Another connection's").await;
+        let web = web_task(&ctx, "Made on the web", None).await;
+        let old = claude_task(&request, &token, "Yesterday's").await;
+        backdate_task(&ctx, old, 25 * 60 * 60).await;
+        let noted = claude_task(&request, &token, "Kreepa noted").await;
+        note_on(&ctx, noted, Some(kreepa)).await;
+        let orphaned = claude_task(&request, &token, "Orphan note").await;
+        note_on(&ctx, orphaned, None).await;
+        let reacted = claude_task(&request, &token, "Kreepa reacted").await;
+        let note = note_on(&ctx, reacted, Some(raj)).await;
+        react(&ctx, &note, kreepa).await;
+        for (id, message) in [
+            (theirs, not_made_here),
+            (web, not_made_here),
+            (old, not_made_here),
+            (noted, others),
+            (orphaned, others),
+            (reacted, others),
+        ] {
+            let (error, result) = delete(&request, &token, "delete_task", "task_id", id).await;
+            assert!(error, "{id}: {result}");
+            assert_eq!(result, message, "{id}");
+            assert!(task_row(&ctx, id).await.is_some());
+        }
+
+        // Raj's own note and reaction don't block it.
+        let (_, task) = tool(
+            &request,
+            &token,
+            "create_task",
+            json!({ "organisation": HIMALAYAN, "title": "Mine", "assignees": ["kreepa"] }),
+        )
+        .await;
+        let mine = task["id"].as_i64().unwrap();
+        let note = note_on(&ctx, mine, Some(raj)).await;
+        react(&ctx, &note, raj).await;
+        let assigned = notifications::Entity::find()
+            .filter(notifications::Column::UserId.eq(kreepa))
+            .filter(notifications::Column::Link.eq(format!("/tasks?open={mine}")))
+            .count(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(assigned, 1, "Kreepa was told about the assignment");
+        let elsewhere = notice_in(&ctx, "softly", mine).await;
+        let unrelated = notice_in(&ctx, HIMALAYAN, noted).await;
+
+        let (error, result) = delete(&request, &token, "delete_task", "task_id", mine).await;
+        assert!(!error, "{result}");
+        assert_eq!(result["deleted"], json!({ "id": mine, "title": "Mine" }));
+        assert!(task_row(&ctx, mine).await.is_none());
+        assert_eq!(
+            task_notes::Entity::find()
+                .filter(task_notes::Column::TaskId.eq(mine))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            note_reactions::Entity::find()
+                .filter(note_reactions::Column::TaskNoteId.eq(note.id))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            collab::models::task_assignees::Entity::find()
+                .filter(collab::models::task_assignees::Column::TaskId.eq(mine))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+        let left: Vec<i64> = notifications::Entity::find()
+            .filter(notifications::Column::Link.eq(format!("/tasks?open={mine}")))
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
+        assert_eq!(
+            left,
+            [elsewhere],
+            "only another org's notice keeps the link"
+        );
+        assert!(notifications::Entity::find_by_id(unrelated)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_some());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_project_rules() {
+    request::<App, _, _>(|request, ctx| async move {
+        setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let second = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let kreepa = user(&ctx, "kreepa@example.com").await;
+        let raj = user(&ctx, "raj@example.com").await;
+        let others_tasks = "Someone else has tasks in this project, so it can't be deleted from \
+Claude. Ask the user to delete it in Collab Tool.";
+        let others_content = "Someone else has added notes or reactions to tasks in this \
+project, so it can't be deleted from Claude. Ask the user to delete it in Collab Tool.";
+        let not_made_here = "Only projects this connection created in the last 24 hours can be \
+deleted from Claude. Ask the user to delete it in Collab Tool.";
+        let task_in = |project: i64, token: String, title: &'static str| {
+            let request = &request;
+            async move {
+                let (error, task) = tool(
+                    request,
+                    &token,
+                    "create_task",
+                    json!({ "organisation": HIMALAYAN, "title": title, "project_id": project }),
+                )
+                .await;
+                assert!(!error, "{task}");
+                task["id"].as_i64().unwrap()
+            }
+        };
+
+        let with_web = claude_project(&request, &token, "With a web task").await;
+        web_task(&ctx, "Web", Some(with_web)).await;
+        let with_other = claude_project(&request, &token, "With another connection's").await;
+        task_in(with_other, second.clone(), "Other").await;
+        let noted = claude_project(&request, &token, "Kreepa noted").await;
+        let task = task_in(noted, token.clone(), "Noted").await;
+        note_on(&ctx, task, Some(kreepa)).await;
+        let reacted = claude_project(&request, &token, "Kreepa reacted").await;
+        let task = task_in(reacted, token.clone(), "Reacted").await;
+        let note = note_on(&ctx, task, Some(raj)).await;
+        react(&ctx, &note, kreepa).await;
+        let orphaned = claude_project(&request, &token, "Orphan note").await;
+        let task = task_in(orphaned, token.clone(), "Orphan").await;
+        note_on(&ctx, task, None).await;
+        // The brake allows five projects a minute; make room for more.
+        for id in [with_web, with_other, noted, reacted, orphaned] {
+            backdate_project(&ctx, id, 61).await;
+        }
+        let old = claude_project(&request, &token, "Yesterday's").await;
+        backdate_project(&ctx, old, 25 * 60 * 60).await;
+        for (id, message) in [
+            (with_web, others_tasks),
+            (with_other, others_tasks),
+            (noted, others_content),
+            (reacted, others_content),
+            (orphaned, others_content),
+            (old, not_made_here),
+        ] {
+            let (error, result) =
+                delete(&request, &token, "delete_project", "project_id", id).await;
+            assert!(error, "{id}: {result}");
+            assert_eq!(result, message, "{id}");
+            assert!(projects::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .is_some());
+        }
+
+        let mine = claude_project(&request, &token, "Mine").await;
+        let first = task_in(mine, token.clone(), "One").await;
+        let second_task = task_in(mine, token.clone(), "Two").await;
+        let note = note_on(&ctx, first, Some(raj)).await;
+        react(&ctx, &note, raj).await;
+        notice_in(&ctx, HIMALAYAN, second_task).await;
+        let (error, result) = delete(&request, &token, "delete_project", "project_id", mine).await;
+        assert!(!error, "{result}");
+        assert_eq!(
+            result["deleted"],
+            json!({ "id": mine, "name": "Mine", "tasks": 2 })
+        );
+        assert!(projects::Entity::find_by_id(mine)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(task_row(&ctx, first).await.is_none());
+        assert!(task_row(&ctx, second_task).await.is_none());
+        assert_eq!(
+            notifications::Entity::find()
+                .filter(notifications::Column::Link.eq(format!("/tasks?open={second_task}")))
+                .count(&ctx.db)
+                .await
+                .unwrap(),
+            0
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_tools_stay_in_their_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        setup(&request, &ctx).await;
+        let himalayan = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let softly = token_in(&ctx, "raj@example.com", "softly").await;
+        let (_, task) = tool(
+            &request,
+            &softly,
+            "create_task",
+            json!({ "organisation": "softly", "title": "Softly copy" }),
+        )
+        .await;
+        let (_, project) = tool(
+            &request,
+            &softly,
+            "create_project",
+            json!({ "organisation": "softly", "name": "Softly launch", "lane": "now", "status": "Active" }),
+        )
+        .await;
+        let before = counts(&ctx).await;
+        for (name, key, id) in [
+            ("delete_task", "task_id", task["id"].as_i64().unwrap()),
+            ("delete_project", "project_id", project["id"].as_i64().unwrap()),
+        ] {
+            let (error, message) = delete(&request, &himalayan, name, key, id).await;
+            assert!(error);
+            assert_eq!(message, "Not found in Himalayan Ritual.");
+        }
+        assert_eq!(counts(&ctx).await, before);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_brake_stops_the_sixth_project_and_sixty_first_task() {
+    request::<App, _, _>(|request, ctx| async move {
+        setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let second = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let mut made = Vec::new();
+        for n in 0..5 {
+            made.push(claude_project(&request, &token, &format!("Project {n}")).await);
+        }
+        let sixth = json!({ "organisation": HIMALAYAN, "name": "Sixth", "lane": "now", "status": "Active" });
+        let (error, message) = tool(&request, &token, "create_project", sixth.clone()).await;
+        assert!(error);
+        assert_eq!(
+            message,
+            "Paused: this connection has made 5 projects in Himalayan Ritual (himalayan-ritual) \
+in the last minute. Confirm with the user that this is the right organisation and that they \
+want more, then try again in a minute."
+        );
+        let (error, _) = tool(&request, &second, "create_project", sixth.clone()).await;
+        assert!(!error, "another connection has its own count");
+        for id in made {
+            backdate_project(&ctx, id, 61).await;
+        }
+        let (error, _) = tool(&request, &token, "create_project", sixth).await;
+        assert!(!error);
+
+        let mut tasks_made = Vec::new();
+        for n in 0..60 {
+            tasks_made.push(claude_task(&request, &token, &format!("Task {n}")).await);
+        }
+        let (error, message) = tool(
+            &request,
+            &token,
+            "create_task",
+            json!({ "organisation": HIMALAYAN, "title": "One too many" }),
+        )
+        .await;
+        assert!(error);
+        assert!(message.as_str().unwrap().starts_with("Paused: this connection has made 60 tasks"));
+        claude_task(&request, &second, "Elsewhere").await;
+        for id in tasks_made {
+            backdate_task(&ctx, id, 61).await;
+        }
+        claude_task(&request, &token, "After a minute").await;
     })
     .await;
 }

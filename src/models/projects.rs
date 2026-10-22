@@ -4,7 +4,10 @@ use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub use super::_entities::projects::{ActiveModel, Column, Entity, Model};
-use super::{field_error, memberships, tasks};
+use super::{
+    field_error, memberships,
+    tasks::{self, Refusal, Removed},
+};
 
 pub type Projects = Entity;
 
@@ -104,6 +107,23 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
+    /// How many projects this Claude connection made after `since`, for the
+    /// brake on bulk creates.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn count_made_by<C: ConnectionTrait>(
+        db: &C,
+        grant: Uuid,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .filter(Column::ClaudeGrantId.eq(grant))
+            .filter(Column::CreatedAt.gt(since))
+            .count(db)
+            .await?)
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn list_for_org<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<Vec<Self>> {
@@ -159,6 +179,53 @@ impl Model {
         Ok(project.insert(db).await?)
     }
 
+    /// Deletes a project with its tasks, their notes, assignees and
+    /// reactions (cascading keys), and the notifications that link to those
+    /// tasks. For owners and admins in the web app. Can't be undone.
+    ///
+    /// # Errors
+    /// `EntityNotFound` when it is not in this organisation, or database
+    /// errors.
+    pub async fn remove(db: &DatabaseConnection, org_id: i64, id: i64) -> ModelResult<Removed> {
+        let txn = db.begin().await?;
+        let (project, task_ids) = lock_with_tasks(&txn, org_id, id).await?;
+        let removed = delete_locked(&txn, project, &task_ids).await?;
+        txn.commit().await?;
+        Ok(removed)
+    }
+
+    /// Deletes a project Claude made, for that same connection (`grant`),
+    /// within [`tasks::UNDO_HOURS`], when every task in it was made by the
+    /// same connection and no one but `user_id` has added notes or reactions.
+    ///
+    /// # Errors
+    /// `EntityNotFound` when it is not in this organisation, or database
+    /// errors.
+    pub async fn remove_made_by(
+        db: &DatabaseConnection,
+        org_id: i64,
+        id: i64,
+        grant: Uuid,
+        user_id: i64,
+    ) -> ModelResult<Result<Removed, Refusal>> {
+        let txn = db.begin().await?;
+        let (project, locked) = lock_with_tasks(&txn, org_id, id).await?;
+        // An early return drops `txn`, which rolls it back.
+        if !tasks::made_lately(project.claude_grant_id, project.created_at, grant) {
+            return Ok(Err(Refusal::NotMadeHere));
+        }
+        if locked.iter().any(|(_, g)| *g != Some(grant)) {
+            return Ok(Err(Refusal::OthersTasks));
+        }
+        let ids: Vec<i64> = locked.iter().map(|(id, _)| *id).collect();
+        if tasks::others_content(&txn, &ids, user_id).await? {
+            return Ok(Err(Refusal::OthersContent));
+        }
+        let removed = delete_locked(&txn, project, &locked).await?;
+        txn.commit().await?;
+        Ok(Ok(removed))
+    }
+
     /// # Errors
     /// Validation errors, or database errors.
     pub async fn update_from<C: ConnectionTrait>(
@@ -172,6 +239,52 @@ impl Model {
         apply(&mut project, params, owner_id);
         Ok(project.update(db).await?)
     }
+}
+
+/// Locks a project, then its tasks, `FOR UPDATE`. A task being added to the
+/// project, or moved into it, waits on the project row (its foreign key
+/// check), so the task list can't change underneath a delete. Returns the
+/// tasks as `(id, claude_grant_id)`.
+async fn lock_with_tasks<C: ConnectionTrait>(
+    db: &C,
+    org_id: i64,
+    id: i64,
+) -> ModelResult<(Model, Vec<(i64, Option<Uuid>)>)> {
+    let project = Entity::find_by_id(id)
+        .in_tenant(org_id)
+        .lock_exclusive()
+        .one(db)
+        .await?
+        .ok_or(ModelError::EntityNotFound)?;
+    let task_ids = tasks::Entity::find()
+        .select_only()
+        .column(tasks::Column::Id)
+        .column(tasks::Column::ClaudeGrantId)
+        .filter(tasks::Column::ProjectId.eq(project.id))
+        .filter(tasks::Column::OrganisationId.eq(org_id))
+        .lock_exclusive()
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok((project, task_ids))
+}
+
+/// Deletes a locked project and the notifications for its locked tasks.
+async fn delete_locked<C: ConnectionTrait>(
+    db: &C,
+    project: Model,
+    task_ids: &[(i64, Option<Uuid>)],
+) -> ModelResult<Removed> {
+    let ids: Vec<i64> = task_ids.iter().map(|(id, _)| *id).collect();
+    let notified = tasks::drop_notices(db, project.organisation_id, &ids).await?;
+    let removed = Removed {
+        id: project.id,
+        name: project.name.clone(),
+        tasks: ids.len(),
+        notified,
+    };
+    project.into_active_model().delete(db).await?;
+    Ok(removed)
 }
 
 fn apply(project: &mut ActiveModel, params: &ProjectParams, owner_id: Option<i64>) {
