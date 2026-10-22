@@ -532,6 +532,10 @@
   .msg:not(.msg-start):not(.msg-own) .bubble { border-top-left-radius: 6px; }
   .msg-own:not(.msg-start) .bubble { border-top-right-radius: 6px; }
   .bubble-text { white-space: pre-wrap; }
+  /* A chat photo: a fixed 4:3 box, so the feed doesn't jump as it loads. */
+  .photo-link { display: block; margin: 0 -4px 4px -6px; }
+  .photo-thumb { display: block; width: 320px; max-width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; background: var(--chip); }
+  .photo-removed { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; font-size: 13px; font-style: italic; color: var(--muted); }
   /* Time and tick inside the bubble, bottom right. The pad keeps room for them on the last line. */
   .bubble-main { position: relative; }
   .stamp-pad { display: inline-block; width: 42px; height: 1px; }
@@ -584,6 +588,8 @@
     .field-emoji[aria-expanded="true"] .ic-keyboard { display: block; }
   }
   .composer textarea:focus { border-color: var(--accent); }
+  [data-photo-pick] .ic-sending, [data-photo-pick][aria-busy="true"] .ic-photo { display: none; }
+  [data-photo-pick][aria-busy="true"] .ic-sending { display: block; }
   /* Emoji picker: a popover on desktop, docked where the keyboard was on phones. */
   :has(> .ep-pop) { position: relative; }
   .ep { display: flex; flex-direction: column; background: var(--surface); color: var(--text); }

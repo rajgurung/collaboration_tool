@@ -710,6 +710,8 @@ mod tests {
             conversation_id,
             user_id: 1,
             parent_id,
+            document_id: None,
+            has_photo: false,
         }
     }
 

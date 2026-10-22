@@ -35,7 +35,7 @@ const LOGINS_ONLY: &str =
     "The Logins folder holds logins only. Add photos and files to another folder.";
 
 /// The upload route's body limit: the 25 MB file plus room for the form.
-const UPLOAD_BODY_LIMIT: usize = 26 * 1024 * 1024;
+pub const UPLOAD_BODY_LIMIT: usize = 26 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct FolderRow {
@@ -374,6 +374,22 @@ async fn delete_folder(
 /// Reads the one `file` part of an upload, refusing it as soon as it passes
 /// 25 MB rather than reading the rest.
 async fn read_file(multipart: &mut Multipart) -> std::result::Result<(String, Bytes), String> {
+    read_upload(multipart, None)
+        .await
+        .map(|(name, bytes, _)| (name, bytes))
+}
+
+/// Reads the `file` part of an upload, as [`read_file`], and the text of the
+/// `text_field` part if one is named and sent. The text may come before or
+/// after the file; it is cut to 4,000 characters, which is more than any
+/// field it is used for allows.
+///
+/// # Errors
+/// The refusal to show, for a file over 25 MB, a broken upload or no file.
+pub async fn read_upload(
+    multipart: &mut Multipart,
+    text_field: Option<&str>,
+) -> std::result::Result<(String, Bytes, String), String> {
     let failed = |err: MultipartError| {
         if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
             documents::too_big()
@@ -381,8 +397,20 @@ async fn read_file(multipart: &mut Multipart) -> std::result::Result<(String, By
             "Stopped part way. Check your connection and try again.".to_string()
         }
     };
+    let mut file = None;
+    let mut text = String::new();
     while let Some(mut field) = multipart.next_field().await.map_err(failed)? {
-        if field.name() != Some("file") {
+        if text_field.is_some() && field.name() == text_field {
+            text = field
+                .text()
+                .await
+                .map_err(failed)?
+                .chars()
+                .take(4000)
+                .collect();
+            continue;
+        }
+        if field.name() != Some("file") || file.is_some() {
             continue;
         }
         let name = field.file_name().unwrap_or("File").to_string();
@@ -393,9 +421,13 @@ async fn read_file(multipart: &mut Multipart) -> std::result::Result<(String, By
             }
             bytes.extend_from_slice(&chunk);
         }
-        return Ok((name, bytes.freeze()));
+        file = Some((name, bytes.freeze()));
+        if text_field.is_none() {
+            break;
+        }
     }
-    Err("Choose a file to add.".to_string())
+    let (name, bytes) = file.ok_or_else(|| "Choose a file to add.".to_string())?;
+    Ok((name, bytes, text))
 }
 
 /// Any member adds one file to a folder. Success refreshes the file list;

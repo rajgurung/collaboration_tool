@@ -17,6 +17,9 @@ pub type Folders = Entity;
 /// The name of the starter folder for logins.
 pub const LOGINS: &str = "Logins";
 
+/// The folder photos posted in chat channels go to.
+pub const CHAT_PHOTOS: &str = "Chat photos";
+
 /// The folders every organisation starts with, and their notes.
 pub const STARTERS: [(&str, Option<&str>); 2] = [
     ("Company", None),
@@ -193,6 +196,41 @@ impl Model {
                 }
             })
             .collect())
+    }
+
+    /// The folder chat photos are stored in, made on first use. Two first
+    /// photos at once both end up in the one folder: the loser of the unique
+    /// name index finds the winner's.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn chat_photos<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<Self> {
+        let find = || {
+            Entity::find()
+                .in_tenant(org_id)
+                .filter(
+                    Expr::expr(Func::lower(Expr::col(Column::Name))).eq(CHAT_PHOTOS.to_lowercase()),
+                )
+                .one(db)
+        };
+        if let Some(folder) = find().await? {
+            return Ok(folder);
+        }
+        let created = ActiveModel {
+            name: ActiveValue::Set(CHAT_PHOTOS.to_string()),
+            note: ActiveValue::Set(Some("Photos posted in chat channels.".to_string())),
+            ..Default::default()
+        }
+        .set_tenant(org_id)?
+        .insert(db)
+        .await;
+        match created {
+            Ok(folder) => Ok(folder),
+            Err(err) if matches!(err.sql_err(), Some(SqlErr::UniqueConstraintViolation(_))) => {
+                find().await?.ok_or(ModelError::EntityNotFound)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// # Errors

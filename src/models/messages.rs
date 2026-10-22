@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 
+use bytes::Bytes;
 use loco_rs::prelude::*;
 use sea_orm::FromQueryResult;
 use serde::Deserialize;
 
 pub use super::_entities::messages::{ActiveModel, Column, Entity, Model};
-use super::{conversation_members::ReadSpan, conversations};
+use super::{
+    conversation_members::ReadSpan,
+    conversations::{self, kind},
+    documents, folders,
+};
 
 pub type Messages = Entity;
 
@@ -28,6 +33,19 @@ pub struct MessageParams {
     #[validate(length(min = 1, max = 1000, message = "Messages are 1 to 1,000 characters."))]
     pub body: String,
 }
+
+/// A photo's caption: optional, so only a maximum.
+#[derive(Debug, Validate)]
+struct CaptionParams {
+    #[validate(length(max = 1000, message = "Captions are up to 1,000 characters."))]
+    body: String,
+}
+
+/// Photo types a chat shows in place. HEIC is left out: most browsers can't
+/// draw it, and phones send JPEG when a page asks for `image/*`.
+const PHOTO_TYPES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
+pub const NOT_A_PHOTO: &str = "Only photos can be posted here. Use a JPG, PNG or WebP.";
+pub const CHANNELS_ONLY: &str = "Photos can only be posted in channels.";
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -196,6 +214,67 @@ impl Model {
             return Err(ModelError::EntityNotFound);
         }
         Self::insert(db, conversation, Some(parent.id), user_id, params).await
+    }
+
+    /// Saves a photo message in a channel: the file goes into the "Chat
+    /// photos" folder in Documents, then the message points at it. The caption
+    /// may be empty. The caller must already know the sender is a member.
+    ///
+    /// # Errors
+    /// `Message` outside a channel, or for a file that is empty, too big or
+    /// not a photo; validation errors for a long caption; storage or database
+    /// errors otherwise.
+    pub async fn create_photo(
+        ctx: &AppContext,
+        conversation: &conversations::Model,
+        user_id: i64,
+        caption: &str,
+        file_name: &str,
+        bytes: Bytes,
+    ) -> ModelResult<Self> {
+        if conversation.kind != kind::CHANNEL {
+            return Err(ModelError::msg(CHANNELS_ONLY));
+        }
+        let body = caption.trim().to_string();
+        ValidatorTrait::validate(&CaptionParams { body: body.clone() })?;
+        if bytes.is_empty() {
+            return Err(ModelError::msg("That file is empty."));
+        }
+        if bytes.len() > documents::MAX_BYTES {
+            return Err(ModelError::msg(&documents::too_big()));
+        }
+        if !documents::sniff(&bytes, file_name).is_some_and(|t| PHOTO_TYPES.contains(&t)) {
+            return Err(ModelError::msg(NOT_A_PHOTO));
+        }
+        let folder = folders::Model::chat_photos(&ctx.db, conversation.organisation_id).await?;
+        let file = documents::Model::upload(ctx, &folder, user_id, file_name, bytes).await?;
+        let saved = ActiveModel {
+            body: ActiveValue::Set(body),
+            conversation_id: ActiveValue::Set(conversation.id),
+            user_id: ActiveValue::Set(user_id),
+            document_id: ActiveValue::Set(Some(file.id)),
+            has_photo: ActiveValue::Set(true),
+            ..Default::default()
+        }
+        .set_tenant(conversation.organisation_id)?
+        .insert(&ctx.db)
+        .await;
+        match saved {
+            Ok(message) => Ok(message),
+            Err(err) => {
+                if let Err(cleanup) = file.delete_file(ctx).await {
+                    tracing::error!(error = %cleanup, "could not delete an unposted chat photo");
+                }
+                Err(err.into())
+            }
+        }
+    }
+
+    /// A photo with no caption: lists say "sent a photo" for it, so nothing
+    /// shows blank.
+    #[must_use]
+    pub fn photo_only(&self) -> bool {
+        self.has_photo && self.body.is_empty()
     }
 
     async fn insert<C: ConnectionTrait>(

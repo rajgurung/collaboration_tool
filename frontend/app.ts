@@ -1572,6 +1572,60 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   uploadFinished(upload, successful, xhr.status);
 });
 
+// Chat photos (channels only): the photo button picks an image and posts it
+// at once, with what's typed as its caption. The message arrives over the
+// socket like any other; if it hasn't shortly after, the feed reloads.
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-photo-pick]");
+  if (button && !button.disabled) button.form?.querySelector<HTMLInputElement>("[data-photo-input]")?.click();
+});
+document.addEventListener("change", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.hasAttribute("data-photo-input")) return;
+  const file = input.files?.[0];
+  input.value = "";
+  if (file) void sendPhoto(input, file);
+});
+
+async function sendPhoto(input: HTMLInputElement, file: File) {
+  const form = input.form;
+  const field = form?.querySelector<HTMLTextAreaElement>("textarea[name=body]");
+  const button = form?.querySelector<HTMLButtonElement>("[data-photo-pick]");
+  const url = input.dataset.photoUrl;
+  if (!form || !field || !button || !url) return;
+  const failed = (message = "Couldn't send the photo. Check your connection and try again.") =>
+    showToast({ kind: "error", message });
+  if (file.size > MAX_UPLOAD) return failed(`Too big: ${megabytes(file.size)}. The limit is 25 MB. Try saving a smaller copy.`);
+  const body = new FormData();
+  body.append("body", field.value);
+  body.append("file", namedPhoto(file));
+  const headers = { "HX-Request": "true", ...orgHeaders() };
+  const probe = () => fetch(orgUrl("/orgs/current"), { headers, credentials: "same-origin" });
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    // Ask first, as document uploads do, so a stale tab is caught before it sends a large body.
+    if (staleRefusal(await probe())) return;
+    const res = await fetch(url, { method: "POST", headers, body, credentials: "same-origin" });
+    if (staleRefusal(res)) return;
+    // Railway's edge can turn the early refusal of a large body into a 502.
+    if (res.status === 502 && staleRefusal(await probe())) return;
+    if (!res.ok) return failed(res.status === 422 ? await res.text() : undefined);
+    form.reset();
+    autogrow(field);
+    const id = /id="(message-\d+)"/.exec(await res.text())?.[1];
+    const feedUrl = form.closest<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;
+    window.setTimeout(() => {
+      if (id && feedUrl && !document.getElementById(id)) void htmx.ajax("GET", feedUrl, { target: "#chat-feed", swap: "innerHTML" });
+    }, 1500);
+  } catch {
+    failed();
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+  }
+}
+
 // <button data-copy-text="..."> copies its own text, such as a login's username.
 document.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLElement>("[data-copy-text]");
