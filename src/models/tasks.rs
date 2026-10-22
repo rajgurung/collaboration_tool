@@ -47,6 +47,10 @@ pub fn made_lately(row_grant: Option<Uuid>, created_at: DateTimeWithTimeZone, gr
 
 /// Whether anyone but `user_id` has a note, or a reaction to a note, on these
 /// tasks. A note whose author was deleted (NULL) counts as someone else's.
+/// Run it inside the delete's transaction, after locking the tasks: the
+/// notes are locked `FOR UPDATE` too, so a reaction being added (its foreign
+/// key check needs the note) waits for the delete instead of being cascaded
+/// away unseen.
 ///
 /// # Errors
 /// On database errors.
@@ -55,21 +59,20 @@ pub async fn others_content<C: ConnectionTrait>(
     task_ids: &[i64],
     user_id: i64,
 ) -> ModelResult<bool> {
-    let notes = task_notes::Entity::find()
+    let notes: Vec<(i64, Option<i64>)> = task_notes::Entity::find()
+        .select_only()
+        .column(task_notes::Column::Id)
+        .column(task_notes::Column::AuthorId)
         .filter(task_notes::Column::TaskId.is_in(task_ids.iter().copied()))
-        .filter(
-            Condition::any()
-                .add(task_notes::Column::AuthorId.is_null())
-                .add(task_notes::Column::AuthorId.ne(user_id)),
-        )
-        .count(db)
+        .lock_exclusive()
+        .into_tuple()
+        .all(db)
         .await?;
-    if notes > 0 {
+    if notes.iter().any(|(_, author)| *author != Some(user_id)) {
         return Ok(true);
     }
     let reactions = note_reactions::Entity::find()
-        .inner_join(task_notes::Entity)
-        .filter(task_notes::Column::TaskId.is_in(task_ids.iter().copied()))
+        .filter(note_reactions::Column::TaskNoteId.is_in(notes.iter().map(|(id, _)| *id)))
         .filter(note_reactions::Column::UserId.ne(user_id))
         .count(db)
         .await?;
