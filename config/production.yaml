@@ -9,7 +9,8 @@
 # The variables this file requires:
 #   DATABASE_URL, JWT_SECRET, APP_URL, MAIL_FROM, the MAILER_* set below, and
 #   R2_BUCKET, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and
-#   SECRETS_KEK.
+#   SECRETS_KEK. SECRETS_KEK_VERSION and the SECRETS_KEK_PREVIOUS pair are
+#   optional; see "Rotating SECRETS_KEK" in docs/deploy.md.
 
 # Application logging configuration
 logger:
@@ -135,7 +136,12 @@ settings:
   # Key-encryption key for login passwords: base64 of 32 random bytes
   # (openssl rand -base64 32). Required. The app will not start without it,
   # or with the development key. Losing it loses every stored password.
+  # To rotate it, see "Rotating SECRETS_KEK" in docs/deploy.md.
   secrets_kek: "<%= get_env(name="SECRETS_KEK") %>"
+  secrets_kek_version: "<%= get_env(name="SECRETS_KEK_VERSION", default="1") %>"
+  # Only during a rotation: the old key and its version, both or neither.
+  secrets_kek_previous: "<%= get_env(name="SECRETS_KEK_PREVIOUS", default="") %>"
+  secrets_kek_previous_version: "<%= get_env(name="SECRETS_KEK_PREVIOUS_VERSION", default="") %>"
   # Public URL of the app, used in email links and the Origin check on form posts.
   app_url: <%= get_env(name="APP_URL") %>
   # Sender for outgoing email. Must be an address your mail provider allows.
