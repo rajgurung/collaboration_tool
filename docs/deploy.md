@@ -42,7 +42,7 @@ The app ships as one Docker image (`Dockerfile`). Railway builds it from the rep
 | `SECRETS_KEK` | yes | The key-encryption key (KEK). It encrypts each organisation's own key, which in turn encrypts that organisation's login passwords. Base64 of 32 random bytes: `openssl rand -base64 32`. The app refuses to start without it, with a value that is not 32 bytes, or with the development key. Keep a copy offline, outside Railway: losing it loses every stored password. Never just replace it: follow [Rotating SECRETS_KEK](#rotating-secrets_kek). |
 | `SECRETS_KEK_VERSION` | no | The version number of `SECRETS_KEK`, stored with each organisation key. Defaults to `1`. Raise it by one at each rotation. |
 | `SECRETS_KEK_PREVIOUS` | rotation only | The old KEK while a rotation runs. Same rules as `SECRETS_KEK`, and it must differ from it. Remove it once no organisation key uses it. |
-| `SECRETS_KEK_PREVIOUS_VERSION` | with `SECRETS_KEK_PREVIOUS` | The old KEK's version. Required when `SECRETS_KEK_PREVIOUS` is set, and must differ from `SECRETS_KEK_VERSION`. |
+| `SECRETS_KEK_PREVIOUS_VERSION` | with `SECRETS_KEK_PREVIOUS` | The old KEK's version. Required when `SECRETS_KEK_PREVIOUS` is set, and only then. Must be lower than `SECRETS_KEK_VERSION`. |
 | `PORT` | set by Railway | The app binds `0.0.0.0:$PORT` |
 | `SUPER_ADMIN_EMAIL` | no | Defaults to `gurungraj26@gmail.com` |
 | `SUPER_ADMIN_USERNAME` | no | Defaults to `raj` |
@@ -59,39 +59,52 @@ Each organisation's key is stored encrypted by the KEK. Rotating swaps the KEK
 and re-encrypts (rewraps) those organisation keys. The logins themselves are
 not touched. The steps below assume today's key is version 1.
 
+Every boot checks the keys, after migrations: it rewraps any organisation key
+still on the previous version, then opens every organisation key once with the
+loaded KEKs. If anything fails, the boot fails. That covers a wrong key, a key
+under the wrong version, or a version that is not loaded. Railway then keeps
+the old deployment serving (the health check never passes), and the log says
+which version failed. It logs counts and versions only.
+
 1. Generate the new key with `openssl rand -base64 32`. Keep an offline copy,
    outside Railway, next to the copy of the old one.
 2. Set all four variables together, in one change, so there is one deploy:
    - `SECRETS_KEK_PREVIOUS` = the old key (today's `SECRETS_KEK`)
    - `SECRETS_KEK_PREVIOUS_VERSION` = `1`
    - `SECRETS_KEK` = the new key
-   - `SECRETS_KEK_VERSION` = `2`
-3. Deploy. At boot, after migrations, the app rewraps every organisation key
-   still on version 1 in one transaction, then logs:
+   - `SECRETS_KEK_VERSION` = `2` (it must be higher than the previous version)
+3. Deploy. The boot rewraps every organisation key still on version 1 in one
+   transaction, then logs
    `rewrapped N organisation keys from v1 to v2; 0 left on v1`.
-   If it fails, nothing changes, the log says so, and logins still open
-   through the old key. Fix the cause and redeploy.
-4. Confirm nothing is left on the old key. Either read that log line, or run
-   `/usr/app/collab-cli task rewrap_org_keys dry_run:true` in the service
-   (`cargo loco task rewrap_org_keys dry_run:true` locally). It prints counts
-   only, for example `0 organisation keys on v1 (previous)`. Without
-   `dry_run:true` the task rewraps first, the same way boot does.
-5. Once it says 0, remove `SECRETS_KEK_PREVIOUS` and
-   `SECRETS_KEK_PREVIOUS_VERSION`, and keep `SECRETS_KEK_VERSION` = `2`.
-   Deploy. Keep the old offline copy until you have checked a saved login
-   still opens.
+   If it fails, nothing changes, the new deployment does not start, and the
+   old one keeps serving. Fix the cause and redeploy.
+4. Once the old deployment has fully stopped, run the task without
+   `dry_run`: `/usr/app/collab-cli task rewrap_org_keys` in the service
+   (`cargo loco task rewrap_org_keys` locally). It moves any key the old
+   deployment made on v1 while both were running, then prints counts only.
+   Confirm it says `0 organisation keys on v1`. With `dry_run:true` it only
+   counts.
+5. Only then remove `SECRETS_KEK_PREVIOUS` and `SECRETS_KEK_PREVIOUS_VERSION`,
+   and keep `SECRETS_KEK_VERSION` = `2`. Deploy. Keep the old offline copy
+   until you have checked a saved login still opens.
 
 The next rotation is the same with versions 2 and 3.
 
-While a deploy overlaps the old instance, the old instance cannot open
+While a deploy overlaps the old deployment, the old one cannot open
 organisation keys already moved to the new version. Logins added on the old
-instance in that window get a key on the old version; the dry run in step 4
-shows them, and a plain run of the task moves them.
+deployment in that window get a key on the old version. Step 4 moves them.
 
-**The limit.** This protects against a leaked KEK on its own. If the database
-was also read, anyone with the old KEK and that copy can open every login
-saved in it. Then each organisation key, and every login under it, must be re-encrypted
-with new keys. This rotation does not do that.
+**The limit.** This protects against a leaked KEK on its own. It does not
+undo a database read:
+
+- `DATABASE_URL` is an environment variable too. If the variables leaked,
+  rotate the Postgres password as well.
+- The organisation keys themselves do not change. Anyone with the old KEK and
+  an old backup or copy of the database can still unwrap them, and those same
+  keys open logins saved after the rotation too.
+- If a database read cannot be ruled out, change the stored passwords at the
+  services they belong to. Rotating the organisation keys (and re-encrypting
+  every login) is a follow-up, not part of this rotation.
 
 ## Custom domain (Cloudflare DNS)
 
