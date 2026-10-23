@@ -123,8 +123,8 @@ impl Kek {
     /// Adds the previous KEK, used only to unwrap DEKs still on `version`.
     ///
     /// # Errors
-    /// The same as [`Self::from_base64`], and when the previous key or its
-    /// version is the same as the current one.
+    /// The same as [`Self::from_base64`], when the previous key is the same
+    /// as the current one, or its version is not lower.
     pub fn with_previous(mut self, encoded: &str, version: i32, production: bool) -> Result<Self> {
         let key = decode_key("SECRETS_KEK_PREVIOUS", encoded, production)?;
         if key.expose_secret() == self.key.expose_secret() {
@@ -132,9 +132,9 @@ impl Kek {
                 "SECRETS_KEK_PREVIOUS is the same key as SECRETS_KEK",
             ));
         }
-        if version == self.version {
+        if version >= self.version {
             return Err(Error::string(
-                "SECRETS_KEK_PREVIOUS_VERSION must differ from SECRETS_KEK_VERSION",
+                "SECRETS_KEK_VERSION must be higher than SECRETS_KEK_PREVIOUS_VERSION",
             ));
         }
         self.previous = Some((key, version));
@@ -145,8 +145,8 @@ impl Kek {
     /// or bad key stops the app from starting.
     ///
     /// # Errors
-    /// See [`Self::from_base64`] and [`Self::with_previous`], and when the
-    /// previous key is set without its version.
+    /// See [`Self::from_base64`] and [`Self::with_previous`], and when only
+    /// one of the previous key and its version is set.
     pub fn from_context(ctx: &AppContext) -> Result<Self> {
         Self::from_settings(
             &ctx.config.settings()?,
@@ -177,12 +177,9 @@ impl Kek {
             (Some(_), None) => Err(Error::string(
                 "SECRETS_KEK_PREVIOUS is set without SECRETS_KEK_PREVIOUS_VERSION",
             )),
-            (None, Some(_)) => {
-                tracing::warn!(
-                    "SECRETS_KEK_PREVIOUS_VERSION is set without SECRETS_KEK_PREVIOUS; ignoring it"
-                );
-                Ok(kek)
-            }
+            (None, Some(_)) => Err(Error::string(
+                "SECRETS_KEK_PREVIOUS_VERSION is set without SECRETS_KEK_PREVIOUS",
+            )),
             (None, None) => Ok(kek),
         }
     }
@@ -467,9 +464,17 @@ mod tests {
     fn the_previous_key_is_checked_like_the_current_one() {
         let current = || Kek::from_base64(&other_key(2), 2, true).unwrap();
         assert!(current().with_previous(&other_key(1), 1, true).is_ok());
-        // The same key, or the same version, is refused.
+        // The same key, or a version that is not lower, is refused.
         assert!(current().with_previous(&other_key(2), 1, true).is_err());
         assert!(current().with_previous(&other_key(1), 2, true).is_err());
+        let Err(err) = current().with_previous(&other_key(1), 3, true) else {
+            panic!("the previous version must be lower");
+        };
+        assert!(
+            err.to_string()
+                .contains("SECRETS_KEK_VERSION must be higher than SECRETS_KEK_PREVIOUS_VERSION"),
+            "{err}"
+        );
         assert!(current().with_previous(DEV_KEK, 1, true).is_err());
         assert!(current().with_previous("not base64!", 1, true).is_err());
         assert!(current()
@@ -503,8 +508,16 @@ mod tests {
         assert_eq!((today.version, today.previous_version()), (1, None));
         let today = Kek::from_settings(&settings(Some(""), Some(""), Some("")), true).unwrap();
         assert_eq!((today.version, today.previous_version()), (1, None));
-        // A stray previous version alone is ignored.
-        let stray = Kek::from_settings(&settings(Some("2"), None, Some("1")), true).unwrap();
-        assert_eq!((stray.version, stray.previous_version()), (2, None));
+        // Swapped versions, or a stray previous version alone, are refused.
+        assert!(
+            Kek::from_settings(&settings(Some("1"), Some(&previous), Some("2")), true).is_err()
+        );
+        let Err(err) = Kek::from_settings(&settings(Some("2"), None, Some("1")), true) else {
+            panic!("a previous version needs its key");
+        };
+        assert!(
+            err.to_string().contains("without SECRETS_KEK_PREVIOUS"),
+            "{err}"
+        );
     }
 }

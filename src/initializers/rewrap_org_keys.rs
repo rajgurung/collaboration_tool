@@ -1,13 +1,15 @@
-//! During a KEK rotation (`SECRETS_KEK_PREVIOUS` set), moves every
-//! organisation's data key onto the new KEK at boot, after migrations. Later
-//! boots find nothing left. A failure is logged, not fatal: the previous key
-//! still reads the rows that were not moved.
+//! At boot, after migrations: during a KEK rotation (`SECRETS_KEK_PREVIOUS`
+//! set) moves every organisation's data key onto the new KEK, then unwraps
+//! every data key once. Any failure stops the boot. Railway keeps the old
+//! deploy serving when a new one fails its health check, so a wrong or
+//! missing KEK never reaches users as unreadable passwords.
 use async_trait::async_trait;
 use loco_rs::{
     app::{AppContext, Initializer},
     environment::Environment,
-    Result,
+    Error, Result,
 };
+use sea_orm::DatabaseConnection;
 
 use crate::models::{org_keys, secrets::crypto::Kek};
 
@@ -20,33 +22,36 @@ impl Initializer for RewrapOrgKeysInitializer {
     }
 
     async fn before_run(&self, ctx: &AppContext) -> Result<()> {
-        // Tests call `rewrap` directly instead.
+        // Each test boot sees the last test's keys; tests call `check_keys`.
         if ctx.environment == Environment::Test {
             return Ok(());
         }
         let kek = Kek::get(ctx)?;
-        match org_keys::Model::rewrap(&ctx.db, &kek).await {
-            Ok(Some(done)) => tracing::info!("{}", rewrapped_line(&done)),
-            Ok(None) => {}
-            Err(err) => tracing::error!(
-                error = %err,
-                "rewrapping organisation keys failed and was rolled back; they still read through SECRETS_KEK_PREVIOUS"
-            ),
-        }
-        match org_keys::Model::count_by_kek_version(&ctx.db).await {
-            Ok(counts) => {
-                for (version, count) in counts {
-                    if !kek.has_version(version) {
-                        tracing::error!(
-                            "{count} organisation keys are on KEK v{version}, which is not loaded; their logins cannot be read"
-                        );
-                    }
-                }
-            }
-            Err(err) => tracing::error!(error = %err, "could not count organisation keys"),
-        }
-        Ok(())
+        check_keys(&ctx.db, &kek).await.inspect_err(|err| {
+            tracing::error!(error = %err, "organisation keys failed the boot check");
+        })
     }
+}
+
+/// Rewraps (during a rotation), then checks every organisation key opens
+/// with the loaded KEKs. Logs counts and versions only.
+///
+/// # Errors
+/// When the rewrap fails (and was rolled back), or any key does not open.
+pub async fn check_keys(db: &DatabaseConnection, kek: &Kek) -> Result<()> {
+    let rewrapped = org_keys::Model::rewrap(db, kek).await.map_err(|err| {
+        Error::Message(format!(
+            "rewrapping organisation keys failed and was rolled back: {err}"
+        ))
+    })?;
+    if let Some(done) = rewrapped {
+        tracing::info!("{}", rewrapped_line(&done));
+    }
+    let checked = org_keys::Model::check_all(db, kek)
+        .await
+        .map_err(|err| Error::Message(err.to_string()))?;
+    tracing::info!("all {checked} organisation keys unwrap with the loaded KEKs");
+    Ok(())
 }
 
 /// The line the boot log and `cargo loco task rewrap_org_keys` both print.
