@@ -4,13 +4,20 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use collab::{
     app::App,
     extractors::current_member::CurrentMember,
+    initializers::rewrap_org_keys::RewrapOrgKeysInitializer,
     models::{
         folders, login_events, logins, memberships, org_keys, organisations,
         secrets::crypto::{Kek, DEV_KEK},
         users,
     },
 };
-use loco_rs::{app::AppContext, boot::run_task, task, testing::prelude::*, TestServer};
+use loco_rs::{
+    app::{AppContext, Initializer},
+    boot::run_task,
+    task,
+    testing::prelude::*,
+    TestServer,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
 };
@@ -1666,6 +1673,75 @@ async fn two_instances_rewrapping_at_once_move_each_key_once() {
         for login in logins::Entity::find().all(&ctx.db).await.unwrap() {
             assert!(login.reveal(&ctx.db, &ring, "password").await.is_ok());
         }
+    })
+    .await;
+}
+
+/// Runs the boot check as a production boot would, with `kek` loaded.
+async fn boot_with(ctx: &AppContext, kek: Kek) -> loco_rs::Result<()> {
+    ctx.shared_store.insert(Arc::new(kek));
+    let mut production = ctx.clone();
+    production.environment = loco_rs::environment::Environment::Production;
+    RewrapOrgKeysInitializer.before_run(&production).await
+}
+
+fn key(byte: u8) -> String {
+    STANDARD.encode([byte; 32])
+}
+
+#[tokio::test]
+#[serial]
+async fn boot_fails_closed_on_a_wrong_or_missing_kek() {
+    request::<App, _, _>(|request, ctx| async move {
+        logins_in_two_orgs(&request, &ctx).await;
+        let before = org_key_rows(&ctx).await;
+        let today = || Kek::from_base64(DEV_KEK, 1, false).unwrap();
+        boot_with(&ctx, today()).await.unwrap();
+
+        // SECRETS_KEK replaced, version left at 1.
+        let err = boot_with(&ctx, Kek::from_base64(&key(9), 1, false).unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("on KEK v1 does not unwrap: the key loaded for that version is wrong"),
+            "{err}"
+        );
+
+        // The versions swapped are refused before boot gets this far.
+        assert!(Kek::from_base64(&key(9), 1, false)
+            .unwrap()
+            .with_previous(DEV_KEK, 2, false)
+            .is_err());
+
+        // The keys swapped: the rewrap fails and rolls back.
+        let swapped = Kek::from_base64(DEV_KEK, 2, false)
+            .unwrap()
+            .with_previous(&key(9), 1, false)
+            .unwrap();
+        let err = boot_with(&ctx, swapped).await.unwrap_err();
+        assert!(err.to_string().contains("rolled back"), "{err}");
+
+        // The previous key removed before the rewrap ran.
+        let err = boot_with(&ctx, Kek::from_base64(&key(9), 2, false).unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("KEK v1, which is not loaded"),
+            "{err}"
+        );
+        assert_eq!(org_key_rows(&ctx).await, before);
+
+        // The right ring boots, moves every key, and boots again without v1.
+        boot_with(&ctx, rotation_ring(9, DEV_KEK)).await.unwrap();
+        assert!(org_key_rows(&ctx)
+            .await
+            .iter()
+            .all(|row| row.kek_version == 2));
+        boot_with(&ctx, Kek::from_base64(&key(9), 2, false).unwrap())
+            .await
+            .unwrap();
+        assert!(boot_with(&ctx, today()).await.is_err());
     })
     .await;
 }
