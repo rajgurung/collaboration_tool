@@ -98,6 +98,7 @@ impl Model {
         let txn = db.begin().await?;
         let rows = Entity::find()
             .filter(Column::KekVersion.eq(from))
+            .order_by_asc(Column::OrganisationId)
             .lock_exclusive()
             .all(&txn)
             .await?;
@@ -134,5 +135,40 @@ impl Model {
             rewrapped: rows.len() as u64,
             left,
         }))
+    }
+}
+
+impl Model {
+    /// Unwraps every DEK once with the KEK of its version, and returns how
+    /// many did. Stops at the first that does not open: its version is not
+    /// loaded, or the key loaded under that version is the wrong one.
+    ///
+    /// # Errors
+    /// On database errors, or a DEK that does not unwrap. The message names
+    /// the version only.
+    pub async fn check_all<C: ConnectionTrait>(db: &C, kek: &Kek) -> ModelResult<u64> {
+        let rows = Entity::find()
+            .order_by_asc(Column::OrganisationId)
+            .all(db)
+            .await?;
+        for row in &rows {
+            if let Err(err) = kek.unwrap(
+                row.organisation_id,
+                row.kek_version,
+                &row.wrapped_dek,
+                &row.nonce,
+            ) {
+                let why = if kek.has_version(row.kek_version) {
+                    "the key loaded for that version is wrong".to_string()
+                } else {
+                    err.to_string()
+                };
+                return Err(ModelError::Message(format!(
+                    "an organisation key on KEK v{} does not unwrap: {why}",
+                    row.kek_version
+                )));
+            }
+        }
+        Ok(rows.len() as u64)
     }
 }
