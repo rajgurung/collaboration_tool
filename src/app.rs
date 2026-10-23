@@ -210,6 +210,7 @@ impl Hooks for App {
             Box::new(initializers::origin_check::OriginCheckInitializer),
             Box::new(initializers::mention_emails::MentionEmailsInitializer),
             Box::new(initializers::claude_update::ClaudeUpdateInitializer),
+            Box::new(initializers::rewrap_org_keys::RewrapOrgKeysInitializer),
             // Last, so it is outermost: it rewrites `/o/{slug}/...` before
             // routing, and routing happens inside it.
             Box::new(initializers::org_path::OrgPathInitializer),
@@ -263,6 +264,7 @@ impl Hooks for App {
     #[allow(unused_variables)]
     fn register_tasks(tasks: &mut Tasks) {
         tasks.register(tasks::super_admin::SuperAdmin);
+        tasks.register(tasks::rewrap_org_keys::RewrapOrgKeys);
         // tasks-inject (do not remove)
         tasks.register(tasks::user_create::UserCreate);
         tasks.register(tasks::user_delete::UserDelete);

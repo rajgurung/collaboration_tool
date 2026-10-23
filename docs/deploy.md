@@ -39,7 +39,10 @@ The app ships as one Docker image (`Dockerfile`). Railway builds it from the rep
 | `MAILER_USER` | yes | SMTP user |
 | `MAILER_PASSWORD` | yes | SMTP password or API key |
 | `RESEND_API_KEY` | production | Sending-only Resend key. When set, email goes through Resend's HTTPS API instead of SMTP. |
-| `SECRETS_KEK` | yes | Encrypts every organisation's key for login passwords. Base64 of 32 random bytes: `openssl rand -base64 32`. The app refuses to start without it, with a value that is not 32 bytes, or with the development key. Keep a copy offline, outside Railway: losing it loses every stored password, and changing it makes them unreadable. |
+| `SECRETS_KEK` | yes | The key-encryption key (KEK). It encrypts each organisation's own key, which in turn encrypts that organisation's login passwords. Base64 of 32 random bytes: `openssl rand -base64 32`. The app refuses to start without it, with a value that is not 32 bytes, or with the development key. Keep a copy offline, outside Railway: losing it loses every stored password. Never just replace it: follow [Rotating SECRETS_KEK](#rotating-secrets_kek). |
+| `SECRETS_KEK_VERSION` | no | The version number of `SECRETS_KEK`, stored with each organisation key. Defaults to `1`. Raise it by one at each rotation. |
+| `SECRETS_KEK_PREVIOUS` | rotation only | The old KEK while a rotation runs. Same rules as `SECRETS_KEK`, and it must differ from it. Remove it once no organisation key uses it. |
+| `SECRETS_KEK_PREVIOUS_VERSION` | with `SECRETS_KEK_PREVIOUS` | The old KEK's version. Required when `SECRETS_KEK_PREVIOUS` is set, and must differ from `SECRETS_KEK_VERSION`. |
 | `PORT` | set by Railway | The app binds `0.0.0.0:$PORT` |
 | `SUPER_ADMIN_EMAIL` | no | Defaults to `gurungraj26@gmail.com` |
 | `SUPER_ADMIN_USERNAME` | no | Defaults to `raj` |
@@ -49,6 +52,46 @@ The app ships as one Docker image (`Dockerfile`). Railway builds it from the rep
 | `DB_MAX_CONNECTIONS` | no | Defaults to `10` |
 
 The app refuses to start if a required variable is missing.
+
+## Rotating SECRETS_KEK
+
+Each organisation's key is stored encrypted by the KEK. Rotating swaps the KEK
+and re-encrypts (rewraps) those organisation keys. The logins themselves are
+not touched. The steps below assume today's key is version 1.
+
+1. Generate the new key with `openssl rand -base64 32`. Keep an offline copy,
+   outside Railway, next to the copy of the old one.
+2. Set all four variables together, in one change, so there is one deploy:
+   - `SECRETS_KEK_PREVIOUS` = the old key (today's `SECRETS_KEK`)
+   - `SECRETS_KEK_PREVIOUS_VERSION` = `1`
+   - `SECRETS_KEK` = the new key
+   - `SECRETS_KEK_VERSION` = `2`
+3. Deploy. At boot, after migrations, the app rewraps every organisation key
+   still on version 1 in one transaction, then logs:
+   `rewrapped N organisation keys from v1 to v2; 0 left on v1`.
+   If it fails, nothing changes, the log says so, and logins still open
+   through the old key. Fix the cause and redeploy.
+4. Confirm nothing is left on the old key. Either read that log line, or run
+   `/usr/app/collab-cli task rewrap_org_keys dry_run:true` in the service
+   (`cargo loco task rewrap_org_keys dry_run:true` locally). It prints counts
+   only, for example `0 organisation keys on v1 (previous)`. Without
+   `dry_run:true` the task rewraps first, the same way boot does.
+5. Once it says 0, remove `SECRETS_KEK_PREVIOUS` and
+   `SECRETS_KEK_PREVIOUS_VERSION`, and keep `SECRETS_KEK_VERSION` = `2`.
+   Deploy. Keep the old offline copy until you have checked a saved login
+   still opens.
+
+The next rotation is the same with versions 2 and 3.
+
+While a deploy overlaps the old instance, the old instance cannot open
+organisation keys already moved to the new version. Logins added on the old
+instance in that window get a key on the old version; the dry run in step 4
+shows them, and a plain run of the task moves them.
+
+**The limit.** This protects against a leaked KEK on its own. If the database
+was also read, anyone with the old KEK and that copy can open every login
+saved in it. Then each organisation key, and every login under it, must be re-encrypted
+with new keys. This rotation does not do that.
 
 ## Custom domain (Cloudflare DNS)
 

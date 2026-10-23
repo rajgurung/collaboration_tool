@@ -1,7 +1,9 @@
 //! Envelope encryption for login secrets, with XChaCha20-Poly1305.
 //!
 //! Each organisation has its own data key (DEK). The DEK is stored wrapped
-//! (encrypted) by the key-encryption key (KEK) from `SECRETS_KEK`. Fields are
+//! (encrypted) by the key-encryption key (KEK) from `SECRETS_KEK`. During a
+//! rotation `SECRETS_KEK_PREVIOUS` still unwraps the DEKs not yet moved to the
+//! new KEK (see `org_keys::Model::rewrap`). Fields are
 //! encrypted with the DEK. Every encryption binds associated data naming what
 //! the value belongs to, so a ciphertext copied to another login, field,
 //! organisation or key version fails to open.
@@ -22,16 +24,24 @@ pub const NONCE_LEN: usize = 24;
 /// A 256-bit key, never printed, zeroed on drop.
 pub type Key = SecretBox<[u8; KEY_LEN]>;
 
-/// The KEK version in use. Stored with each wrapped DEK.
-pub const KEK_VERSION: i32 = 1;
+/// The KEK version when `SECRETS_KEK_VERSION` is not set. Stored with each
+/// wrapped DEK.
+pub const DEFAULT_KEK_VERSION: i32 = 1;
 
 /// The key development and tests use. Production refuses to start with it.
 pub const DEV_KEK: &str = "EUqaJ5SN03zOzpn2Ec9MZ7fVH4UrZP4wo4/lTTAVwlE=";
 
-/// The `settings:` key the KEK is read from.
+/// The `settings:` keys the KEKs are read from. Production fills the
+/// optional ones from the environment, so unset arrives as an empty string.
 #[derive(serde::Deserialize)]
 struct KekSettings {
     secrets_kek: SecretString,
+    #[serde(default)]
+    secrets_kek_version: Option<String>,
+    #[serde(default)]
+    secrets_kek_previous: Option<SecretString>,
+    #[serde(default)]
+    secrets_kek_previous_version: Option<String>,
 }
 
 /// Ciphertext (with its tag) and the random nonce it was sealed with.
@@ -40,53 +50,141 @@ pub struct Sealed {
     pub nonce: Vec<u8>,
 }
 
-/// The key-encryption key, read once at boot.
+/// The key-encryption keys, read once at boot: the current one, which wraps
+/// every new DEK, and during a rotation the previous one, which only unwraps
+/// DEKs not yet moved to the current one.
 pub struct Kek {
     key: Key,
     pub version: i32,
+    previous: Option<(Key, i32)>,
+}
+
+/// Versions only, never the keys.
+impl std::fmt::Debug for Kek {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Kek")
+            .field("version", &self.version)
+            .field("previous_version", &self.previous_version())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Decodes one KEK from base64. `name` is the variable it came from.
+fn decode_key(name: &str, encoded: &str, production: bool) -> Result<Key> {
+    let refuse = || {
+        Error::string(&format!(
+            "{name} must be base64 of 32 random bytes (openssl rand -base64 32)"
+        ))
+    };
+    let bytes = SecretBox::new(Box::new(
+        STANDARD.decode(encoded.trim()).map_err(|_| refuse())?,
+    ));
+    let key: [u8; KEY_LEN] = bytes
+        .expose_secret()
+        .as_slice()
+        .try_into()
+        .map_err(|_| refuse())?;
+    if production && encoded.trim() == DEV_KEK {
+        return Err(Error::string(&format!(
+            "{name} is the development key; set a real one in production"
+        )));
+    }
+    Ok(SecretBox::new(Box::new(key)))
+}
+
+/// Reads a version number; empty or missing is `None`.
+fn parse_version(name: &str, value: Option<&str>) -> Result<Option<i32>> {
+    match value.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(text) => match text.parse::<i32>() {
+            Ok(version) if version > 0 => Ok(Some(version)),
+            _ => Err(Error::string(&format!(
+                "{name} must be a whole number above 0"
+            ))),
+        },
+    }
 }
 
 impl Kek {
-    /// Reads a KEK from base64. In production it must not be the
+    /// Reads the current KEK from base64. In production it must not be the
     /// development and test key.
     ///
     /// # Errors
     /// When it is not base64 of exactly 32 bytes, or production is given
     /// the development key.
-    pub fn from_base64(encoded: &str, production: bool) -> Result<Self> {
-        let refuse = || {
-            Error::string("SECRETS_KEK must be base64 of 32 random bytes (openssl rand -base64 32)")
-        };
-        let bytes = SecretBox::new(Box::new(
-            STANDARD.decode(encoded.trim()).map_err(|_| refuse())?,
-        ));
-        let key: [u8; KEY_LEN] = bytes
-            .expose_secret()
-            .as_slice()
-            .try_into()
-            .map_err(|_| refuse())?;
-        if production && encoded.trim() == DEV_KEK {
-            return Err(Error::string(
-                "SECRETS_KEK is the development key; set a real one in production",
-            ));
-        }
+    pub fn from_base64(encoded: &str, version: i32, production: bool) -> Result<Self> {
         Ok(Self {
-            key: SecretBox::new(Box::new(key)),
-            version: KEK_VERSION,
+            key: decode_key("SECRETS_KEK", encoded, production)?,
+            version,
+            previous: None,
         })
     }
 
-    /// Reads `settings.secrets_kek`. Called once at boot, so a missing or
-    /// bad key stops the app from starting.
+    /// Adds the previous KEK, used only to unwrap DEKs still on `version`.
     ///
     /// # Errors
-    /// See [`Self::from_base64`].
+    /// The same as [`Self::from_base64`], and when the previous key or its
+    /// version is the same as the current one.
+    pub fn with_previous(mut self, encoded: &str, version: i32, production: bool) -> Result<Self> {
+        let key = decode_key("SECRETS_KEK_PREVIOUS", encoded, production)?;
+        if key.expose_secret() == self.key.expose_secret() {
+            return Err(Error::string(
+                "SECRETS_KEK_PREVIOUS is the same key as SECRETS_KEK",
+            ));
+        }
+        if version == self.version {
+            return Err(Error::string(
+                "SECRETS_KEK_PREVIOUS_VERSION must differ from SECRETS_KEK_VERSION",
+            ));
+        }
+        self.previous = Some((key, version));
+        Ok(self)
+    }
+
+    /// Reads the keys from `settings:`. Called once at boot, so a missing
+    /// or bad key stops the app from starting.
+    ///
+    /// # Errors
+    /// See [`Self::from_base64`] and [`Self::with_previous`], and when the
+    /// previous key is set without its version.
     pub fn from_context(ctx: &AppContext) -> Result<Self> {
-        let settings: KekSettings = ctx.config.settings()?;
-        Self::from_base64(
-            settings.secrets_kek.expose_secret(),
+        Self::from_settings(
+            &ctx.config.settings()?,
             ctx.environment == loco_rs::environment::Environment::Production,
         )
+    }
+
+    fn from_settings(settings: &KekSettings, production: bool) -> Result<Self> {
+        let version = parse_version(
+            "SECRETS_KEK_VERSION",
+            settings.secrets_kek_version.as_deref(),
+        )?
+        .unwrap_or(DEFAULT_KEK_VERSION);
+        let kek = Self::from_base64(settings.secrets_kek.expose_secret(), version, production)?;
+        let previous = settings
+            .secrets_kek_previous
+            .as_ref()
+            .map(|key| key.expose_secret().trim())
+            .filter(|key| !key.is_empty());
+        let previous_version = parse_version(
+            "SECRETS_KEK_PREVIOUS_VERSION",
+            settings.secrets_kek_previous_version.as_deref(),
+        )?;
+        match (previous, previous_version) {
+            (Some(key), Some(previous_version)) => {
+                kek.with_previous(key, previous_version, production)
+            }
+            (Some(_), None) => Err(Error::string(
+                "SECRETS_KEK_PREVIOUS is set without SECRETS_KEK_PREVIOUS_VERSION",
+            )),
+            (None, Some(_)) => {
+                tracing::warn!(
+                    "SECRETS_KEK_PREVIOUS_VERSION is set without SECRETS_KEK_PREVIOUS; ignoring it"
+                );
+                Ok(kek)
+            }
+            (None, None) => Ok(kek),
+        }
     }
 
     /// The KEK loaded at boot.
@@ -99,11 +197,35 @@ impl Kek {
             .ok_or_else(|| ModelError::msg("the secrets key was not loaded"))
     }
 
-    fn wrap_aad(&self, org_id: i64, kek_version: i32) -> String {
+    /// The previous KEK's version, while one is set.
+    #[must_use]
+    pub fn previous_version(&self) -> Option<i32> {
+        self.previous.as_ref().map(|(_, version)| *version)
+    }
+
+    /// Whether a DEK wrapped by KEK `version` can be unwrapped.
+    #[must_use]
+    pub fn has_version(&self, version: i32) -> bool {
+        version == self.version || self.previous_version() == Some(version)
+    }
+
+    fn key_for(&self, version: i32) -> ModelResult<&Key> {
+        if version == self.version {
+            return Ok(&self.key);
+        }
+        match &self.previous {
+            Some((key, previous)) if *previous == version => Ok(key),
+            _ => Err(ModelError::Message(format!(
+                "data key was wrapped by KEK v{version}, which is not loaded"
+            ))),
+        }
+    }
+
+    fn wrap_aad(org_id: i64, kek_version: i32) -> String {
         format!("org:{org_id}|kek:{kek_version}")
     }
 
-    /// Encrypts an organisation's DEK.
+    /// Encrypts an organisation's DEK with the current KEK.
     ///
     /// # Errors
     /// See [`seal`].
@@ -111,14 +233,15 @@ impl Kek {
         seal(
             &self.key,
             dek.expose_secret(),
-            &self.wrap_aad(org_id, self.version),
+            &Self::wrap_aad(org_id, self.version),
         )
     }
 
-    /// Decrypts an organisation's DEK.
+    /// Decrypts an organisation's DEK with the KEK of `kek_version`.
     ///
     /// # Errors
-    /// When it was wrapped for another organisation or KEK, or was changed.
+    /// When that KEK is not loaded, or the DEK was wrapped for another
+    /// organisation or KEK, or was changed.
     pub fn unwrap(
         &self,
         org_id: i64,
@@ -126,14 +249,11 @@ impl Kek {
         wrapped: &[u8],
         nonce: &[u8],
     ) -> ModelResult<Key> {
-        if kek_version != self.version {
-            return Err(ModelError::msg("data key was wrapped by another KEK"));
-        }
         let bytes = open_bytes(
-            &self.key,
+            self.key_for(kek_version)?,
             wrapped,
             nonce,
-            &self.wrap_aad(org_id, kek_version),
+            &Self::wrap_aad(org_id, kek_version),
         )?;
         let key: [u8; KEY_LEN] = bytes
             .expose_secret()
@@ -253,31 +373,138 @@ mod tests {
         assert_ne!(a.ciphertext, b.ciphertext);
     }
 
+    const V: i32 = DEFAULT_KEK_VERSION;
+
+    fn other_key(byte: u8) -> String {
+        STANDARD.encode([byte; KEY_LEN])
+    }
+
+    fn settings(
+        version: Option<&str>,
+        previous: Option<&str>,
+        previous_version: Option<&str>,
+    ) -> KekSettings {
+        KekSettings {
+            secrets_kek: SecretString::from(other_key(2)),
+            secrets_kek_version: version.map(str::to_string),
+            secrets_kek_previous: previous.map(SecretString::from),
+            secrets_kek_previous_version: previous_version.map(str::to_string),
+        }
+    }
+
     #[test]
     fn a_dek_unwraps_only_for_its_organisation_and_kek_version() {
-        let kek = Kek::from_base64(DEV_KEK, false).unwrap();
+        let kek = Kek::from_base64(DEV_KEK, V, false).unwrap();
         let dek = random_key();
         let wrapped = kek.wrap(5, &dek).unwrap();
         let back = kek
-            .unwrap(5, KEK_VERSION, &wrapped.ciphertext, &wrapped.nonce)
+            .unwrap(5, V, &wrapped.ciphertext, &wrapped.nonce)
             .unwrap();
         assert_eq!(back.expose_secret(), dek.expose_secret());
         assert!(kek
-            .unwrap(6, KEK_VERSION, &wrapped.ciphertext, &wrapped.nonce)
+            .unwrap(6, V, &wrapped.ciphertext, &wrapped.nonce)
             .is_err());
         assert!(kek
-            .unwrap(5, KEK_VERSION + 1, &wrapped.ciphertext, &wrapped.nonce)
+            .unwrap(5, V + 1, &wrapped.ciphertext, &wrapped.nonce)
             .is_err());
     }
 
     #[test]
     fn the_kek_must_be_32_bytes_and_not_the_dev_key_in_production() {
-        assert!(Kek::from_base64(DEV_KEK, false).is_ok());
-        assert!(Kek::from_base64(DEV_KEK, true).is_err());
-        assert!(Kek::from_base64("not base64!", false).is_err());
-        assert!(Kek::from_base64(&STANDARD.encode([7u8; 16]), true).is_err());
-        assert!(Kek::from_base64(&STANDARD.encode([7u8; 33]), true).is_err());
-        assert!(Kek::from_base64(&STANDARD.encode([7u8; 32]), true).is_ok());
-        assert!(Kek::from_base64("", true).is_err());
+        assert!(Kek::from_base64(DEV_KEK, V, false).is_ok());
+        assert!(Kek::from_base64(DEV_KEK, V, true).is_err());
+        assert!(Kek::from_base64("not base64!", V, false).is_err());
+        assert!(Kek::from_base64(&STANDARD.encode([7u8; 16]), V, true).is_err());
+        assert!(Kek::from_base64(&STANDARD.encode([7u8; 33]), V, true).is_err());
+        assert!(Kek::from_base64(&STANDARD.encode([7u8; 32]), V, true).is_ok());
+        assert!(Kek::from_base64("", V, true).is_err());
+    }
+
+    #[test]
+    fn the_ring_unwraps_by_version_and_wraps_with_the_current_key() {
+        let old = Kek::from_base64(DEV_KEK, 1, false).unwrap();
+        let dek = random_key();
+        let on_v1 = old.wrap(5, &dek).unwrap();
+
+        let ring = Kek::from_base64(&other_key(2), 2, false)
+            .unwrap()
+            .with_previous(DEV_KEK, 1, false)
+            .unwrap();
+        assert_eq!(ring.previous_version(), Some(1));
+        let back = ring.unwrap(5, 1, &on_v1.ciphertext, &on_v1.nonce).unwrap();
+        assert_eq!(back.expose_secret(), dek.expose_secret());
+
+        // New wraps use v2, which the old key alone cannot open.
+        let on_v2 = ring.wrap(5, &dek).unwrap();
+        let back = ring.unwrap(5, 2, &on_v2.ciphertext, &on_v2.nonce).unwrap();
+        assert_eq!(back.expose_secret(), dek.expose_secret());
+        assert!(old.unwrap(5, 2, &on_v2.ciphertext, &on_v2.nonce).is_err());
+        // A row claiming the other version does not open either.
+        assert!(ring.unwrap(5, 1, &on_v2.ciphertext, &on_v2.nonce).is_err());
+        assert!(ring.unwrap(5, 2, &on_v1.ciphertext, &on_v1.nonce).is_err());
+    }
+
+    #[test]
+    fn an_unknown_kek_version_is_a_clear_error() {
+        let ring = Kek::from_base64(&other_key(2), 2, false)
+            .unwrap()
+            .with_previous(DEV_KEK, 1, false)
+            .unwrap();
+        let dek = random_key();
+        let sealed = ring.wrap(5, &dek).unwrap();
+        let Err(err) = ring.unwrap(5, 3, &sealed.ciphertext, &sealed.nonce) else {
+            panic!("v3 is not loaded");
+        };
+        assert!(
+            err.to_string().contains("KEK v3, which is not loaded"),
+            "{err}"
+        );
+        assert!(!ring.has_version(3));
+        assert!(ring.has_version(1) && ring.has_version(2));
+    }
+
+    #[test]
+    fn the_previous_key_is_checked_like_the_current_one() {
+        let current = || Kek::from_base64(&other_key(2), 2, true).unwrap();
+        assert!(current().with_previous(&other_key(1), 1, true).is_ok());
+        // The same key, or the same version, is refused.
+        assert!(current().with_previous(&other_key(2), 1, true).is_err());
+        assert!(current().with_previous(&other_key(1), 2, true).is_err());
+        assert!(current().with_previous(DEV_KEK, 1, true).is_err());
+        assert!(current().with_previous("not base64!", 1, true).is_err());
+        assert!(current()
+            .with_previous(&STANDARD.encode([7u8; 16]), 1, true)
+            .is_err());
+    }
+
+    #[test]
+    fn settings_need_a_version_with_the_previous_key() {
+        let previous = other_key(1);
+        let ring =
+            Kek::from_settings(&settings(Some("2"), Some(&previous), Some("1")), true).unwrap();
+        assert_eq!((ring.version, ring.previous_version()), (2, Some(1)));
+
+        let Err(err) = Kek::from_settings(&settings(Some("2"), Some(&previous), None), true) else {
+            panic!("the previous key needs its version");
+        };
+        assert!(
+            err.to_string().contains("SECRETS_KEK_PREVIOUS_VERSION"),
+            "{err}"
+        );
+        assert!(Kek::from_settings(&settings(Some("2"), Some(&previous), Some("")), true).is_err());
+        assert!(
+            Kek::from_settings(&settings(Some("1"), Some(&previous), Some("1")), true).is_err()
+        );
+        assert!(Kek::from_settings(&settings(Some("two"), None, None), true).is_err());
+        assert!(Kek::from_settings(&settings(Some("0"), None, None), true).is_err());
+
+        // Unset (or empty, as production's config gives it) changes nothing.
+        let today = Kek::from_settings(&settings(None, None, None), true).unwrap();
+        assert_eq!((today.version, today.previous_version()), (1, None));
+        let today = Kek::from_settings(&settings(Some(""), Some(""), Some("")), true).unwrap();
+        assert_eq!((today.version, today.previous_version()), (1, None));
+        // A stray previous version alone is ignored.
+        let stray = Kek::from_settings(&settings(Some("2"), None, Some("1")), true).unwrap();
+        assert_eq!((stray.version, stray.previous_version()), (2, None));
     }
 }

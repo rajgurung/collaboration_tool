@@ -1,18 +1,21 @@
 //! Logins: who can add, see and copy them, the app password unlock and its
 //! lock, the activity log, and what the database holds.
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use collab::{
     app::App,
     extractors::current_member::CurrentMember,
     models::{
-        folders, login_events, logins, memberships, org_keys, organisations, secrets::crypto::Kek,
+        folders, login_events, logins, memberships, org_keys, organisations,
+        secrets::crypto::{Kek, DEV_KEK},
         users,
     },
 };
-use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
+use loco_rs::{app::AppContext, boot::run_task, task, testing::prelude::*, TestServer};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
 };
 use serial_test::serial;
+use std::sync::Arc;
 
 use super::prepare_data::{approve_as_owner, join, login, sign_up_member, AsMember, USER_PASSWORD};
 
@@ -1453,6 +1456,216 @@ async fn an_owner_who_locks_themselves_gets_one_email() {
             "she had no Claude connection"
         );
         assert!(emails_about(&ctx, before, "alice's account was locked").is_empty());
+    })
+    .await;
+}
+
+/// A key ring with a new v2 key and today's (development) key as v1.
+fn rotation_ring(new_key: u8, previous: &str) -> Kek {
+    Kek::from_base64(&STANDARD.encode([new_key; 32]), 2, false)
+        .unwrap()
+        .with_previous(previous, 1, false)
+        .unwrap()
+}
+
+/// Acme's login, and one in Globex, so two organisation keys exist on v1.
+async fn logins_in_two_orgs(request: &TestServer, ctx: &AppContext) -> Acme {
+    let acme = acme(request, ctx).await;
+    add(request, &acme.alice, acme.folder.id, &[]).await;
+    let gina = sign_up_member(request, "Globex", "gina", "gina@example.com").await;
+    let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
+        .await
+        .unwrap();
+    let folder = folders::Model::list_for_org(&ctx.db, globex.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.folder.name == "Logins")
+        .unwrap()
+        .folder;
+    let bank = [("title", "Bank".to_string())];
+    add(request, &gina, folder.id, &bank).await;
+    acme
+}
+
+async fn org_key_rows(ctx: &AppContext) -> Vec<org_keys::Model> {
+    let mut rows = org_keys::Entity::find().all(&ctx.db).await.unwrap();
+    rows.sort_by_key(|row| row.organisation_id);
+    rows
+}
+
+#[tokio::test]
+#[serial]
+async fn rotating_the_kek_keeps_every_login_readable() {
+    request::<App, _, _>(|request, ctx| async move {
+        let acme = logins_in_two_orgs(&request, &ctx).await;
+        let saved = logins::Entity::find().all(&ctx.db).await.unwrap();
+        assert_eq!(saved.len(), 2);
+        let before = org_key_rows(&ctx).await;
+        assert!(before.iter().all(|row| row.kek_version == 1));
+
+        // A dry run of the task changes nothing.
+        let dry = task::Vars::from_cli_args(vec![("dry_run".to_string(), "true".to_string())]);
+        ctx.shared_store.insert(Arc::new(rotation_ring(9, DEV_KEK)));
+        run_task::<App>(&ctx, Some(&"rewrap_org_keys".to_string()), &dry)
+            .await
+            .unwrap();
+        assert_eq!(org_key_rows(&ctx).await, before);
+
+        let ring = rotation_ring(9, DEV_KEK);
+        let done = org_keys::Model::rewrap(&ctx.db, &ring).await.unwrap();
+        assert_eq!(
+            done,
+            Some(org_keys::Rewrapped {
+                from: 1,
+                to: 2,
+                rewrapped: 2,
+                left: 0
+            })
+        );
+        let after = org_key_rows(&ctx).await;
+        assert!(after.iter().all(|row| row.kek_version == 2));
+        for (old, new) in before.iter().zip(&after) {
+            assert_ne!(old.wrapped_dek, new.wrapped_dek);
+            assert_eq!(old.dek_version, new.dek_version);
+        }
+        // The logins themselves are untouched.
+        assert_eq!(logins::Entity::find().all(&ctx.db).await.unwrap().len(), 2);
+        for login in logins::Entity::find().all(&ctx.db).await.unwrap() {
+            let was = saved.iter().find(|l| l.id == login.id).unwrap();
+            assert_eq!(login.password_ct, was.password_ct);
+            assert_eq!(login.recovery_ct, was.recovery_ct);
+            let password = login.reveal(&ctx.db, &ring, "password").await.unwrap();
+            assert_eq!(secrecy::ExposeSecret::expose_secret(&password), SECRET);
+            let codes = login.reveal(&ctx.db, &ring, "recovery").await.unwrap();
+            assert_eq!(secrecy::ExposeSecret::expose_secret(&codes), CODES);
+        }
+
+        // A second run (the task, as a manual run would) does nothing.
+        run_task::<App>(
+            &ctx,
+            Some(&"rewrap_org_keys".to_string()),
+            &task::Vars::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            org_keys::Model::rewrap(&ctx.db, &ring).await.unwrap(),
+            Some(org_keys::Rewrapped {
+                from: 1,
+                to: 2,
+                rewrapped: 0,
+                left: 0
+            })
+        );
+        assert_eq!(org_key_rows(&ctx).await, after);
+
+        // With the previous key removed, the app still shows the password.
+        let v2_only = Kek::from_base64(&STANDARD.encode([9u8; 32]), 2, false).unwrap();
+        assert_eq!(
+            org_keys::Model::rewrap(&ctx.db, &v2_only).await.unwrap(),
+            None
+        );
+        ctx.shared_store.insert(Arc::new(v2_only));
+        let id = saved
+            .iter()
+            .find(|l| l.organisation_id == acme.org.id)
+            .unwrap()
+            .id;
+        assert_eq!(
+            unlock(&request, &acme.alice, USER_PASSWORD)
+                .await
+                .status_code(),
+            200
+        );
+        let res = reveal(&request, &acme.alice, id).await;
+        assert_eq!(res.status_code(), 200);
+        assert!(res.text().contains(SECRET));
+
+        // The old key alone no longer reads them, and says why.
+        let v1_only = Kek::from_base64(DEV_KEK, 1, false).unwrap();
+        let login = logins::Entity::find_by_id(id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let err = login
+            .reveal(&ctx.db, &v1_only, "password")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("KEK v2, which is not loaded"),
+            "{err}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_failed_rewrap_leaves_every_key_on_the_old_version() {
+    request::<App, _, _>(|request, ctx| async move {
+        logins_in_two_orgs(&request, &ctx).await;
+        let before = org_key_rows(&ctx).await;
+
+        // The wrong previous key: nothing opens, nothing moves.
+        let wrong = STANDARD.encode([4u8; 32]);
+        assert!(org_keys::Model::rewrap(&ctx.db, &rotation_ring(9, &wrong))
+            .await
+            .is_err());
+        assert_eq!(org_key_rows(&ctx).await, before);
+
+        // One damaged row: the other, which would move, is rolled back too.
+        let mut damaged = before[1].clone().into_active_model();
+        let mut nonce = before[1].nonce.clone();
+        nonce[0] ^= 1;
+        damaged.nonce = ActiveValue::Set(nonce);
+        damaged.update(&ctx.db).await.unwrap();
+        let damaged = org_key_rows(&ctx).await;
+        assert!(org_keys::Model::rewrap(&ctx.db, &rotation_ring(9, DEV_KEK))
+            .await
+            .is_err());
+        assert_eq!(org_key_rows(&ctx).await, damaged);
+        assert!(damaged.iter().all(|row| row.kek_version == 1));
+
+        // The first organisation's logins still open with today's key.
+        let kek = Kek::get(&ctx).unwrap();
+        let login = logins::Entity::find()
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|l| l.organisation_id == before[0].organisation_id)
+            .unwrap();
+        assert!(login.reveal(&ctx.db, &kek, "password").await.is_ok());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn two_instances_rewrapping_at_once_move_each_key_once() {
+    request::<App, _, _>(|request, ctx| async move {
+        logins_in_two_orgs(&request, &ctx).await;
+        let mut options = sea_orm::ConnectOptions::new(ctx.config.database.uri.clone());
+        options.max_connections(4);
+        let pool = sea_orm::Database::connect(options).await.unwrap();
+        let ring = rotation_ring(9, DEV_KEK);
+        let (a, b) = futures_util::future::join(
+            org_keys::Model::rewrap(&ctx.db, &ring),
+            org_keys::Model::rewrap(&pool, &ring),
+        )
+        .await;
+        let (a, b) = (a.unwrap().unwrap(), b.unwrap().unwrap());
+        assert_eq!(a.rewrapped + b.rewrapped, 2);
+        assert_eq!((a.left, b.left), (0, 0));
+        assert!(org_key_rows(&ctx)
+            .await
+            .iter()
+            .all(|row| row.kek_version == 2));
+        for login in logins::Entity::find().all(&ctx.db).await.unwrap() {
+            assert!(login.reveal(&ctx.db, &ring, "password").await.is_ok());
+        }
     })
     .await;
 }
