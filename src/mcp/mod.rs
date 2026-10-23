@@ -8,23 +8,30 @@ use axum::http::request::Parts;
 use loco_rs::{app::AppContext, model::ModelError};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, tool::Extension, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
-    schemars, tool, tool_handler, tool_router, ErrorData, ServerHandler,
+    model::{
+        CacheScope, CallToolResult, ContentBlock, DiscoverResult, Implementation,
+        InitializeRequestParams, InitializeResult, ListToolsResult, PaginatedRequestParams,
+        ProtocolVersion, ResultType, ServerCapabilities, ServerConfig,
+    },
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router, ErrorData, RoleServer, ServerHandler,
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 
 use crate::{
     controllers::notifications::{self, TaskBefore},
-    extractors::current_member::CurrentMember,
+    data::notify_hub::NotifyHub,
+    extractors::{bearer::McpConnection, current_member::CurrentMember},
     models::{
-        memberships,
+        claude_update_notices, memberships,
         projects::{self, Progress, ProjectParams, ACCENTS},
         task_assignees,
         task_notes::{self, NoteParams},
-        tasks::{self, TaskParams},
+        tasks::{self, Refusal, Removed, TaskParams},
     },
-    views::{forms::field_errors, time},
+    views::{forms::field_errors, links::is_slug, time},
 };
 
 const INSTRUCTIONS: &str = "Collab Tool is a small team's workspace. Tasks usually belong to a \
@@ -33,6 +40,19 @@ Task statuses are todo, progress, blocked and done; priorities are high, medium 
 project's status is free text such as \"Active\" or \"Planned\". People are referred to by \
 username; \"me\" means the person you are acting for. Changes notify teammates exactly as they \
 would in the web app.";
+/// Tools that change something. Each takes `organisation`.
+const WRITE_TOOLS: [&str; 6] = [
+    "create_project",
+    "create_task",
+    "update_task",
+    "add_task_note",
+    "delete_task",
+    "delete_project",
+];
+/// The brake on bulk creates, per connection per minute. A guard against a
+/// run in the wrong organisation, not a security control.
+const PROJECTS_PER_MINUTE: u64 = 5;
+const TASKS_PER_MINUTE: u64 = 60;
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
 
@@ -64,6 +84,11 @@ where
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateProject {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "Project name, up to 80 characters.")]
     pub name: String,
     #[schemars(description = "Roadmap lane: now, next or later.")]
@@ -100,6 +125,11 @@ pub struct TaskId {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateTask {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "What needs doing, up to 140 characters.")]
     pub title: String,
     #[schemars(description = "Project id. Leave out for a chore with no project.")]
@@ -116,6 +146,11 @@ pub struct CreateTask {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct UpdateTask {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "The task's id.")]
     pub task_id: i64,
     #[schemars(description = "New title, up to 140 characters.")]
@@ -138,6 +173,11 @@ pub struct UpdateTask {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AddTaskNote {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
     #[schemars(description = "The task's id.")]
     pub task_id: i64,
     #[schemars(
@@ -146,10 +186,34 @@ pub struct AddTaskNote {
     pub body: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteTask {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
+    #[schemars(description = "The task's id.")]
+    pub task_id: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteProject {
+    #[schemars(
+        required,
+        description = "Slug of the organisation this change is for. It must be the connected one, named in this tool's description."
+    )]
+    pub organisation: Option<String>,
+    #[schemars(description = "The project's id.")]
+    pub project_id: i64,
+}
+
 /// Why a tool call did not go through.
 enum Fail {
     /// Something the caller can fix; returned as a tool error.
     Refused(String),
+    /// No such item in the connected organisation; a tool error naming it.
+    NotFound,
     /// Our fault; logged and returned as an internal error.
     Broken(String),
 }
@@ -165,7 +229,7 @@ impl From<ModelError> for Fail {
             return Self::Refused(message);
         }
         match err {
-            ModelError::EntityNotFound => Self::Refused("Not found in your organisation.".into()),
+            ModelError::EntityNotFound => Self::NotFound,
             other => Self::Broken(other.to_string()),
         }
     }
@@ -188,17 +252,112 @@ fn tool_field(field: &str) -> &str {
 
 type Outcome = Result<Value, Fail>;
 
-fn finish(outcome: Outcome) -> Result<CallToolResult, ErrorData> {
+/// Turns a read tool's outcome into its result. Every success names the
+/// connected organisation, and carries the update notice while it is due.
+fn finish(parts: &Parts, outcome: Outcome) -> Result<CallToolResult, ErrorData> {
+    result(parts, outcome, true)
+}
+
+fn result(parts: &Parts, outcome: Outcome, notice: bool) -> Result<CallToolResult, ErrorData> {
+    let member = parts.extensions.get::<CurrentMember>();
     match outcome {
-        Ok(value) => Ok(CallToolResult::success(vec![ContentBlock::text(
-            value.to_string(),
-        )])),
+        Ok(mut value) => {
+            if let (Some(member), Some(object)) = (member, value.as_object_mut()) {
+                object.insert(
+                    "organisation".into(),
+                    json!({ "name": clean_name(&member.org.name), "slug": member.org.slug }),
+                );
+                if notice
+                    && parts
+                        .extensions
+                        .get::<McpConnection>()
+                        .is_some_and(|c| c.update_notice)
+                {
+                    object.insert("notice".into(), json!(update_notice(member)));
+                }
+            }
+            Ok(CallToolResult::success(vec![ContentBlock::text(
+                value.to_string(),
+            )]))
+        }
         Err(Fail::Refused(message)) => Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
+        Err(Fail::NotFound) => {
+            let place = member.map_or_else(|| "this organisation".to_string(), org_label);
+            Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "Not found in {place}."
+            ))]))
+        }
         Err(Fail::Broken(err)) => {
             tracing::error!(error = %err, "MCP tool failed");
             Err(ErrorData::internal_error("Something went wrong.", None))
         }
     }
+}
+
+/// Unicode format characters (category Cf): invisible, and able to make
+/// text read differently from what it is.
+fn is_format(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{0600}'..='\u{0605}' | '\u{061C}' | '\u{06DD}' | '\u{070F}'
+        | '\u{0890}'..='\u{0891}' | '\u{08E2}' | '\u{180E}' | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}'
+        | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{110BD}' | '\u{110CD}'
+        | '\u{13430}'..='\u{1343F}' | '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}'
+        | '\u{E0001}' | '\u{E0020}'..='\u{E007F}')
+}
+
+/// An organisation name as it may reach the model: one line, no invisible
+/// characters, no double quotes (it is shown inside them), at most 80
+/// characters. Owners choose names, so they are treated like any input.
+fn clean_name(name: &str) -> String {
+    let spaced: String = name
+        .chars()
+        .filter(|c| !is_format(*c))
+        .map(|c| match c {
+            '"' => '\'',
+            c if c.is_control() || c.is_whitespace() => ' ',
+            c => c,
+        })
+        .collect();
+    spaced
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(80)
+        .collect()
+}
+
+/// The connected organisation as every message names it: `"Name" (slug)`.
+fn org_label(member: &CurrentMember) -> String {
+    format!("\"{}\" ({})", clean_name(&member.org.name), member.org.slug)
+}
+
+/// The server's instructions for this connection: which organisation it
+/// reaches, then the fixed text.
+fn instructions(member: &CurrentMember) -> String {
+    let (org, slug) = (org_label(member), &member.org.slug);
+    format!(
+        "Connected to {org} as {}. Every tool reads and writes only there. Write \
+tools need `organisation: \"{slug}\"`. If the user means another organisation, stop and tell \
+them this connection can't reach it; they can connect again and pick that organisation. \
+{INSTRUCTIONS}",
+        member.username
+    )
+}
+
+/// The member for a protocol request (not a tool call). Never missing on
+/// `/mcp`; if it is, the request fails rather than answering without an org.
+fn context_member(context: &RequestContext<RoleServer>) -> Result<CurrentMember, ErrorData> {
+    context
+        .extensions
+        .get::<Parts>()
+        .and_then(|parts| parts.extensions.get::<CurrentMember>())
+        .cloned()
+        .ok_or_else(|| {
+            tracing::error!("no member on an /mcp request");
+            ErrorData::internal_error("Something went wrong.", None)
+        })
 }
 
 fn member(parts: &Parts) -> Result<CurrentMember, Fail> {
@@ -207,6 +366,70 @@ fn member(parts: &Parts) -> Result<CurrentMember, Fail> {
         .get::<CurrentMember>()
         .cloned()
         .ok_or_else(|| Fail::Broken("no member on an /mcp request".into()))
+}
+
+/// The connection behind the request. Never missing on `/mcp`; if it is,
+/// creates and deletes fail rather than treat the call as the web app's.
+fn connection(parts: &Parts) -> Result<McpConnection, Fail> {
+    parts
+        .extensions
+        .get::<McpConnection>()
+        .copied()
+        .ok_or_else(|| Fail::Broken("no connection on an /mcp request".into()))
+}
+
+fn a_minute_ago() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now() - chrono::Duration::seconds(60)
+}
+
+/// The brake's refusal, naming the organisation so the run can be checked.
+fn paused(member: &CurrentMember, limit: u64, what: &str) -> Fail {
+    Fail::Refused(format!(
+        "Paused: this connection has made {limit} {what} in {} in the last minute. Confirm \
+with the user that this is the right organisation and that they want more, then try again in a \
+minute.",
+        org_label(member)
+    ))
+}
+
+/// What a connection made before this release is told until it reloads its
+/// tools.
+fn update_notice(member: &CurrentMember) -> String {
+    format!(
+        "Tell the user once: the Collab connector was updated. Each write now names its \
+organisation (this connection is {}). Restart Claude, or reconnect the connector, to load \
+the new tools.",
+        org_label(member)
+    )
+}
+
+/// Refuses a write whose `organisation` isn't the connected one. Only ever
+/// refuses: the organisation always comes from the token. No database call.
+fn check_org(member: &CurrentMember, given: Option<&str>) -> Result<(), Fail> {
+    let (org, slug) = (org_label(member), &member.org.slug);
+    let given = given
+        .map(|g| g.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if given.is_empty() {
+        return Err(Fail::Refused(format!(
+            "Collab was updated. Tell the user: writes now name their organisation. This \
+connection is {org}. Retry with organisation: \"{slug}\", and restart Claude to \
+refresh its tools."
+        )));
+    }
+    if &given == slug {
+        return Ok(());
+    }
+    // Echo only slug-shaped input, so no free text reaches the model.
+    let other = if is_slug(&given) {
+        given
+    } else {
+        "a different organisation".to_string()
+    };
+    Err(Fail::Refused(format!(
+        "This connection is {org}, not {other}. Nothing was changed. To work in \
+{other}, the user needs a connection for that organisation: connect again and pick it."
+    )))
 }
 
 /// The team as `(user_id, username)`, for turning usernames into ids and back.
@@ -292,7 +515,7 @@ impl CollabServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.list_projects_for(&parts).await)
+        finish(&parts, self.list_projects_for(&parts).await)
     }
 
     #[tool(
@@ -304,7 +527,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateProject>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.create_project_for(&parts, input).await)
+        self.finish_write(&parts, self.create_project_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -315,7 +539,7 @@ impl CollabServer {
         &self,
         Extension(parts): Extension<Parts>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.list_members_for(&parts).await)
+        finish(&parts, self.list_members_for(&parts).await)
     }
 
     #[tool(
@@ -327,7 +551,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<ListTasks>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.list_tasks_for(&parts, input).await)
+        finish(&parts, self.list_tasks_for(&parts, input).await)
     }
 
     #[tool(
@@ -339,7 +563,7 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<TaskId>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.get_task_for(&parts, input).await)
+        finish(&parts, self.get_task_for(&parts, input).await)
     }
 
     #[tool(
@@ -351,7 +575,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<CreateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.create_task_for(&parts, input).await)
+        self.finish_write(&parts, self.create_task_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -363,7 +588,8 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<UpdateTask>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.update_task_for(&parts, input).await)
+        self.finish_write(&parts, self.update_task_for(&parts, input).await)
+            .await
     }
 
     #[tool(
@@ -375,11 +601,72 @@ impl CollabServer {
         Extension(parts): Extension<Parts>,
         Parameters(input): Parameters<AddTaskNote>,
     ) -> Result<CallToolResult, ErrorData> {
-        finish(self.add_task_note_for(&parts, input).await)
+        self.finish_write(&parts, self.add_task_note_for(&parts, input).await)
+            .await
+    }
+
+    #[tool(
+        description = "Delete a task this connection created in the last 24 hours, to undo a mistake. Its notes and assignees go with it. Anything else must be deleted in Collab Tool.",
+        annotations(destructive_hint = true, open_world_hint = false)
+    )]
+    async fn delete_task(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(input): Parameters<DeleteTask>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.finish_write(&parts, self.delete_task_for(&parts, input).await)
+            .await
+    }
+
+    #[tool(
+        description = "Delete a project this connection created in the last 24 hours, with its tasks, to undo a mistake. Refused if anyone else has added tasks or notes to it.",
+        annotations(destructive_hint = true, open_world_hint = false)
+    )]
+    async fn delete_project(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(input): Parameters<DeleteProject>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.finish_write(&parts, self.delete_project_for(&parts, input).await)
+            .await
     }
 }
 
 impl CollabServer {
+    /// The member and connection for a write, once its `organisation` is the
+    /// connected one.
+    fn writer(
+        parts: &Parts,
+        organisation: Option<&str>,
+    ) -> Result<(CurrentMember, McpConnection), Fail> {
+        let member = member(parts)?;
+        let connection = connection(parts)?;
+        check_org(&member, organisation)?;
+        Ok((member, connection))
+    }
+
+    /// A write tool's result, without the update notice. A write that went
+    /// through named its organisation, so this connection has the new tools:
+    /// that ends the notice. A refused or invalid write leaves it.
+    async fn finish_write(
+        &self,
+        parts: &Parts,
+        outcome: Outcome,
+    ) -> Result<CallToolResult, ErrorData> {
+        if let (Ok(_), Some(connection)) = (&outcome, parts.extensions.get::<McpConnection>()) {
+            if connection.update_notice {
+                // The change is saved; failing to record it only keeps the
+                // notice a little longer.
+                if let Err(err) =
+                    claude_update_notices::Model::written(&self.ctx.db, connection.grant_id).await
+                {
+                    tracing::error!(error = %err, "could not end the update notice");
+                }
+            }
+        }
+        result(parts, outcome, false)
+    }
+
     async fn list_projects_for(&self, parts: &Parts) -> Outcome {
         let member = member(parts)?;
         let db = &self.ctx.db;
@@ -404,8 +691,13 @@ impl CollabServer {
     }
 
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
-        let member = member(parts)?;
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
         let db = &self.ctx.db;
+        let recent =
+            projects::Model::count_made_by(db, connection.grant_id, a_minute_ago()).await?;
+        if recent >= PROJECTS_PER_MINUTE {
+            return Err(paused(&member, PROJECTS_PER_MINUTE, "projects"));
+        }
         let team = Team::load(&self.ctx, &member).await?;
         let owner_id = match input.owner.as_deref().filter(|o| !o.trim().is_empty()) {
             Some(name) => team.id(&member, name)?.to_string(),
@@ -422,7 +714,8 @@ impl CollabServer {
             owner_id,
             summary: input.summary.unwrap_or_default(),
         };
-        let project = projects::Model::create(db, member.org.id, &params).await?;
+        let project =
+            projects::Model::create(db, member.org.id, &params, Some(connection.grant_id)).await?;
         notifications::project_saved(&self.ctx, &member, None, &project).await?;
         Ok(json!({
             "id": project.id,
@@ -512,7 +805,12 @@ impl CollabServer {
     }
 
     async fn create_task_for(&self, parts: &Parts, input: CreateTask) -> Outcome {
-        let member = member(parts)?;
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        let recent =
+            tasks::Model::count_made_by(&self.ctx.db, connection.grant_id, a_minute_ago()).await?;
+        if recent >= TASKS_PER_MINUTE {
+            return Err(paused(&member, TASKS_PER_MINUTE, "tasks"));
+        }
         let team = Team::load(&self.ctx, &member).await?;
         let params = TaskParams {
             title: input.title,
@@ -525,13 +823,19 @@ impl CollabServer {
             due_on: input.due_on.unwrap_or_default(),
             status: input.status.unwrap_or_default(),
         };
-        let task = tasks::Model::create(&self.ctx.db, member.org.id, &params).await?;
+        let task = tasks::Model::create(
+            &self.ctx.db,
+            member.org.id,
+            &params,
+            Some(connection.grant_id),
+        )
+        .await?;
         notifications::task_saved(&self.ctx, &member, None, &task).await?;
         show_task(&self.ctx, &member, &team, &task).await
     }
 
     async fn update_task_for(&self, parts: &Parts, input: UpdateTask) -> Outcome {
-        let member = member(parts)?;
+        let (member, _) = Self::writer(parts, input.organisation.as_deref())?;
         let db = &self.ctx.db;
         let task = tasks::Model::find_in_org(db, member.org.id, input.task_id).await?;
         let current = task_assignees::Model::for_task(db, member.org.id, task.id).await?;
@@ -563,7 +867,7 @@ impl CollabServer {
     }
 
     async fn add_task_note_for(&self, parts: &Parts, input: AddTaskNote) -> Outcome {
-        let member = member(parts)?;
+        let (member, _) = Self::writer(parts, input.organisation.as_deref())?;
         let task = tasks::Model::find_in_org(&self.ctx.db, member.org.id, input.task_id).await?;
         let note = task_notes::Model::create(
             &self.ctx.db,
@@ -581,10 +885,146 @@ impl CollabServer {
             "at": time::local(note.created_at, member.tz()).to_rfc3339(),
         }))
     }
+
+    async fn delete_task_for(&self, parts: &Parts, input: DeleteTask) -> Outcome {
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        let removed = tasks::Model::remove_made_by(
+            &self.ctx.db,
+            member.org.id,
+            input.task_id,
+            connection.grant_id,
+            member.user.id,
+        )
+        .await?
+        .map_err(|refusal| {
+            Fail::Refused(
+                match refusal {
+                    Refusal::NotMadeHere => "Only tasks this connection created in the last 24 hours can be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                    Refusal::OthersTasks | Refusal::OthersContent => "Someone else has added notes or reactions to this task, so it can't be deleted from Claude.",
+                }
+                .into(),
+            )
+        })?;
+        self.after_delete(&member, &connection, "task", &removed);
+        Ok(json!({ "deleted": { "id": removed.id, "title": removed.name } }))
+    }
+
+    async fn delete_project_for(&self, parts: &Parts, input: DeleteProject) -> Outcome {
+        let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        let removed = projects::Model::remove_made_by(
+            &self.ctx.db,
+            member.org.id,
+            input.project_id,
+            connection.grant_id,
+            member.user.id,
+        )
+        .await?
+        .map_err(|refusal| {
+            Fail::Refused(
+                match refusal {
+                    Refusal::NotMadeHere => "Only projects this connection created in the last 24 hours can be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                    Refusal::OthersTasks => "Someone else has tasks in this project, so it can't be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                    Refusal::OthersContent => "Someone else has added notes or reactions to tasks in this project, so it can't be deleted from Claude. Ask the user to delete it in Collab Tool.",
+                }
+                .into(),
+            )
+        })?;
+        self.after_delete(&member, &connection, "project", &removed);
+        Ok(json!({
+            "deleted": { "id": removed.id, "name": removed.name, "tasks": removed.tasks }
+        }))
+    }
+
+    /// The log is the only record once the rows are gone. The bells of people
+    /// whose notifications went with it refresh.
+    fn after_delete(
+        &self,
+        member: &CurrentMember,
+        connection: &McpConnection,
+        what: &str,
+        removed: &Removed,
+    ) {
+        tracing::info!(
+            user_id = member.user.id,
+            org_id = member.org.id,
+            what,
+            id = removed.id,
+            tasks = removed.tasks,
+            acting = member.acting,
+            grant_id = %connection.grant_id,
+            "Claude deleted a {what}"
+        );
+        if let Some(hub) = self.ctx.shared_store.get::<NotifyHub>() {
+            hub.publish(member.org.id, &removed.notified);
+        }
+    }
 }
 
 #[tool_handler]
 impl ServerHandler for CollabServer {
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        let member = context_member(&context)?;
+        context.peer.set_peer_info(request.clone());
+        let mut result = self.negotiate_initialize(&request)?;
+        result.instructions = Some(instructions(&member));
+        Ok(result)
+    }
+
+    async fn discover(
+        &self,
+        context: RequestContext<RoleServer>,
+    ) -> Result<DiscoverResult, ErrorData> {
+        let member = context_member(&context)?;
+        // `from_server_info` keeps rmcp's private cache scope: the text differs
+        // per connection.
+        let mut result = DiscoverResult::from_server_info(
+            self.supported_protocol_versions().into_owned(),
+            self.get_info(),
+        );
+        result.instructions = Some(instructions(&member));
+        Ok(result)
+    }
+
+    /// The generated list, with the connected org named in each write tool.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let member = context_member(&context)?;
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        let mut tools = self.tool_router.list_all();
+        for tool in &mut tools {
+            if WRITE_TOOLS.contains(&tool.name.as_ref()) {
+                let description = tool.description.as_deref().unwrap_or_default();
+                tool.description = Some(
+                    format!(
+                        "{description} Connected to {}: pass organisation \"{}\".",
+                        org_label(&member),
+                        member.org.slug
+                    )
+                    .into(),
+                );
+            }
+        }
+        // The descriptions differ per connection, so no shared cache may
+        // hold them.
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools,
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Private),
+        })
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
@@ -592,5 +1032,97 @@ impl ServerHandler for CollabServer {
                     .with_title("Collab Tool"),
             )
             .with_instructions(INSTRUCTIONS)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::Request;
+    use loco_rs::testing::prelude::*;
+    use sea_orm::{EntityTrait, PaginatorTrait};
+    use serial_test::serial;
+
+    use super::{CollabServer, CreateTask, CurrentMember, DeleteTask, Fail};
+    use crate::{
+        app::App,
+        models::{
+            memberships,
+            organisations::{self, SignupParams},
+            tasks::{self, TaskParams},
+        },
+    };
+
+    /// The bearer gate always adds the connection. If it ever didn't, creates
+    /// and deletes must fail, never act as the web app (a NULL grant).
+    #[tokio::test]
+    #[serial]
+    async fn no_connection_means_no_delete_and_no_create() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = boot.app_context;
+        let (user, org) = organisations::Model::sign_up(
+            &ctx.db,
+            &SignupParams {
+                organisation_name: "Acme".to_string(),
+                name: "alice".to_string(),
+                email: "alice@example.com".to_string(),
+                password: "correct-horse".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let membership = memberships::Model::active_in(&ctx.db, org.id, user.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let (mut parts, ()) = Request::new(()).into_parts();
+        parts.extensions.insert(CurrentMember::from_membership(
+            user,
+            org.clone(),
+            membership,
+        ));
+        let params = |title: &str| TaskParams {
+            title: title.to_string(),
+            project_id: String::new(),
+            assignee_ids: vec![],
+            priority: "medium".to_string(),
+            due_on: String::new(),
+            status: String::new(),
+        };
+        let web = tasks::Model::create(&ctx.db, org.id, &params("Web"), None)
+            .await
+            .unwrap();
+        let server = CollabServer::new(ctx.clone());
+
+        let deleted = server
+            .delete_task_for(
+                &parts,
+                DeleteTask {
+                    organisation: Some(org.slug.clone()),
+                    task_id: web.id,
+                },
+            )
+            .await;
+        assert!(matches!(deleted, Err(Fail::Broken(_))));
+        let created = server
+            .create_task_for(
+                &parts,
+                CreateTask {
+                    organisation: Some(org.slug.clone()),
+                    title: "From Claude".to_string(),
+                    project_id: None,
+                    status: None,
+                    priority: None,
+                    due_on: None,
+                    assignees: None,
+                },
+            )
+            .await;
+        assert!(matches!(created, Err(Fail::Broken(_))));
+        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
+        assert!(tasks::Entity::find_by_id(web.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .is_some());
     }
 }

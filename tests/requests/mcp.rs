@@ -257,7 +257,7 @@ async fn browsers_from_other_sites_are_refused_and_no_origin_is_fine() {
 
 #[tokio::test]
 #[serial]
-async fn initialize_and_list_the_eight_tools() {
+async fn initialize_and_list_the_tools() {
     request::<App, _, _>(|request, ctx| async move {
         sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
@@ -275,6 +275,11 @@ async fn initialize_and_list_the_eight_tools() {
         let body = res.json();
         assert_eq!(body["result"]["serverInfo"]["name"], "Collab Tool");
         assert_eq!(body["result"]["protocolVersion"], "2025-11-25");
+        let instructions = body["result"]["instructions"].as_str().unwrap();
+        assert!(
+            instructions.contains("Connected to \"Acme\" (acme)"),
+            "{instructions}"
+        );
 
         let body = rpc(&request, &token, "tools/list", json!({})).await.json();
         let mut names: Vec<&str> = body["result"]["tools"]
@@ -290,6 +295,8 @@ async fn initialize_and_list_the_eight_tools() {
                 "add_task_note",
                 "create_project",
                 "create_task",
+                "delete_project",
+                "delete_task",
                 "get_task",
                 "list_members",
                 "list_projects",
@@ -309,6 +316,15 @@ async fn initialize_and_list_the_eight_tools() {
             .find(|t| t["name"] == "list_tasks")
             .unwrap();
         assert_eq!(list["annotations"]["readOnlyHint"], true);
+        for name in ["delete_task", "delete_project"] {
+            let delete = body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["name"] == name)
+                .unwrap();
+            assert_eq!(delete["annotations"]["destructiveHint"], true, "{name}");
+        }
     })
     .await;
 }
@@ -325,7 +341,7 @@ async fn create_project_fills_in_a_colour_and_tells_the_owner() {
             &request,
             &token,
             "create_project",
-            json!({ "name": "Collab Tool website", "lane": "now", "status": "Active", "owner": "Bob" }),
+            json!({ "organisation": "acme", "name": "Collab Tool website", "lane": "now", "status": "Active", "owner": "Bob" }),
         )
         .await;
         assert!(!error, "{project}");
@@ -344,7 +360,7 @@ async fn create_project_fills_in_a_colour_and_tells_the_owner() {
             &request,
             &token,
             "create_project",
-            json!({ "name": "Later", "lane": "someday", "status": "Planned" }),
+            json!({ "organisation": "acme", "name": "Later", "lane": "someday", "status": "Planned" }),
         )
         .await;
         assert!(error);
@@ -371,7 +387,7 @@ async fn create_task_assigns_by_username_and_notifies() {
             &request,
             &token,
             "create_task",
-            json!({ "title": "Write the launch email", "project_id": project.id, "assignees": ["bob", "me"] }),
+            json!({ "organisation": "acme", "title": "Write the launch email", "project_id": project.id, "assignees": ["bob", "me"] }),
         )
         .await;
         assert!(!error, "{task}");
@@ -413,7 +429,7 @@ async fn update_task_changes_only_what_it_is_given() {
             &token,
             "create_task",
             json!({
-                "title": "Ship it", "project_id": project.id, "priority": "high",
+                "organisation": "acme", "title": "Ship it", "project_id": project.id, "priority": "high",
                 "due_on": "2026-11-03", "assignees": ["me"]
             }),
         )
@@ -425,7 +441,7 @@ async fn update_task_changes_only_what_it_is_given() {
             &request,
             &token,
             "update_task",
-            json!({ "task_id": id, "status": "blocked" }),
+            json!({ "organisation": "acme", "task_id": id, "status": "blocked" }),
         )
         .await;
         assert!(!error, "{task}");
@@ -441,7 +457,7 @@ async fn update_task_changes_only_what_it_is_given() {
             &request,
             &token,
             "update_task",
-            json!({ "task_id": id, "project_id": null, "due_on": null, "assignees": [] }),
+            json!({ "organisation": "acme", "task_id": id, "project_id": null, "due_on": null, "assignees": [] }),
         )
         .await;
         assert_eq!(task["project_id"], Value::Null);
@@ -462,7 +478,7 @@ async fn update_task_records_when_a_task_was_finished() {
             &request,
             &token,
             "create_task",
-            json!({ "title": "Ship it" }),
+            json!({ "organisation": "acme", "title": "Ship it" }),
         )
         .await;
         let id = task["id"].as_i64().unwrap();
@@ -479,7 +495,7 @@ async fn update_task_records_when_a_task_was_finished() {
             &request,
             &token,
             "update_task",
-            json!({ "task_id": id, "status": "done" }),
+            json!({ "organisation": "acme", "task_id": id, "status": "done" }),
         )
         .await;
         assert!(done_at().await.is_some());
@@ -487,7 +503,7 @@ async fn update_task_records_when_a_task_was_finished() {
             &request,
             &token,
             "update_task",
-            json!({ "task_id": id, "status": "todo" }),
+            json!({ "organisation": "acme", "task_id": id, "status": "todo" }),
         )
         .await;
         assert_eq!(done_at().await, None);
@@ -507,7 +523,7 @@ async fn other_organisations_are_out_of_reach() {
             &request,
             &gina,
             "create_task",
-            json!({ "title": "Secret task", "project_id": theirs.id }),
+            json!({ "organisation": "globex", "title": "Secret task", "project_id": theirs.id }),
         )
         .await;
         let alice = token_for(&ctx, "alice@example.com").await;
@@ -529,7 +545,7 @@ async fn other_organisations_are_out_of_reach() {
             &request,
             &alice,
             "update_task",
-            json!({ "task_id": secret["id"], "title": "Mine now" }),
+            json!({ "organisation": "acme", "task_id": secret["id"], "title": "Mine now" }),
         )
         .await;
         assert!(error);
@@ -537,7 +553,7 @@ async fn other_organisations_are_out_of_reach() {
             &request,
             &alice,
             "add_task_note",
-            json!({ "task_id": secret["id"], "body": "Peeking" }),
+            json!({ "organisation": "acme", "task_id": secret["id"], "body": "Peeking" }),
         )
         .await;
         assert!(error, "no notes on another org's task");
@@ -550,7 +566,7 @@ async fn other_organisations_are_out_of_reach() {
             &request,
             &alice,
             "create_task",
-            json!({ "title": "Sneaky", "project_id": theirs.id }),
+            json!({ "organisation": "acme", "title": "Sneaky", "project_id": theirs.id }),
         )
         .await;
         assert!(error, "a project from another org is refused");
@@ -558,7 +574,7 @@ async fn other_organisations_are_out_of_reach() {
             &request,
             &alice,
             "create_task",
-            json!({ "title": "Sneaky", "assignees": ["gina"] }),
+            json!({ "organisation": "acme", "title": "Sneaky", "assignees": ["gina"] }),
         )
         .await;
         assert!(error, "people from another org are refused");
@@ -583,7 +599,7 @@ async fn list_tasks_filters_and_list_members_has_no_emails() {
                 &request,
                 &token,
                 "create_task",
-                json!({ "title": title, "project_id": project.id, "assignees": assignees, "status": status }),
+                json!({ "organisation": "acme", "title": title, "project_id": project.id, "assignees": assignees, "status": status }),
             )
             .await;
         }
@@ -632,7 +648,7 @@ async fn validation_problems_come_back_as_tool_errors() {
             &request,
             &token,
             "create_task",
-            json!({ "title": "x".repeat(141) }),
+            json!({ "organisation": "acme", "title": "x".repeat(141) }),
         )
         .await;
         assert!(error);
@@ -642,7 +658,7 @@ async fn validation_problems_come_back_as_tool_errors() {
             &request,
             &token,
             "create_task",
-            json!({ "title": "Fine", "assignees": ["nobody"] }),
+            json!({ "organisation": "acme", "title": "Fine", "assignees": ["nobody"] }),
         )
         .await;
         assert!(error);
@@ -652,7 +668,7 @@ async fn validation_problems_come_back_as_tool_errors() {
             &request,
             &token,
             "create_task",
-            json!({ "title": "Fine", "due_on": "next tuesday" }),
+            json!({ "organisation": "acme", "title": "Fine", "due_on": "next tuesday" }),
         )
         .await;
         assert!(error);
@@ -667,13 +683,19 @@ async fn notes_notify_mentioned_people() {
         let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let token = token_for(&ctx, "alice@example.com").await;
-        let (_, task) = tool(&request, &token, "create_task", json!({ "title": "Chore" })).await;
+        let (_, task) = tool(
+            &request,
+            &token,
+            "create_task",
+            json!({ "organisation": "acme", "title": "Chore" }),
+        )
+        .await;
 
         let (error, note) = tool(
             &request,
             &token,
             "add_task_note",
-            json!({ "task_id": task["id"], "body": "Can you look, @bob?" }),
+            json!({ "organisation": "acme", "task_id": task["id"], "body": "Can you look, @bob?" }),
         )
         .await;
         assert!(!error, "{note}");
@@ -694,7 +716,7 @@ async fn notes_notify_mentioned_people() {
             &request,
             &token,
             "add_task_note",
-            json!({ "task_id": task["id"], "body": "  " }),
+            json!({ "organisation": "acme", "task_id": task["id"], "body": "  " }),
         )
         .await;
         assert!(error, "an empty note is refused");
@@ -715,7 +737,7 @@ async fn the_connector_cannot_notify_everyone() {
             &request,
             &token,
             "create_task",
-            json!({ "title": "Chore", "assignees": ["carol"] }),
+            json!({ "organisation": "acme", "title": "Chore", "assignees": ["carol"] }),
         )
         .await;
 
@@ -723,7 +745,7 @@ async fn the_connector_cannot_notify_everyone() {
             &request,
             &token,
             "add_task_note",
-            json!({ "task_id": task["id"], "body": "@everyone hello" }),
+            json!({ "organisation": "acme", "task_id": task["id"], "body": "@everyone hello" }),
         )
         .await;
         assert!(!error, "{note}");
@@ -739,7 +761,7 @@ async fn the_connector_cannot_notify_everyone() {
             &request,
             &token,
             "add_task_note",
-            json!({ "task_id": task["id"], "body": "@bob @everyone hello" }),
+            json!({ "organisation": "acme", "task_id": task["id"], "body": "@bob @everyone hello" }),
         )
         .await;
         assert_eq!(notices(&ctx, bob, "mention").await.len(), 1);

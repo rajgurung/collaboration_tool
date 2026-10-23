@@ -431,7 +431,9 @@ async fn the_beta_allow_page_is_refused_after_removal() {
         )
         .await;
         assert_ne!(res.status_code(), 302, "nothing granted");
-        assert!(res.text().contains("Start again from Claude"));
+        assert!(res
+            .text()
+            .contains("You can&#39;t connect Claude to that organisation."));
         assert_eq!(oauth_codes::Entity::find().count(&ctx.db).await.unwrap(), 0);
     })
     .await;

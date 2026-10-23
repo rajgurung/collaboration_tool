@@ -6,6 +6,7 @@
       <p class="meta m-0 mb-1.5 flex items-center gap-1.5"><span class="dot" style="--dot: {{ task.accent }}"></span>{% if task.project %}{{ task.project }}{% else %}No project{% endif %}</p>
       <h2 class="m-0 text-[22px] font-bold leading-tight tracking-tight">{{ task.title }}</h2>
       <p class="meta mt-1.5 mb-0 text-sm">{{ task.meta }}</p>
+      {% if task.made_with_claude %}<p class="made-with-claude meta mt-1 mb-0 text-sm">{{<icon name="sparkles" class="h-3.5 w-3.5"/>}}Made with Claude</p>{% endif %}
     </div>
     <button type="button" class="btn btn-secondary -mt-0.5" hx-get="{{ org_url(path="/tasks/" ~ (task.id) ~ "/edit") }}" hx-target="#task-sheet-body">{{<icon name="pencil" class="h-4 w-4"/>}}Edit</button>
     <button type="button" class="icon-btn -mt-1.5 -mr-2.5 text-muted" data-dialog-close aria-label="Close">{{<icon name="x" class="h-[22px] w-[22px]"/>}}</button>

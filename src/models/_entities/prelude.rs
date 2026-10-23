@@ -2,6 +2,7 @@
 
 pub use super::access_tokens::Entity as AccessTokens;
 pub use super::auth_attempts::Entity as AuthAttempts;
+pub use super::claude_update_notices::Entity as ClaudeUpdateNotices;
 pub use super::conversation_members::Entity as ConversationMembers;
 pub use super::conversations::Entity as Conversations;
 pub use super::documents::Entity as Documents;

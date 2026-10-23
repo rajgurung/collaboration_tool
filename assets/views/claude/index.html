@@ -10,6 +10,7 @@
       <input class="input font-mono text-sm" readonly value="{{ mcp_url }}" aria-label="Connector URL" id="mcp-url" onclick="this.select()">
       <button type="button" class="btn btn-secondary shrink-0" data-copy="#mcp-url">Copy</button>
     </div>
+    <p class="meta m-0 text-sm">The same address for every organisation. You choose which one when you press Allow.</p>
   </section>
 
   <section class="card flex flex-col gap-2 p-4">
@@ -59,7 +60,7 @@
   </section>
 
   <section class="flex flex-col gap-2">
-    <h2 class="section-label">Connected · {{ connections | length }}</h2>
+    <h2 class="section-label">Connected to {{ org.name }} · {{ connections | length }}</h2>
     <div class="list">
       {% for c in connections %}
       <div class="list-row">
@@ -71,7 +72,7 @@
         <form method="post" action="{{ org_url(path="/settings/claude/grants/" ~ (c.grant_id) ~ "/revoke") }}"><button type="submit" class="btn btn-danger">Revoke</button></form>
       </div>
       {% else %}
-      <p class="empty">Nothing is connected yet.</p>
+      <p class="empty">Nothing is connected to {{ org.name }} yet.<br>For another organisation, connect again and pick it.</p>
       {% endfor %}
     </div>
   </section>

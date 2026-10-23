@@ -5,6 +5,7 @@ use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    data::notify_hub::NotifyHub,
     extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
         memberships,
@@ -155,10 +156,25 @@ async fn form_data(
     values: serde_json::Value,
     errors: &crate::views::forms::FieldErrors,
 ) -> Result<serde_json::Value> {
+    // For the edit form's delete confirm and "Made with Claude" line. Only a
+    // bool about Claude reaches the template, never the grant.
+    let project = match project_id {
+        Some(id) => {
+            let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+            Some(serde_json::json!({
+                "name": project.name,
+                "task_count": tasks::Model::count_in_project(&ctx.db, member.org.id, id).await?,
+                "made_with_claude": project.claude_grant_id.is_some(),
+            }))
+        }
+        None => None,
+    };
+    // `page` puts `me.can_manage` in, which shows the delete button.
     Ok(member.page(
         "roadmap",
         data!({
             "project_id": project_id,
+            "project": project,
             "form": values,
             "errors": errors,
             "team": team(ctx, member.org.id).await?,
@@ -206,7 +222,7 @@ async fn create(
     headers: HeaderMap,
     Form(params): Form<ProjectParams>,
 ) -> Result<Response> {
-    let result = projects::Model::create(&ctx.db, member.org.id, &params).await;
+    let result = projects::Model::create(&ctx.db, member.org.id, &params, None).await;
     if let Ok(project) = &result {
         super::notifications::project_saved(&ctx, &member, None, project).await?;
     }
@@ -249,6 +265,44 @@ async fn update(
         "Project saved",
     )
     .await
+}
+
+/// Deletes a project with its tasks, their notes, assignees and reactions,
+/// and the notifications about those tasks. Owners and admins, through their
+/// own membership. Can't be undone, so it is logged.
+#[debug_handler]
+async fn destroy(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Response> {
+    member.require_manager()?;
+    member.require_own_membership()?;
+    let removed = projects::Model::remove(&ctx.db, member.org.id, id).await?;
+    tracing::info!(
+        user_id = member.user.id,
+        org_id = member.org.id,
+        project_id = removed.id,
+        tasks = removed.tasks,
+        acting = member.acting,
+        "deleted a project"
+    );
+    if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
+        hub.publish(member.org.id, &removed.notified);
+    }
+    if !headers.contains_key("hx-request") {
+        return Ok(redirect_response(&headers, &member.url("/roadmap")));
+    }
+    let trigger = serde_json::json!({
+        "toast": { "kind": "success", "message": "Project deleted" },
+        "roadmap-changed": true,
+        "close-dialogs": true,
+    });
+    format::render()
+        .header("HX-Trigger", trigger.to_string())
+        .header("HX-Reswap", "none")
+        .empty()
 }
 
 /// Success closes the dialog and refreshes the lane (or redirects without
@@ -298,4 +352,5 @@ pub fn routes() -> Routes {
         .add("/roadmap/projects", post(create))
         .add("/roadmap/projects/{id}/edit", get(edit))
         .add("/roadmap/projects/{id}", post(update))
+        .add("/roadmap/projects/{id}/delete", post(destroy))
 }

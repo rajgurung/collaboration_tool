@@ -438,10 +438,15 @@ async fn index(
             .await?
             .into_iter()
             .map(|n| {
-                let actor = n
-                    .actor_id
-                    .and_then(|id| names.get(&id).cloned())
-                    .unwrap_or_else(|| "Someone".to_string());
+                // The app's own notices have no person behind them.
+                let from_app = n.kind == kind::CONNECTOR;
+                let actor = if from_app {
+                    "Collab Tool".to_string()
+                } else {
+                    n.actor_id
+                        .and_then(|id| names.get(&id).cloned())
+                        .unwrap_or_else(|| "Someone".to_string())
+                };
                 let (mut headline, excerpt) = n
                     .body
                     .split_once('\n')
@@ -458,6 +463,8 @@ async fn index(
                     color: avatar_color(&actor),
                     who: if mine {
                         "You".to_string()
+                    } else if from_app {
+                        String::new()
                     } else {
                         actor.clone()
                     },

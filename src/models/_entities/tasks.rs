@@ -18,6 +18,10 @@ pub struct Model {
     pub organisation_id: i64,
     pub project_id: Option<i64>,
     pub done_at: Option<DateTimeWithTimeZone>,
+    /// The Claude connection that made it; `None` for the web app. Never
+    /// serialized, so no uuid reaches a page.
+    #[serde(skip)]
+    pub claude_grant_id: Option<Uuid>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

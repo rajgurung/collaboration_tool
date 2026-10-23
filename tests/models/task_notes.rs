@@ -62,6 +62,7 @@ async fn find_on_task_refuses_another_tasks_note() {
             due_on: String::new(),
             status: String::new(),
         },
+        None,
     )
     .await
     .unwrap();

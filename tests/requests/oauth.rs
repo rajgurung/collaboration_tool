@@ -3,17 +3,17 @@ use collab::{
     app::App,
     models::{
         access_tokens::{self, CodeExchange},
-        oauth_clients, oauth_codes, organisations,
+        memberships, oauth_clients, oauth_codes, organisations,
     },
 };
-use loco_rs::{testing::prelude::*, TestServer};
+use loco_rs::{prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::{json, Value};
 use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    mcp::{rpc, RESOURCE},
+    mcp::{rpc, tool, RESOURCE},
     multi_org::{alice_in_two_orgs, with_org},
     prepare_data::{sign_up_member, AsMember, USER_PASSWORD},
 };
@@ -596,6 +596,42 @@ async fn refresh_rotates_and_reuse_revokes_the_grant() {
 
 #[tokio::test]
 #[serial]
+async fn the_record_survives_a_token_refresh() {
+    request::<App, _, _>(|request, _ctx| async move {
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let client_id = register(&request, CLAUDE).await;
+        let code = code_for(&request, &alice, &client_id).await;
+        let (_, first) = exchange(&request, &client_id, &code).await;
+        let (error, task) = tool(
+            &request,
+            first["access_token"].as_str().unwrap(),
+            "create_task",
+            json!({ "organisation": "acme", "title": "Made before the refresh" }),
+        )
+        .await;
+        assert!(!error, "{task}");
+
+        let (status, second) = refresh(
+            &request,
+            &client_id,
+            first["refresh_token"].as_str().unwrap(),
+        )
+        .await;
+        assert_eq!(status, 200, "{second}");
+        let (error, result) = tool(
+            &request,
+            second["access_token"].as_str().unwrap(),
+            "delete_task",
+            json!({ "organisation": "acme", "task_id": task["id"] }),
+        )
+        .await;
+        assert!(!error, "the same connection, a new access token: {result}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn racing_refreshes_let_one_win_then_revoke_it() {
     request::<App, _, _>(|request, ctx| async move {
         let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
@@ -660,6 +696,58 @@ async fn a_super_admin_acting_elsewhere_is_asked_to_leave_first() {
             .await
             .unwrap()
             .is_empty());
+    })
+    .await;
+}
+
+/// The admin is also a real member of Beta and posts Beta's id while acting
+/// in Acme. The acting page still comes first: no org is looked at.
+#[tokio::test]
+#[serial]
+async fn an_acting_super_admin_cannot_pick_their_own_org_either() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        sign_up_member(&request, "Beta", "bob", "bob@example.com").await;
+        let acme = organisations::Model::find_by_slug(&ctx.db, "acme")
+            .await
+            .unwrap();
+        let beta = organisations::Model::find_by_slug(&ctx.db, "beta")
+            .await
+            .unwrap();
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let admin_user =
+            collab::models::users::Model::find_by_email(&ctx.db, "gurungraj26@gmail.com")
+                .await
+                .unwrap();
+        memberships::ActiveModel {
+            user_id: ActiveValue::Set(admin_user.id),
+            username: ActiveValue::Set("raj".to_string()),
+            role: ActiveValue::Set(memberships::role::MEMBER.to_string()),
+            status: ActiveValue::Set(memberships::status::ACTIVE.to_string()),
+            approved_at: ActiveValue::Set(Some(chrono::Utc::now().into())),
+            ..Default::default()
+        }
+        .set_tenant(beta.id)
+        .unwrap()
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), acme.id);
+        let client_id = register(&request, CLAUDE).await;
+
+        let mut fields = authorize_fields(&client_id, CLAUDE);
+        fields.push(("decision", "allow".to_string()));
+        fields.push(("org_id", beta.id.to_string()));
+        let pairs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let res = request
+            .post("/oauth/authorize")
+            .add_header("cookie", acting)
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(form_body(&pairs))
+            .await;
+        assert_eq!(res.status_code(), 403, "{}", res.text());
+        assert!(res.text().contains("Leave Acme first"));
+        assert!(no_codes(&ctx).await);
     })
     .await;
 }
@@ -830,14 +918,14 @@ async fn the_allow_page_pins_the_org() {
 
 #[tokio::test]
 #[serial]
-async fn allow_after_a_switch_is_refused() {
+async fn allow_binds_the_posted_org_not_the_cookie() {
     request::<App, _, _>(|request, ctx| async move {
         let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
         let client_id = register(&request, CLAUDE).await;
         let shown = shown_org_id(&request, &cookie, &client_id).await;
         assert_eq!(shown, in_acme.organisation_id.to_string());
 
-        // Another tab switched this browser to Beta.
+        // Another tab switched this browser to Beta; the page's choice stands.
         let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
         let res = post_decision(
             &request,
@@ -848,11 +936,10 @@ async fn allow_after_a_switch_is_refused() {
             Some(&shown),
         )
         .await;
-        assert_eq!(res.status_code(), 400);
-        assert!(res
-            .text()
-            .contains("You switched organisation while this page was open."));
-        assert!(no_codes(&ctx).await);
+        assert_eq!(res.status_code(), 302, "{}", res.text());
+        let codes = oauth_codes::Entity::find().all(&ctx.db).await.unwrap();
+        assert_eq!(codes.len(), 1);
+        assert_eq!(codes[0].organisation_id, in_acme.organisation_id);
     })
     .await;
 }
@@ -883,6 +970,230 @@ async fn deny_without_an_org_still_goes_back_with_access_denied() {
         let query = query_of(&location(res.headers()));
         assert_eq!(query["error"], "access_denied");
         assert!(!query.contains_key("code"));
+    })
+    .await;
+}
+
+/// The organisations on the picker, in order, as `(id, checked)`.
+fn picker(html: &str) -> Vec<(String, bool)> {
+    html.split(r#"<input type="radio" name="org_id" value=""#)
+        .skip(1)
+        .map(|rest| {
+            let id = rest[..rest.find('"').unwrap()].to_string();
+            let tag = &rest[..rest.find('>').unwrap()];
+            (id, tag.contains("checked"))
+        })
+        .collect()
+}
+
+async fn allow_html(request: &TestServer, cookie: &Cookie, url: &str) -> String {
+    let page = request
+        .get(url)
+        .add_header(cookie.0.clone(), cookie.1.clone())
+        .await;
+    assert_eq!(page.status_code(), 200, "{}", page.text());
+    page.text()
+}
+
+/// A third and fourth org, where Alice is pending and removed.
+async fn alice_waiting_and_removed(
+    request: &TestServer,
+    ctx: &loco_rs::app::AppContext,
+    alice: i64,
+) -> (i64, i64) {
+    let mut ids = Vec::new();
+    for (name, owner, email, status) in [
+        (
+            "Gamma",
+            "gina",
+            "gina@example.com",
+            memberships::status::PENDING,
+        ),
+        (
+            "Delta",
+            "dan",
+            "dan@example.com",
+            memberships::status::REMOVED,
+        ),
+    ] {
+        sign_up_member(request, name, owner, email).await;
+        let org = organisations::Model::find_by_slug(&ctx.db, &name.to_lowercase())
+            .await
+            .unwrap();
+        memberships::ActiveModel {
+            user_id: ActiveValue::Set(alice),
+            username: ActiveValue::Set("alice".to_string()),
+            role: ActiveValue::Set(memberships::role::MEMBER.to_string()),
+            status: ActiveValue::Set(status.to_string()),
+            ..Default::default()
+        }
+        .set_tenant(org.id)
+        .unwrap()
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        ids.push(org.id);
+    }
+    (ids[0], ids[1])
+}
+
+#[tokio::test]
+#[serial]
+async fn the_picker_lists_only_active_orgs_pinned_first() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, alice, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        alice_waiting_and_removed(&request, &ctx, alice).await;
+        let client_id = register(&request, CLAUDE).await;
+        let url = authorize_url(&client_id, CLAUDE);
+
+        let html = allow_html(&request, &cookie, &url).await;
+        assert_eq!(
+            picker(&html),
+            [
+                (in_acme.organisation_id.to_string(), true),
+                (in_beta.organisation_id.to_string(), false)
+            ]
+        );
+        assert!(html.contains("Owner · as alice · <span class=\"org-last\">Last used</span>"));
+        assert!(html.contains("Member · as alice"));
+        assert!(!html.contains("Gamma") && !html.contains("Delta"));
+        assert!(!html.contains(r#"type="hidden" name="org_id""#));
+
+        let in_beta_cookie = with_org(&ctx, &cookie, in_beta.organisation_id).await;
+        let html = allow_html(&request, &in_beta_cookie, &url).await;
+        assert_eq!(
+            picker(&html),
+            [
+                (in_beta.organisation_id.to_string(), true),
+                (in_acme.organisation_id.to_string(), false)
+            ]
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_query_string_cannot_pick_the_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, in_acme, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let client_id = register(&request, CLAUDE).await;
+        let url = format!(
+            "{}&org_id={}",
+            authorize_url(&client_id, CLAUDE),
+            in_beta.organisation_id
+        );
+        let html = allow_html(&request, &cookie, &url).await;
+        assert_eq!(
+            picker(&html)[0],
+            (in_acme.organisation_id.to_string(), true)
+        );
+        assert!(!picker(&html)[1].1);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn one_org_shows_no_picker() {
+    request::<App, _, _>(|request, ctx| async move {
+        let alice = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let client_id = register(&request, CLAUDE).await;
+        let html = allow_html(&request, &alice, &authorize_url(&client_id, CLAUDE)).await;
+        assert!(picker(&html).is_empty());
+        assert!(html.contains(&format!(
+            r#"type="hidden" name="org_id" value="{}""#,
+            alice.org_id
+        )));
+        assert!(html.contains("in Acme, as alice"));
+        let _ = ctx;
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn allow_binds_the_chosen_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, _, _, in_beta) = alice_in_two_orgs(&request, &ctx).await;
+        let client_id = register(&request, CLAUDE).await;
+        let res = post_decision(
+            &request,
+            &cookie,
+            &client_id,
+            CLAUDE,
+            "allow",
+            Some(&in_beta.organisation_id.to_string()),
+        )
+        .await;
+        assert_eq!(res.status_code(), 302, "{}", res.text());
+        let code = query_of(&location(res.headers()))["code"].clone();
+        let (status, tokens) = exchange(&request, &client_id, &code).await;
+        assert_eq!(status, 200, "{tokens}");
+        let access = tokens["access_token"].as_str().unwrap();
+        let body = rpc(
+            &request,
+            access,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "test", "version": "1" }
+            }),
+        )
+        .await
+        .json();
+        let instructions = body["result"]["instructions"].as_str().unwrap();
+        assert!(
+            instructions.starts_with("Connected to \"Beta\" (beta) as alice."),
+            "{instructions}"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn every_unusable_org_gets_the_same_answer() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (cookie, alice, _, _) = alice_in_two_orgs(&request, &ctx).await;
+        let (pending, removed) = alice_waiting_and_removed(&request, &ctx, alice).await;
+        sign_up_member(&request, "Epsilon", "eve", "eve@example.com").await;
+        let stranger = organisations::Model::find_by_slug(&ctx.db, "epsilon")
+            .await
+            .unwrap()
+            .id;
+        let client_id = register(&request, CLAUDE).await;
+        let mut answers = Vec::new();
+        for org_id in [
+            "abc".to_string(),
+            stranger.to_string(),
+            removed.to_string(),
+            pending.to_string(),
+        ] {
+            let res = post_decision(
+                &request,
+                &cookie,
+                &client_id,
+                CLAUDE,
+                "allow",
+                Some(&org_id),
+            )
+            .await;
+            // The hidden fields come in any order; they are the form's own.
+            let text = res.text();
+            let without_fields = text
+                .split("<input type=\"hidden\"")
+                .map(|part| part.split_once('>').map_or(part, |(_, rest)| rest))
+                .collect::<String>();
+            answers.push((res.status_code().as_u16(), without_fields));
+        }
+        assert_eq!(answers[0].0, 400);
+        assert!(answers[0]
+            .1
+            .contains("You can&#39;t connect Claude to that organisation."));
+        assert!(answers.iter().all(|a| a == &answers[0]), "{answers:?}");
+        assert!(no_codes(&ctx).await);
     })
     .await;
 }

@@ -16,6 +16,8 @@ pub mod kind {
     pub const PROJECT: &str = "project";
     /// Someone replied in a thread you started or replied in.
     pub const REPLY: &str = "reply";
+    /// From the app itself, not a person: the Claude connector changed.
+    pub const CONNECTOR: &str = "connector";
 }
 
 /// One notification to send: the same text and link for every recipient.

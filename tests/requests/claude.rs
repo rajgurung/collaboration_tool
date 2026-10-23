@@ -67,7 +67,8 @@ async fn the_page_shows_the_connector_url_and_more_links_to_it() {
         let body = page.text();
         assert!(body.contains("http://localhost:5150/mcp"));
         assert!(body.contains("claude mcp add --transport http collab http://localhost:5150/mcp"));
-        assert!(body.contains("Nothing is connected yet."));
+        assert!(body.contains("Nothing is connected to Acme yet."));
+        assert!(body.contains("For another organisation, connect again and pick it."));
 
         assert_eq!(request.get("/settings/claude").await.status_code(), 303);
     })
@@ -170,7 +171,7 @@ async fn revoking_kills_the_grant_and_only_your_own() {
             .add_header(alice.0.clone(), alice.1.clone())
             .await
             .text();
-        assert!(page.contains("Nothing is connected yet."));
+        assert!(page.contains("Nothing is connected to Acme yet."));
     })
     .await;
 }

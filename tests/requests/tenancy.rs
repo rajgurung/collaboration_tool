@@ -59,6 +59,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
             owner_id: owner.id.to_string(),
             summary: SECRET.to_string(),
         },
+        None,
     )
     .await
     .unwrap();
@@ -73,6 +74,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
             due_on: String::new(),
             status: String::new(),
         },
+        None,
     )
     .await
     .unwrap();
@@ -176,7 +178,7 @@ async fn org_a_cannot_reach_org_b() {
                 owner_id: String::new(),
                 summary: String::new(),
             },
-        )
+        None,)
         .await
         .unwrap();
         let b_user = globex.owner.id.to_string();
@@ -260,7 +262,7 @@ async fn org_a_cannot_reach_org_b() {
                 due_on: String::new(),
                 status: String::new(),
             },
-        )
+        None,)
         .await
         .unwrap();
         let res = request

@@ -208,6 +208,9 @@ async fn a_strangers_org_and_a_made_up_slug_look_identical() {
         assert!(routes
             .iter()
             .any(|(m, p)| m == Method::POST && p == "/settings/claude/tokens"));
+        assert!(routes
+            .iter()
+            .any(|(m, p)| m == Method::POST && p == "/roadmap/projects/1/delete"));
         for (name, cookie) in who {
             for (method, path) in &routes {
                 let mut seen = Vec::new();

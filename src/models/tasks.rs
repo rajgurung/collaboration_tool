@@ -4,9 +4,110 @@ use loco_rs::prelude::*;
 use serde::Deserialize;
 
 pub use super::_entities::tasks::{ActiveModel, Column, Entity, Model};
-use super::{field_error, memberships, projects, task_assignees};
+use super::{
+    field_error, memberships, note_reactions, notifications, projects, task_assignees, task_notes,
+};
 
 pub type Tasks = Entity;
+
+/// How long Claude can undo what its own connection made.
+pub const UNDO_HOURS: i64 = 24;
+
+/// What a hard delete removed, for the tool result and the log.
+#[derive(Debug)]
+pub struct Removed {
+    pub id: i64,
+    /// The task's title or the project's name.
+    pub name: String,
+    /// Tasks deleted: 1 for a task, the project's tasks for a project.
+    pub tasks: usize,
+    /// People whose notifications went with it, so their bells can refresh.
+    pub notified: Vec<i64>,
+}
+
+/// Why Claude may not delete something.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// Not made by this connection in the last [`UNDO_HOURS`].
+    NotMadeHere,
+    /// A project with tasks made by someone else (the web app or another
+    /// connection).
+    OthersTasks,
+    /// Someone else's note, or reaction to a note, is on it.
+    OthersContent,
+}
+
+/// Whether a row was made by this connection within [`UNDO_HOURS`]. The
+/// grant is compared as `Some(grant)`, so a web-made row (NULL) never matches.
+#[must_use]
+pub fn made_lately(row_grant: Option<Uuid>, created_at: DateTimeWithTimeZone, grant: Uuid) -> bool {
+    row_grant == Some(grant)
+        && created_at > chrono::Utc::now() - chrono::Duration::hours(UNDO_HOURS)
+}
+
+/// Whether anyone but `user_id` has a note, or a reaction to a note, on these
+/// tasks. A note whose author was deleted (NULL) counts as someone else's.
+/// Run it inside the delete's transaction, after locking the tasks: the
+/// notes are locked `FOR UPDATE` too, so a reaction being added (its foreign
+/// key check needs the note) waits for the delete instead of being cascaded
+/// away unseen.
+///
+/// # Errors
+/// On database errors.
+pub async fn others_content<C: ConnectionTrait>(
+    db: &C,
+    task_ids: &[i64],
+    user_id: i64,
+) -> ModelResult<bool> {
+    let notes: Vec<(i64, Option<i64>)> = task_notes::Entity::find()
+        .select_only()
+        .column(task_notes::Column::Id)
+        .column(task_notes::Column::AuthorId)
+        .filter(task_notes::Column::TaskId.is_in(task_ids.iter().copied()))
+        .lock_exclusive()
+        .into_tuple()
+        .all(db)
+        .await?;
+    if notes.iter().any(|(_, author)| *author != Some(user_id)) {
+        return Ok(true);
+    }
+    let reactions = note_reactions::Entity::find()
+        .filter(note_reactions::Column::TaskNoteId.is_in(notes.iter().map(|(id, _)| *id)))
+        .filter(note_reactions::Column::UserId.ne(user_id))
+        .count(db)
+        .await?;
+    Ok(reactions > 0)
+}
+
+/// Deletes this organisation's notifications that link to these tasks, and
+/// returns whose they were. Use ids read inside the delete's transaction.
+///
+/// # Errors
+/// On database errors.
+pub async fn drop_notices<C: ConnectionTrait>(
+    db: &C,
+    org_id: i64,
+    task_ids: &[i64],
+) -> ModelResult<Vec<i64>> {
+    if task_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let links: Vec<String> = task_ids
+        .iter()
+        .map(|id| format!("/tasks?open={id}"))
+        .collect();
+    let mut users: Vec<i64> = notifications::Entity::delete_many()
+        .filter(notifications::Column::OrganisationId.eq(org_id))
+        .filter(notifications::Column::Link.is_in(links))
+        .exec_with_returning(db)
+        .await?
+        .into_iter()
+        .map(|n| n.user_id)
+        .collect();
+    users.sort_unstable();
+    users.dedup();
+    Ok(users)
+}
 
 /// Board columns, in order, with their labels and colours.
 pub const STATUSES: [(&str, &str, &str); 4] = [
@@ -122,6 +223,39 @@ impl ActiveModelBehavior for ActiveModel {
 }
 
 impl Model {
+    /// How many tasks a project has.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn count_in_project<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        project_id: i64,
+    ) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::ProjectId.eq(project_id))
+            .count(db)
+            .await?)
+    }
+
+    /// How many tasks this Claude connection made after `since`, for the
+    /// brake on bulk creates.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn count_made_by<C: ConnectionTrait>(
+        db: &C,
+        grant: Uuid,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .filter(Column::ClaudeGrantId.eq(grant))
+            .filter(Column::CreatedAt.gt(since))
+            .count(db)
+            .await?)
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn list_for_org<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<Vec<Self>> {
@@ -147,7 +281,9 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
-    /// Adds a task and its assignees together.
+    /// Adds a task and its assignees together. `claude_grant` is the Claude
+    /// connection making it, `None` from the web app (see
+    /// [`super::projects::Model::create`]).
     ///
     /// # Errors
     /// Validation errors, or database errors.
@@ -155,6 +291,7 @@ impl Model {
         db: &DatabaseConnection,
         org_id: i64,
         params: &TaskParams,
+        claude_grant: Option<Uuid>,
     ) -> ModelResult<Self> {
         let checked = params.check(db, org_id).await?;
         let txn = db.begin().await?;
@@ -176,6 +313,7 @@ impl Model {
             due_on: ActiveValue::Set(checked.due_on),
             sort_order: ActiveValue::Set(last + 1),
             project_id: ActiveValue::Set(checked.project_id),
+            claude_grant_id: ActiveValue::Set(claude_grant),
             ..Default::default()
         }
         .set_tenant(org_id)?
@@ -219,6 +357,48 @@ impl Model {
     pub async fn remove<C: ConnectionTrait>(self, db: &C) -> ModelResult<()> {
         self.into_active_model().delete(db).await?;
         Ok(())
+    }
+
+    /// Deletes a task Claude made, for that same connection (`grant`), within
+    /// [`UNDO_HOURS`], when no one but `user_id` has added notes or reactions
+    /// to it. Notes, assignees and reactions cascade; notifications that link
+    /// to it are deleted too. The task is locked first, so the checks and the
+    /// delete see the same row.
+    ///
+    /// # Errors
+    /// `EntityNotFound` when it is not in this organisation, or database
+    /// errors.
+    pub async fn remove_made_by(
+        db: &DatabaseConnection,
+        org_id: i64,
+        id: i64,
+        grant: Uuid,
+        user_id: i64,
+    ) -> ModelResult<Result<Removed, Refusal>> {
+        let txn = db.begin().await?;
+        let task = Entity::find_by_id(id)
+            .in_tenant(org_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        // An early return drops `txn`, which rolls it back.
+        if !made_lately(task.claude_grant_id, task.created_at, grant) {
+            return Ok(Err(Refusal::NotMadeHere));
+        }
+        if others_content(&txn, &[task.id], user_id).await? {
+            return Ok(Err(Refusal::OthersContent));
+        }
+        let notified = drop_notices(&txn, org_id, &[task.id]).await?;
+        let removed = Removed {
+            id: task.id,
+            name: task.title.clone(),
+            tasks: 1,
+            notified,
+        };
+        task.into_active_model().delete(&txn).await?;
+        txn.commit().await?;
+        Ok(Ok(removed))
     }
 
     /// Moves the task to another board column.
