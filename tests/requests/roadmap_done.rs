@@ -3,7 +3,7 @@
 use collab::{
     app::App,
     models::{
-        memberships, organisations, projects,
+        memberships, notifications, organisations, projects,
         tasks::{self, TaskParams},
         users,
     },
@@ -916,6 +916,194 @@ async fn owning_a_project_in_a_does_not_let_you_close_bs() {
         assert_eq!(status, 404);
         assert!(!find(&ctx, &theirs).await.is_closed());
         assert!(!find(&ctx, &wholesale).await.is_closed());
+    })
+    .await;
+}
+
+async fn notices(ctx: &AppContext) -> Vec<notifications::Model> {
+    notifications::Entity::find().all(&ctx.db).await.unwrap()
+}
+
+async fn ana_id(ctx: &AppContext) -> i64 {
+    users::Model::find_by_email(&ctx.db, "ana@example.com")
+        .await
+        .unwrap()
+        .id
+}
+
+/// Website, owned by Tom. Maya is on two open tasks, Tom on one, Ana (who
+/// closes it) on one, and Leo on one already done. Starts with no notices.
+/// Returns Ana and the ids of Maya, Tom and Leo.
+async fn website_with_people(
+    request: &TestServer,
+    ctx: &AppContext,
+) -> (TestMember, i64, i64, i64, projects::Model) {
+    let ana = sign_up_member(request, "Juniper Tea Co", "ana", "ana@example.com").await;
+    let (_, maya) = teammate(request, ctx, "maya", memberships::role::MEMBER).await;
+    let (_, tom) = teammate(request, ctx, "tom", memberships::role::MEMBER).await;
+    let (_, leo) = teammate(request, ctx, "leo", memberships::role::MEMBER).await;
+    let website = project_in(ctx, ORG, "Website").await;
+    let website = owned_by(ctx, &website, tom).await;
+    let pid = Some(website.id);
+    let ana_user = ana_id(ctx).await;
+    task_in(ctx, ana.org_id, pid, "Returns page", "todo", &[maya]).await;
+    task_in(
+        ctx,
+        ana.org_id,
+        pid,
+        "Checkout",
+        "blocked",
+        &[maya, ana_user],
+    )
+    .await;
+    task_in(ctx, ana.org_id, pid, "Couriers", "progress", &[tom]).await;
+    task_in(ctx, ana.org_id, pid, "Logo", "done", &[leo]).await;
+    notifications::Entity::delete_many()
+        .exec(&ctx.db)
+        .await
+        .unwrap();
+    (ana, maya, tom, leo, website)
+}
+
+#[tokio::test]
+#[serial]
+async fn maya_with_two_tasks_gets_one_notice() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, maya, tom, leo, website) = website_with_people(&request, &ctx).await;
+        let (status, _) = act(&request, &ana, &website, "close").await;
+        assert_eq!(status, 200);
+
+        let all = notices(&ctx).await;
+        let mayas: Vec<_> = all.iter().filter(|n| n.user_id == maya).collect();
+        assert_eq!(mayas.len(), 1);
+        assert_eq!(mayas[0].kind, "closed");
+        assert_eq!(mayas[0].body, "marked Website done\n2 of your tasks closed");
+        assert_eq!(mayas[0].link, "/roadmap?lane=done");
+        // Tom is an assignee and the owner: only the assignee notice.
+        let toms: Vec<_> = all.iter().filter(|n| n.user_id == tom).collect();
+        assert_eq!(toms.len(), 1);
+        assert_eq!(toms[0].body, "marked Website done\n1 of your tasks closed");
+        // Leo's task was already done, and Ana closed it.
+        let ana_user = ana_id(&ctx).await;
+        assert!(all
+            .iter()
+            .all(|n| n.user_id != leo && n.user_id != ana_user));
+        assert!(all.iter().all(|n| n.kind == "closed"), "no task notices");
+        assert_eq!(all.len(), 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_owner_gets_the_total() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (_, maya) = teammate(&request, &ctx, "maya", memberships::role::MEMBER).await;
+        let (_, tom) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let website = owned_by(&ctx, &project_in(&ctx, ORG, "Website").await, tom).await;
+        let empty = owned_by(&ctx, &project_in(&ctx, ORG, "Empty").await, tom).await;
+        for title in ["A", "B", "C", "D"] {
+            task_in(&ctx, ana.org_id, Some(website.id), title, "todo", &[maya]).await;
+        }
+        notifications::Entity::delete_many()
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+
+        act(&request, &ana, &website, "close").await;
+        act(&request, &ana, &empty, "close").await;
+        let toms: Vec<String> = notices(&ctx)
+            .await
+            .into_iter()
+            .filter(|n| n.user_id == tom)
+            .map(|n| n.body)
+            .collect();
+        assert_eq!(
+            toms,
+            ["marked Website done\n4 tasks closed", "marked Empty done"],
+            "with nothing open, the owner still hears"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn removed_members_get_nothing() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, maya, tom, _, website) = website_with_people(&request, &ctx).await;
+        for user in [maya, tom] {
+            let mut m = memberships::Entity::find()
+                .filter(memberships::Column::UserId.eq(user))
+                .one(&ctx.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .into_active_model();
+            m.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
+            m.update(&ctx.db).await.unwrap();
+        }
+        act(&request, &ana, &website, "close").await;
+        assert!(notices(&ctx).await.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn reopen_and_a_second_close_send_nothing() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, _, _, _, website) = website_with_people(&request, &ctx).await;
+        act(&request, &ana, &website, "close").await;
+        notifications::Entity::delete_many()
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        act(&request, &ana, &website, "close").await;
+        let (status, _) = act(&request, &ana, &website, "reopen").await;
+        assert_eq!(status, 200);
+        assert!(notices(&ctx).await.is_empty());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_bell_shows_the_closed_icon() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, _, _, _, website) = website_with_people(&request, &ctx).await;
+        act(&request, &ana, &website, "close").await;
+        let cookie = super::prepare_data::login(
+            &request,
+            "maya@example.com",
+            super::prepare_data::USER_PASSWORD,
+        )
+        .await;
+        let maya = TestMember::of(&ctx, cookie, ana.org_id).await;
+        let bell = get(&request, &maya, "/notifications").await;
+        assert!(bell.contains("notice-closed"), "{bell}");
+        assert!(bell.contains("marked Website done"));
+        assert!(bell.contains("2 of your tasks closed"));
+    })
+    .await;
+}
+
+/// Closing Juniper's Website tells only Juniper's team.
+#[tokio::test]
+#[serial]
+async fn notices_stay_in_the_org() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, _, _, _, website) = website_with_people(&request, &ctx).await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        let gina = users::Model::find_by_email(&ctx.db, "gina@example.com")
+            .await
+            .unwrap();
+        act(&request, &ana, &website, "close").await;
+        let all = notices(&ctx).await;
+        assert!(!all.is_empty());
+        assert!(all.iter().all(|n| n.organisation_id == ana.org_id));
+        assert!(all.iter().all(|n| n.user_id != gina.id));
     })
     .await;
 }

@@ -471,6 +471,9 @@ async fn close(
 ) -> Result<Response> {
     closable(&ctx, &member, id).await?;
     let closed = projects::Model::close(&ctx.db, member.org.id, id, member.user.id).await?;
+    if !closed.already {
+        super::notifications::project_closed(&ctx, &member, &closed.project, &closed.tasks).await?;
+    }
     let name = &closed.project.name;
     tracing::info!(
         user_id = member.user.id,
