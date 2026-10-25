@@ -11,7 +11,7 @@
         <span class="meta text-[13px]">{{ l.hint }}</span>
       </header>
       <p class="meta m-0 px-1 text-sm mobile-only">{{ l.hint }}</p>
-      <div class="roadmap-cards">
+      <div class="roadmap-cards" data-drop-lane="{{ l.key }}">
         {% if l.key == "done" %}
         {% for card in l.cards %}
         <article class="roadmap-card is-closed" style="--accent-bar: {{ card.accent }}">
@@ -46,7 +46,8 @@
         {% endif %}
         {% else %}
         {% for card in l.cards %}
-        <article class="roadmap-card" style="--accent-bar: {{ card.accent }}">
+        <article class="roadmap-card" style="--accent-bar: {{ card.accent }}" draggable="true"
+                 data-project-id="{{ card.id }}" data-card-lane="{{ l.key }}" data-name="{{ card.name }}"{% if card.can_close %} data-can-close{% endif %}>
           <div class="flex items-center gap-2.5">
             <h3 class="truncate-1 m-0 flex-1 text-base font-bold">{{ card.name }}</h3>
             {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} size="sm"/>}}{% endif %}

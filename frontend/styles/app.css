@@ -431,6 +431,9 @@
   .lane-progress > span { display: block; height: 100%; border-radius: 999px; }
   .lane-cells { padding: 0 14px 14px; }
   .cell { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 72px; padding: 6px; margin: -6px; border-radius: 12px; transition: background 0.12s; }
+  .roadmap-card[draggable] { cursor: grab; }
+  .roadmap-card.is-dragging { opacity: 0.45; }
+  .roadmap-cards.is-drop-target { border-radius: 14px; background: color-mix(in srgb, var(--progress) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--progress) 45%, transparent); outline-offset: 4px; }
   .cell.is-drop-target { background: color-mix(in srgb, var(--progress) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--progress) 45%, transparent); }
   .cell-more { padding: 2px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
   .cell-more:hover, .task-row-more:hover { color: var(--link); }

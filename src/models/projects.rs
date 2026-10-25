@@ -373,6 +373,20 @@ impl Model {
         Ok(project.update(db).await?)
     }
 
+    /// Moves the project to another lane, from a drag on the roadmap. The
+    /// caller refuses a closed project first.
+    ///
+    /// # Errors
+    /// A message when `lane` is not now, next or later, or database errors.
+    pub async fn move_to_lane<C: ConnectionTrait>(self, db: &C, lane: &str) -> ModelResult<Self> {
+        if !LANES.contains(&lane) {
+            return Err(ModelError::msg("Choose now, next or later."));
+        }
+        let mut project = self.into_active_model();
+        project.lane = ActiveValue::Set(lane.to_string());
+        Ok(project.update(db).await?)
+    }
+
     /// Marked done. A closed project keeps its lane but shows in none.
     #[must_use]
     pub const fn is_closed(&self) -> bool {
