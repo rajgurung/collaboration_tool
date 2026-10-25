@@ -624,7 +624,7 @@ async fn only_photos_and_short_captions_are_accepted() {
 
 #[tokio::test]
 #[serial]
-async fn a_photo_with_no_caption_says_sent_a_photo() {
+async fn a_photo_with_no_caption_says_photo() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob) = acme_with_bob(&request, &ctx).await;
         let general = general(&ctx).await;
@@ -634,11 +634,33 @@ async fn a_photo_with_no_caption_says_sent_a_photo() {
         assert_eq!(message.body, "");
 
         let list = page(&request, &bob, "/chat").await;
-        assert!(list.contains("alice sent a photo"), "{list}");
+        assert!(list.contains("alice: Photo<"), "{list}");
         let home = page(&request, &bob, "/dashboard").await;
-        assert!(home.contains("alice sent a photo"));
+        assert!(home.contains("alice: Photo<"), "{home}");
         let own = page(&request, &alice, "/chat").await;
-        assert!(own.contains("You sent a photo"));
+        assert!(own.contains("You: Photo<"), "{own}");
+
+        // In a DM, the other person's photo needs no name.
+        let org_id = acme_id(&ctx).await;
+        let alice_id = user_id(&ctx, "alice@example.com").await;
+        let bob_id = user_id(&ctx, "bob@example.com").await;
+        let dm = conversations::Model::start_dm(&ctx.db, org_id, alice_id, bob_id)
+            .await
+            .unwrap();
+        send_photo(&request, &alice, dm.id, None, "a.png", PNG).await;
+        let list = page(&request, &bob, "/chat").await;
+        assert!(list.contains(">Photo<"), "{list}");
+        send_photo(
+            &request,
+            &alice,
+            general.id,
+            Some("New office"),
+            "b.png",
+            PNG,
+        )
+        .await;
+        let list = page(&request, &bob, "/chat").await;
+        assert!(list.contains("alice: Photo · New office<"), "{list}");
 
         let sheet = request
             .get(&bob.at(&format!(

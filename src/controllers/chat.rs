@@ -480,6 +480,22 @@ fn when(at: &DateTime<FixedOffset>, tz: Tz) -> String {
     }
 }
 
+/// A conversation's last message in the chat list and on Home: "maya: Van
+/// fuel", "maya: Photo · Van fuel", "You: Photo", or with no name for the
+/// other person in a DM. The text is cut to 80 characters.
+fn last_line(who: Option<&str>, message: &messages::Model) -> String {
+    let body: String = message.body.chars().take(80).collect();
+    let text = match (message.has_photo, body.is_empty()) {
+        (true, true) => "Photo".to_string(),
+        (true, false) => format!("Photo · {body}"),
+        (false, _) => body,
+    };
+    match who {
+        Some(who) => format!("{who}: {text}"),
+        None => text,
+    }
+}
+
 /// The viewer's conversations with last message and unread count, most recent first.
 pub async fn list_items(
     ctx: &AppContext,
@@ -503,21 +519,15 @@ pub async fn list_items(
                 kind: c.kind.clone(),
                 color: avatar_color(&label),
                 last: last.map(|m| {
+                    // The other person's DM needs no name.
                     let who = if m.user_id == me {
-                        "You".to_string()
+                        Some("You")
+                    } else if c.kind == kind::DM {
+                        None
                     } else {
-                        names
-                            .get(&m.user_id)
-                            .cloned()
-                            .unwrap_or_else(|| FORMER_MEMBER.to_string())
+                        Some(names.get(&m.user_id).map_or(FORMER_MEMBER, String::as_str))
                     };
-                    let body: String = m.body.chars().take(80).collect();
-                    match (c.kind == kind::DM && m.user_id != me, m.photo_only()) {
-                        (true, true) => "Sent a photo".to_string(),
-                        (true, false) => body,
-                        (false, true) => format!("{who} sent a photo"),
-                        (false, false) => format!("{who}: {body}"),
-                    }
+                    last_line(who, m)
                 }),
                 time: last
                     .map(|m| when(&m.created_at, member.tz()))
@@ -1482,6 +1492,55 @@ mod tests {
         assert!(!r.dm);
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(names(&r.shown), vec!["bob", "carol"]);
+    }
+
+    fn message(body: &str, has_photo: bool) -> messages::Model {
+        messages::Model {
+            created_at: at(0),
+            updated_at: at(0),
+            id: 1,
+            body: body.to_string(),
+            organisation_id: 1,
+            conversation_id: 1,
+            user_id: 1,
+            parent_id: None,
+            document_id: None,
+            has_photo,
+            photo_key: None,
+            photo_type: None,
+            photo_size: None,
+            photo_name: None,
+        }
+    }
+
+    #[test]
+    fn list_lines_say_photo_then_the_caption() {
+        let captioned = message("Van fuel £62", true);
+        let photo = message("", true);
+        let text = message("Morning all", false);
+        assert_eq!(
+            last_line(Some("maya"), &captioned),
+            "maya: Photo · Van fuel £62"
+        );
+        assert_eq!(last_line(Some("maya"), &photo), "maya: Photo");
+        assert_eq!(last_line(Some("You"), &photo), "You: Photo");
+        assert_eq!(last_line(None, &captioned), "Photo · Van fuel £62");
+        assert_eq!(last_line(None, &photo), "Photo");
+        assert_eq!(last_line(Some("maya"), &text), "maya: Morning all");
+        assert_eq!(last_line(None, &text), "Morning all");
+        // A #general photo deleted from Documents still had a photo.
+        assert_eq!(
+            last_line(Some("maya"), &message("Whiteboard", true)),
+            "maya: Photo · Whiteboard"
+        );
+
+        // The text is cut to 80 characters, as before.
+        let long = "é".repeat(100);
+        assert_eq!(last_line(None, &message(&long, false)), "é".repeat(80));
+        assert_eq!(
+            last_line(Some("maya"), &message(&long, true)),
+            format!("maya: Photo · {}", "é".repeat(80))
+        );
     }
 
     #[test]

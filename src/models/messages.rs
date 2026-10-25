@@ -361,13 +361,6 @@ impl Model {
         }
     }
 
-    /// A photo with no caption: lists say "Photo" for it, so nothing shows
-    /// blank.
-    #[must_use]
-    pub fn photo_only(&self) -> bool {
-        self.has_photo && self.body.is_empty()
-    }
-
     /// Where this message's photo is stored, if it still has one.
     #[must_use]
     pub fn photo_file(&self) -> Option<PhotoFile<'_>> {
