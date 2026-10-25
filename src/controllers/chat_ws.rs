@@ -15,8 +15,8 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::{
     controllers::chat::{
-        names, receipt, render_reactions, shows_receipt, thread_line, MessageView, ReactionRow,
-        ThreadLine,
+        names, receipt, render_reactions, replies_label, shows_receipt, thread_line, MessageView,
+        ReactionRow, ThreadLine,
     },
     data::{
         chat_hub::{ChatEvent, ChatHub, ReceiptUpdate},
@@ -38,8 +38,9 @@ struct Session {
     hub: ChatHub,
     org_id: i64,
     user_id: i64,
-    /// An owner or admin when the socket opened, for the Delete on photos.
-    /// Display only: the delete route checks the role on every request.
+    /// An owner or admin when the socket opened, for Delete on messages and
+    /// photos. Display only: the delete routes check the role on every
+    /// request.
     can_manage: bool,
     /// The session version this socket was opened with.
     session_version: i32,
@@ -216,6 +217,19 @@ async fn run(mut socket: WebSocket, session: Session) {
                             }
                         }
                         Err(err) => tracing::error!(error = %err, "could not render a removed photo"),
+                    }
+                }
+                Ok(event @ ChatEvent::MessageDeleted { .. }) => {
+                    if let ChatEvent::MessageDeleted { parent_id: Some(parent_id), count, .. } = &event {
+                        reply_deleted(&mut sent_replies, *parent_id, *count);
+                    }
+                    match render_deleted(&session, &event) {
+                        Ok(html) => {
+                            if socket.send(Message::Text(html.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(err) => tracing::error!(error = %err, "could not render a deleted message"),
                     }
                 }
                 Ok(event @ ChatEvent::Read { .. }) => {
@@ -413,6 +427,50 @@ pub fn publish_photo_removed(ctx: &AppContext, message: &messages::Model) -> Res
     Ok(())
 }
 
+/// Announces that a message was deleted, to every socket following its
+/// conversation. For a reply it carries the parent's new reply line, which
+/// has names and times but never text.
+///
+/// # Errors
+/// When the hub is missing or the thread cannot be read.
+pub async fn publish_message_deleted(
+    ctx: &AppContext,
+    org_id: i64,
+    conversation_id: i64,
+    message_id: i64,
+    parent_id: Option<i64>,
+) -> Result<()> {
+    let hub = ctx
+        .shared_store
+        .get::<ChatHub>()
+        .ok_or_else(|| Error::string("chat hub missing"))?;
+    let (line, count) = match parent_id {
+        None => (None, 0),
+        Some(parent_id) => {
+            let names = names(ctx, org_id).await?;
+            let tz = time::zone(
+                &organisations::Model::find_by_id(&ctx.db, org_id)
+                    .await?
+                    .timezone,
+            );
+            let stats = messages::Model::thread_stats(&ctx.db, org_id, &[parent_id]).await?;
+            let stats = stats.get(&parent_id).map_or(&[][..], Vec::as_slice);
+            (
+                thread_line(conversation_id, parent_id, stats, &names, tz),
+                stats.iter().map(|s| s.replies).sum(),
+            )
+        }
+    };
+    hub.publish(ChatEvent::MessageDeleted {
+        conversation_id,
+        message_id,
+        parent_id,
+        line: line.map(Box::new),
+        count,
+    });
+    Ok(())
+}
+
 /// Marks a conversation read for `reader_id` and tells everyone who sees the
 /// receipts of the messages that read covered (see [`receipts_for`]) who has
 /// now read them.
@@ -464,11 +522,54 @@ pub async fn mark_read(
 fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result<String> {
     message.own = author_id == session.user_id;
     message.read_receipts = shows_receipt(&session.conversation_kind, message.own);
-    message.allow_photo_delete(session.user_id, session.can_manage);
+    message.allow_delete(session.user_id, session.can_manage, 0);
     session.view.render(
         "chat/_message_oob.html",
-        session.fragment(data!({ "message": message })),
+        session.fragment(data!({ "message": message, "live": true })),
     )
+}
+
+/// A deleted message for this socket's viewer, as top-level out-of-band
+/// swaps (never nested). A main feed removes a top-level message, or swaps
+/// the parent's reply line for a reply. A thread page shows "This thread was
+/// deleted" for its parent, and drops the composer; for a reply it removes
+/// it and updates the count.
+fn render_deleted(session: &Session, event: &ChatEvent) -> Result<String> {
+    let ChatEvent::MessageDeleted {
+        message_id,
+        parent_id,
+        line,
+        count,
+        ..
+    } = event
+    else {
+        return Ok(String::new());
+    };
+    let remove = format!(r#"<div id="message-{message_id}" hx-swap-oob="delete"></div>"#);
+    match (session.thread_id, parent_id) {
+        (None, None) => Ok(remove),
+        (None, Some(parent_id)) => session.view.render(
+            "chat/_thread_link.html",
+            session
+                .fragment(data!({ "message": { "id": parent_id, "thread": line }, "oob": true })),
+        ),
+        (Some(thread), _) if thread == *message_id => {
+            let gone = session.view.render(
+                "chat/_thread_gone.html",
+                session.fragment(data!({ "conversation_id": session.conversation_id })),
+            )?;
+            Ok(format!(
+                r#"<div id="chat-feed" hx-swap-oob="innerHTML">{gone}</div><div id="thread-composer" hx-swap-oob="outerHTML"></div>"#
+            ))
+        }
+        (Some(_), _) => Ok(remove
+            + &session.view.render(
+                "chat/_thread_count.html",
+                session.fragment(
+                    data!({ "count": count, "count_label": replies_label(*count), "oob": true }),
+                ),
+            )?),
+    }
 }
 
 /// "Photo removed" in place of the photo, as an out-of-band swap of
@@ -510,9 +611,10 @@ fn render_reply(
     message.own = author_id == session.user_id;
     message.read_receipts = false;
     message.can_reply = false;
+    message.allow_delete(session.user_id, session.can_manage, 0);
     let mut html = session.view.render(
         "chat/_message_oob.html",
-        session.fragment(data!({ "message": message, "in_thread": true })),
+        session.fragment(data!({ "message": message, "in_thread": true, "live": true })),
     )?;
     if grew {
         html.push_str(
@@ -537,6 +639,12 @@ fn grows(sent: &mut HashMap<i64, i64>, parent_id: i64, count: i64) -> bool {
     }
     *last = count;
     true
+}
+
+/// After a reply's delete, `count` replies is the truth for its thread, so
+/// the next reply (one more) still passes [`grows`].
+fn reply_deleted(sent: &mut HashMap<i64, i64>, parent_id: i64, count: i64) {
+    sent.insert(parent_id, count);
 }
 
 /// Whether a socket should handle `event`. The socket follows
@@ -567,6 +675,10 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
         | ChatEvent::PhotoRemoved {
             conversation_id: id,
             ..
+        }
+        | ChatEvent::MessageDeleted {
+            conversation_id: id,
+            ..
         } => *id,
         ChatEvent::Close(_) => return false,
     };
@@ -594,6 +706,17 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
         // message's own thread page, where it is the parent.
         (ChatEvent::PhotoRemoved { .. }, None) => true,
         (ChatEvent::PhotoRemoved { message_id, .. }, Some(thread)) => *message_id == thread,
+        // The message itself, or its parent's reply line, is in the main
+        // feed. A thread page takes its parent and its own replies.
+        (ChatEvent::MessageDeleted { .. }, None) => true,
+        (
+            ChatEvent::MessageDeleted {
+                message_id,
+                parent_id,
+                ..
+            },
+            Some(thread),
+        ) => *message_id == thread || *parent_id == Some(thread),
         (ChatEvent::Close(_), _) => false,
     }
 }
@@ -827,6 +950,16 @@ mod tests {
         }
     }
 
+    fn deleted_event(conversation_id: i64, message_id: i64, parent_id: Option<i64>) -> ChatEvent {
+        ChatEvent::MessageDeleted {
+            conversation_id,
+            message_id,
+            parent_id,
+            line: None,
+            count: 0,
+        }
+    }
+
     fn close() -> ChatEvent {
         ChatEvent::Close(CloseScope::Account { user_id: 1 })
     }
@@ -846,6 +979,11 @@ mod tests {
             ),
             ("reply", reply_event(conversation_id, 10)),
             ("photo removed", photo_removed_event(conversation_id, 10)),
+            ("message deleted", deleted_event(conversation_id, 10, None)),
+            (
+                "reply deleted",
+                deleted_event(conversation_id, 11, Some(10)),
+            ),
         ]
     }
 
@@ -911,6 +1049,40 @@ mod tests {
     }
 
     #[test]
+    fn deletes_reach_the_main_feed_and_their_own_thread_only() {
+        assert!(wants(&deleted_event(7, 10, None), 7, None), "the message");
+        assert!(
+            wants(&deleted_event(7, 10, None), 7, Some(10)),
+            "its own thread page"
+        );
+        assert!(
+            !wants(&deleted_event(7, 10, None), 7, Some(20)),
+            "another thread"
+        );
+        assert!(
+            wants(&deleted_event(7, 11, Some(10)), 7, None),
+            "the parent's reply line"
+        );
+        assert!(
+            wants(&deleted_event(7, 11, Some(10)), 7, Some(10)),
+            "the parent's thread page"
+        );
+        assert!(
+            !wants(&deleted_event(7, 21, Some(20)), 7, Some(10)),
+            "another thread's reply"
+        );
+    }
+
+    #[test]
+    fn a_deleted_reply_lowers_the_count_and_the_next_reply_still_grows() {
+        let mut sent = HashMap::new();
+        assert!(grows(&mut sent, 10, 3));
+        reply_deleted(&mut sent, 10, 2);
+        assert!(grows(&mut sent, 10, 3), "the next reply");
+        assert!(!grows(&mut sent, 10, 2), "a late event after that");
+    }
+
+    #[test]
     fn late_reply_events_never_lower_a_count() {
         let mut sent = HashMap::new();
         assert!(grows(&mut sent, 10, 2));
@@ -937,13 +1109,35 @@ mod tests {
         photo.document_id = Some(9);
         // The sender is user 1.
         for (viewer, can_manage, shown) in [(1, false, true), (2, true, true), (3, false, false)] {
-            let mut view = view(&photo);
-            view.allow_photo_delete(viewer, can_manage);
-            assert_eq!(view.can_delete_photo, shown, "viewer {viewer}");
+            for replies in [0, 2] {
+                let mut view = view(&photo);
+                view.allow_delete(viewer, can_manage, replies);
+                assert_eq!(view.can_delete_photo, shown, "viewer {viewer}, {replies}");
+            }
         }
         // No photo to delete: never shown, even to a manager.
         let mut text = view(&message(11, 7, None));
-        text.allow_photo_delete(2, true);
+        text.allow_delete(2, true, 0);
         assert!(!text.can_delete_photo);
+        assert!(text.can_delete);
+    }
+
+    #[test]
+    fn the_sender_deletes_until_there_are_replies_and_managers_always() {
+        // The sender is user 1. (viewer, manager, replies, row, blocked line)
+        for (viewer, can_manage, replies, row, blocked) in [
+            (1, false, 0, true, false),
+            (1, false, 3, false, true),
+            (2, true, 0, true, false),
+            (2, true, 3, true, false),
+            (3, false, 0, false, false),
+            (3, false, 3, false, false),
+        ] {
+            let mut view = view(&message(10, 7, None));
+            view.allow_delete(viewer, can_manage, replies);
+            let what = format!("viewer {viewer}, manager {can_manage}, {replies} replies");
+            assert_eq!(view.can_delete, row, "{what}");
+            assert_eq!(view.delete_blocked, blocked, "{what}");
+        }
     }
 }

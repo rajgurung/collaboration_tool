@@ -1,0 +1,1 @@
+{# What a quote of the message says, in the sheet and the delete confirm. #}{% if message.photo_removed %}Photo removed{% if message.body %} · {{ message.body }}{% endif %}{% elif message.photo %}Photo{% if message.body %} · {{ message.body }}{% endif %}{% else %}{{ message.body }}{% endif %}

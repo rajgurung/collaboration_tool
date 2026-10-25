@@ -1,0 +1,15 @@
+{# The confirm for deleting a message, drawn into the sheet's <template> and moved into #message-delete by frontend/app.ts. Every word is from here, escaped. #}
+<div class="flex flex-col gap-4">
+  <h2 id="message-delete-title" class="m-0 text-[19px] font-bold">Delete this message?</h2>
+  <div class="quote">
+    <div class="quote-head">{{<avatar name={message.author} color={message.color} size="xs" label={false}/>}}<span>{% if message.own %}You{% else %}{{ message.author }}{% endif %}</span><span class="meta">{{ message.at }}</span></div>
+    <p>{% include "chat/_quote_text.html" %}</p>
+  </div>
+  <p class="m-0 text-[15px] text-muted">{% if conversation.kind == "dm" %}It's removed for you and {{ conversation.label }}.{% else %}It's removed for everyone in #{{ conversation.label }}.{% endif %}{% if message.photo %} The photo is deleted too.{% endif %}{% if message.photo and conversation.kind == "channel" %} It's also deleted from Documents.{% endif %}{% if replies == 1 %} Its reply is deleted too.{% elif replies > 1 %} Its {{ replies }} replies are deleted too.{% endif %} This can't be undone.</p>
+  <div class="alert alert-error" role="alert" data-message-delete-alert hidden>{{<icon name="circle-alert" class="h-[18px] w-[18px] shrink-0"/>}}<span data-message-delete-error>Couldn't delete the message. Check your connection and try again.</span></div>
+  <div class="flex flex-col gap-2" data-message-delete-buttons>
+    <button type="button" class="btn btn-lg btn-danger-solid w-full" data-message-delete-confirm data-url="{{ org_url(path="/chat/" ~ (message.conversation_id) ~ "/messages/" ~ (message.id) ~ "/delete") }}"><span data-message-delete-spin hidden>{{<icon name="loader-circle" class="spin h-[18px] w-[18px]"/>}}</span><span data-message-delete-label>Delete</span></button>
+    <button type="button" class="btn btn-lg btn-secondary w-full" data-message-delete-cancel data-dialog-close>Cancel</button>
+  </div>
+  <div data-message-delete-gone hidden><button type="button" class="btn btn-lg btn-secondary w-full" data-dialog-close>Close</button></div>
+</div>

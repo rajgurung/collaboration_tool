@@ -18,7 +18,7 @@
     <div id="chat-feed" class="chat-feed top" data-autoscroll aria-live="polite">
       {% include "chat/_thread_feed.html" %}
     </div>
-    <form class="composer" method="post" action="{{ org_url(path="/chat/" ~ (conversation.id) ~ "/threads/" ~ (thread.parent_id) ~ "/replies") }}" ws-send>
+    <form id="thread-composer" class="composer" method="post" action="{{ org_url(path="/chat/" ~ (conversation.id) ~ "/threads/" ~ (thread.parent_id) ~ "/replies") }}" ws-send>
       <label class="sr-only" for="composer-body">Reply</label>
       <div class="emoji-field">
         <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}"{% if conversation.everyone_hint %} data-everyone-hint="{{ conversation.everyone_hint }}"{% endif %} autocomplete="off" placeholder="Reply in thread"{% if thread.focus %} autofocus{% endif %}></textarea>
@@ -31,6 +31,7 @@
 <dialog id="chat-dialog" class="sheet" aria-label="Chat"><div class="sheet-handle"></div><div id="chat-dialog-body" class="sheet-body"></div></dialog>
 {% include "chat/_photo_viewer.html" %}
 {% include "chat/_photo_delete.html" %}
+<dialog id="message-delete" class="sheet" aria-labelledby="message-delete-title"><div class="sheet-handle"></div><div class="sheet-body" data-message-delete-slot></div></dialog>
 {% endblock main %}
 {# A thread fills the phone screen, like a conversation. #}
 {% block tabbar %}{% endblock tabbar %}

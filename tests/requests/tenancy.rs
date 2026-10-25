@@ -282,6 +282,9 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/chat/{}/photos/{}/delete", globex.group.id, globex.group_photo.id), serde_json::json!({})),
             (format!("/chat/{}/photos/{}/delete", globex.general.id, globex.message.id), serde_json::json!({})),
             (format!("/chat/{}/photos/{}/delete", globex.general.id, globex_general_photo.id), serde_json::json!({})),
+            (format!("/chat/{}/messages/{}/delete", globex.general.id, globex.message.id), serde_json::json!({})),
+            (format!("/chat/{}/messages/{}/delete", globex.group.id, globex.group_photo.id), serde_json::json!({})),
+            (format!("/chat/{}/messages/{}/delete", globex.general.id, globex_general_photo.id), serde_json::json!({})),
         ];
         for (path, form) in &posts {
             let res = request.post(&a.to(path)).as_member(&a).form(form).await;
@@ -322,11 +325,15 @@ async fn org_a_cannot_reach_org_b() {
         .await
         .unwrap();
         for conversation in [&acme_group, &acme_general] {
-            for photo in [&globex.group_photo, &globex_general_photo] {
-                let path = format!("/chat/{}/photos/{}/delete", conversation.id, photo.id);
-                let res = request.post(&a.at(&path)).as_member(&a).await;
-                assert_eq!(res.status_code(), 404, "own {}, Globex photo: {path}", conversation.kind);
-                assert!(!res.text().contains(SECRET), "{path}");
+            for photo in [&globex.group_photo, &globex_general_photo, &globex.message] {
+                for path in [
+                    format!("/chat/{}/photos/{}/delete", conversation.id, photo.id),
+                    format!("/chat/{}/messages/{}/delete", conversation.id, photo.id),
+                ] {
+                    let res = request.post(&a.at(&path)).as_member(&a).await;
+                    assert_eq!(res.status_code(), 404, "own {}, Globex message: {path}", conversation.kind);
+                    assert!(!res.text().contains(SECRET), "{path}");
+                }
             }
         }
 
@@ -474,6 +481,10 @@ async fn documents_and_removal_need_your_own_active_membership() {
             format!("/chat/{}/photos", globex.group.id),
             format!(
                 "/chat/{}/photos/{}/delete",
+                globex.group.id, globex.group_photo.id
+            ),
+            format!(
+                "/chat/{}/messages/{}/delete",
                 globex.group.id, globex.group_photo.id
             ),
         ];
