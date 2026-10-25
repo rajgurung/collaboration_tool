@@ -380,7 +380,13 @@ mod own_photo_constraint {
                     ..GOOD
                 },
             ),
-            ("empty", Row { size: Some(0), ..GOOD }),
+            (
+                "empty",
+                Row {
+                    size: Some(0),
+                    ..GOOD
+                },
+            ),
             (
                 "not a photo message",
                 Row {
@@ -392,5 +398,231 @@ mod own_photo_constraint {
         for (what, row) in refused {
             assert!(insert(row).await.is_err(), "{what} is refused");
         }
+    }
+}
+
+/// Group and DM photos are stored on the message, outside Documents. Every
+/// stored value comes from the server, never from the browser.
+mod own_photos {
+    use std::path::Path;
+
+    use collab::{
+        app::App,
+        models::{
+            conversations::{self, GroupParams},
+            documents, folders, messages,
+            organisations::{self, SignupParams},
+            users,
+        },
+    };
+    use loco_rs::{
+        app::AppContext,
+        prelude::{ModelError, TenantActiveModelExt},
+        testing::prelude::*,
+    };
+    use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, ModelTrait, PaginatorTrait};
+    use serial_test::serial;
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    /// Acme with alice (the owner), a group and a DM. Who else is in them
+    /// doesn't matter to the model; the request tests cover that.
+    async fn acme(
+        ctx: &AppContext,
+    ) -> (
+        i64,
+        users::Model,
+        conversations::Model,
+        conversations::Model,
+    ) {
+        let (alice, org) = organisations::Model::sign_up(
+            &ctx.db,
+            &SignupParams {
+                organisation_name: "Acme".to_string(),
+                name: "alice".to_string(),
+                email: "alice@example.com".to_string(),
+                password: "correct-horse".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let group = conversations::Model::create_group(
+            &ctx.db,
+            org.id,
+            alice.id,
+            &GroupParams {
+                name: "finance".to_string(),
+                member_ids: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let dm = conversations::ActiveModel {
+            kind: ActiveValue::Set(conversations::kind::DM.to_string()),
+            dm_key: ActiveValue::Set(Some(format!("dm:{}:0", alice.id))),
+            created_by_id: ActiveValue::Set(Some(alice.id)),
+            ..Default::default()
+        }
+        .set_tenant(org.id)
+        .unwrap()
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        (org.id, alice, group, dm)
+    }
+
+    /// Every file stored under an organisation's chat area.
+    async fn stored_chat_files(ctx: &AppContext, org_id: i64) -> Vec<String> {
+        ctx.storage
+            .list(Path::new(&format!("orgs/{org_id}/chat")), true)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|entry| !entry.is_dir)
+            .map(|entry| entry.path)
+            .collect()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn group_and_dm_photos_are_stored_on_the_message() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, dm) = acme(ctx).await;
+        assert!(stored_chat_files(ctx, org_id).await.is_empty());
+
+        for conversation in [&group, &dm] {
+            // PNG bytes with an HTML name: the bytes decide the type and the extension.
+            let message = messages::Model::create_photo(
+                ctx,
+                conversation,
+                alice.id,
+                " Van fuel £62 ",
+                "evil.html",
+                bytes::Bytes::from_static(PNG),
+            )
+            .await
+            .unwrap();
+            assert_eq!(message.body, "Van fuel £62");
+            assert!(message.has_photo);
+            assert_eq!(message.document_id, None);
+            assert_eq!(message.photo_type.as_deref(), Some("image/png"));
+            assert_eq!(message.photo_name.as_deref(), Some("evil.png"));
+            assert_eq!(message.photo_size, Some(PNG.len() as i64));
+            let key = message.photo_key.clone().unwrap();
+            assert!(
+                key.starts_with(&format!("orgs/{org_id}/chat/{}/", conversation.id)),
+                "{key}"
+            );
+            let stored: Vec<u8> = ctx.storage.download(Path::new(&key)).await.unwrap();
+            assert_eq!(stored, PNG);
+        }
+
+        // A name with quotes, a line break and a right-to-left override.
+        let message = messages::Model::create_photo(
+            ctx,
+            &group,
+            alice.id,
+            "",
+            "a\"b\r\nc\u{202E}gpj.png",
+            bytes::Bytes::from_static(PNG),
+        )
+        .await
+        .unwrap();
+        let name = message.photo_name.unwrap();
+        assert!(name.ends_with(".png"), "{name}");
+        assert!(!name.contains(['\r', '\n', '\u{202E}']), "{name}");
+
+        assert_eq!(documents::Entity::find().count(&ctx.db).await.unwrap(), 0);
+        let folders = folders::Entity::find().all(&ctx.db).await.unwrap();
+        assert!(!folders.iter().any(|f| f.name == "Chat photos"));
+        assert_eq!(stored_chat_files(ctx, org_id).await.len(), 3);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn general_photos_still_go_to_documents() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, _, _) = acme(ctx).await;
+        let general = conversations::Model::find_general(&ctx.db, org_id)
+            .await
+            .unwrap();
+        let message = messages::Model::create_photo(
+            ctx,
+            &general,
+            alice.id,
+            "",
+            "office.png",
+            bytes::Bytes::from_static(PNG),
+        )
+        .await
+        .unwrap();
+        assert!(message.document_id.is_some());
+        assert_eq!(message.photo_key, None);
+        assert!(stored_chat_files(ctx, org_id).await.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_save_deletes_the_stored_photo() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, _) = acme(ctx).await;
+        // A stale model: the group is gone, so the insert fails on its foreign key.
+        group.clone().delete(&ctx.db).await.unwrap();
+        let result = messages::Model::create_photo(
+            ctx,
+            &group,
+            alice.id,
+            "",
+            "a.png",
+            bytes::Bytes::from_static(PNG),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(stored_chat_files(ctx, org_id).await.is_empty());
+        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn only_photos_are_stored() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, _) = acme(ctx).await;
+        let refused = [
+            ("a.png", b"%PDF-1.7\n".to_vec()),
+            (
+                "a.svg",
+                br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#.to_vec(),
+            ),
+            ("a.png", Vec::new()),
+        ];
+        for (name, bytes) in refused {
+            let result = messages::Model::create_photo(
+                ctx,
+                &group,
+                alice.id,
+                "",
+                name,
+                bytes::Bytes::from(bytes),
+            )
+            .await;
+            assert!(matches!(result, Err(ModelError::Message(_))), "{name}");
+        }
+        let long = "x".repeat(1001);
+        let result = messages::Model::create_photo(
+            ctx,
+            &group,
+            alice.id,
+            &long,
+            "a.png",
+            bytes::Bytes::from_static(PNG),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(stored_chat_files(ctx, org_id).await.is_empty());
+        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 0);
     }
 }

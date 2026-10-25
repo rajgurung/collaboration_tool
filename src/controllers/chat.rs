@@ -730,7 +730,7 @@ async fn send_photo(
     let conversation =
         conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
     if conversation.kind != kind::CHANNEL {
-        return Err(forbidden(messages::CHANNELS_ONLY));
+        return Err(forbidden("Photos can only be posted in channels."));
     }
     let (name, bytes, caption) =
         match super::documents::read_upload(&mut multipart, Some("body")).await {
