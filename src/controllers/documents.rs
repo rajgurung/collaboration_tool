@@ -475,8 +475,7 @@ struct OpenQuery {
 }
 
 /// Streams a file to a member of its organisation. Photos and PDFs open in
-/// the browser, everything else downloads. The headers stop the browser from
-/// guessing another type, caching it, or letting another site embed it.
+/// the browser, everything else downloads (see [`send_stored`]).
 #[debug_handler]
 async fn open_file(
     member: CurrentMember,
@@ -486,12 +485,37 @@ async fn open_file(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let file = documents::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    send_stored(
+        &ctx,
+        &file.storage_key,
+        &file.content_type,
+        file.size_bytes,
+        &file.name,
+        query.download.is_some(),
+    )
+    .await
+}
+
+/// Streams stored bytes with the headers every file is sent with. The caller
+/// has already checked who may see them. The headers stop the browser from
+/// guessing another type, caching it, or letting any page frame it.
+///
+/// # Errors
+/// 500 when storage can't be read.
+pub async fn send_stored(
+    ctx: &AppContext,
+    key: &str,
+    content_type: &str,
+    size: i64,
+    name: &str,
+    download: bool,
+) -> Result<Response> {
     let stream = ctx
         .storage
-        .download_stream(std::path::Path::new(&file.storage_key))
+        .download_stream(std::path::Path::new(key))
         .await
         .map_err(|err| {
-            tracing::error!(error = %err, file_id = file.id, "could not read a stored file");
+            tracing::error!(error = %err, key, "could not read a stored file");
             Error::InternalServerError
         })?;
     let value = |value: String| {
@@ -499,11 +523,11 @@ async fn open_file(
     };
     let mut response = Response::new(stream.into_body());
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_TYPE, value(file.content_type.clone())?);
-    headers.insert(header::CONTENT_LENGTH, value(file.size_bytes.to_string())?);
+    headers.insert(header::CONTENT_TYPE, value(content_type.to_string())?);
+    headers.insert(header::CONTENT_LENGTH, value(size.to_string())?);
     headers.insert(
         header::CONTENT_DISPOSITION,
-        value(file.disposition(query.download.is_some()))?,
+        value(documents::disposition_for(name, content_type, download))?,
     );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -519,8 +543,10 @@ async fn open_file(
     );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(file.content_security_policy()),
+        HeaderValue::from_static(documents::content_security_policy_for(content_type)),
     );
+    // Documents routes also get this from `no_framing`; chat routes don't.
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     Ok(response)
 }
 
