@@ -36,7 +36,8 @@ use crate::{
 
 const INSTRUCTIONS: &str = "Collab Tool is a small team's workspace. Tasks usually belong to a \
 project; a task with no project is a chore. Projects sit in roadmap lanes: now, next or later. \
-Task statuses are todo, progress, blocked and done; priorities are high, medium and low. A \
+A project can be marked done in the web app; list_projects shows it as closed, a closed project \
+is not current work whatever its lane, and it takes no new tasks. Task statuses are todo, progress, blocked and done; priorities are high, medium and low. A \
 project's status is free text such as \"Active\" or \"Planned\". People are referred to by \
 username; \"me\" means the person you are acting for. Changes notify teammates exactly as they \
 would in the web app.";
@@ -508,7 +509,7 @@ async fn project_names(
 #[tool_router]
 impl CollabServer {
     #[tool(
-        description = "List every project with its lane, status, owner and progress (done/total tasks).",
+        description = "List every project with its lane, status, owner, progress (done/total tasks), and whether it is closed (marked done).",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_projects(
@@ -684,6 +685,8 @@ impl CollabServer {
                     "summary": p.summary,
                     "owner": p.owner_id.and_then(|id| names.get(&id)),
                     "progress": Progress::of(p.id, &all_tasks),
+                    "closed": p.is_closed(),
+                    "closed_at": p.closed_at.map(|at| time::local(at, member.tz()).to_rfc3339()),
                 })
             })
             .collect();

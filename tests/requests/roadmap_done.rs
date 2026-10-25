@@ -18,7 +18,7 @@ use serial_test::serial;
 
 use super::{
     admin::super_admin_cookie,
-    mcp::{token_for, tool},
+    mcp::{rpc, token_for, tool},
     prepare_data::{approve_as_owner, join, sign_up_member, AsMember, TestMember},
     tasks::{project_in, task_form},
 };
@@ -1206,6 +1206,54 @@ async fn all_done_shows_100() {
         assert_eq!(home.matches("donut-arc").count(), 1);
         assert!(home.contains("In 1 project in Now"));
         assert_eq!(home.matches(r#"class="zero""#).count(), 3);
+    })
+    .await;
+}
+
+/// "What's done on the roadmap?": closed projects say so, in this
+/// organisation only, and the instructions explain it.
+#[tokio::test]
+#[serial]
+async fn mcp_list_projects_shows_closed() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let gina = sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        project_in(&ctx, ORG, "Spring tea range").await;
+        let secret = project_in(&ctx, "globex", "Secret plan").await;
+        close(&ctx, &ana, &website).await;
+        close(&ctx, &gina, &secret).await;
+        let token = token_for(&ctx, "ana@example.com").await;
+
+        let (error, list) = tool(&request, &token, "list_projects", json!({})).await;
+        assert!(!error, "{list}");
+        let projects = list["projects"].as_array().unwrap();
+        assert_eq!(projects.len(), 2, "only this organisation's: {list}");
+        let by_name = |name: &str| projects.iter().find(|p| p["name"] == name).unwrap();
+        let done = by_name("Website");
+        assert_eq!(done["closed"], true);
+        assert_eq!(done["lane"], "now", "the lane as stored");
+        let at = done["closed_at"].as_str().unwrap();
+        assert!(chrono::DateTime::parse_from_rfc3339(at).is_ok(), "{at}");
+        let open = by_name("Spring tea range");
+        assert_eq!(open["closed"], false);
+        assert!(open["closed_at"].is_null());
+
+        let init = rpc(
+            &request,
+            &token,
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "test", "version": "1" }
+            }),
+        )
+        .await
+        .json();
+        let instructions = init["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("list_projects shows it as closed"));
+        assert!(instructions.contains("is not current work"));
     })
     .await;
 }
