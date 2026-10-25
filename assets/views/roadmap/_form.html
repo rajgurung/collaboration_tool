@@ -1,4 +1,6 @@
 {% set action = org_url(path="/roadmap/projects/" ~ project_id) if project_id else org_url(path="/roadmap/projects") %}
+{% set close = project.close if project else false %}
+<div id="project-sheet">
 <form id="project-form" method="post" data-close-on-success
       action="{{ action }}"
       hx-post="{{ action }}"
@@ -44,6 +46,12 @@
     <textarea name="summary" class="input" rows="3">{{ form.summary }}</textarea>
     {% if errors.summary %}<span class="field-error">{{ errors.summary }}</span>{% endif %}
   </label>
+  {% if close %}
+  <div class="close-row">
+    <div class="close-row-text"><b>Finished with this project?</b><span class="meta">{{ close.box_line }} You can reopen it later.</span></div>
+    <button type="button" class="btn btn-secondary" data-close-open>{{<icon name="status-done" class="close-row-tick h-[17px] w-[17px]"/>}}Mark project done</button>
+  </div>
+  {% endif %}
   <div class="flex justify-end gap-2">
     {% if project and me.can_manage %}
     {% set n = project.task_count %}
@@ -56,3 +64,26 @@
     <button type="submit" class="btn btn-primary">{% if project_id %}Save project{% else %}Add project{% endif %}</button>
   </div>
 </form>
+{% if close %}
+{# Outside the form, so the close posts no form fields. #}
+<div class="close-confirm" data-close-step hidden>
+  <h2>Mark {{ project.name }} done?</h2>
+  <div class="alert alert-error" role="alert" data-close-alert hidden>{{<icon name="circle-alert" class="h-[18px] w-[18px] shrink-0"/>}}<span></span></div>
+  <p class="close-confirm-lead">{{ close.sentence }}</p>
+  {% if close.summary.progress > 0 or close.summary.blocked > 0 or close.summary.todo > 0 %}
+  <div class="flex flex-wrap gap-1.5">
+    {% if close.summary.progress > 0 %}<span class="status-pill" style="--dot: var(--progress)"><span class="dot"></span>{{ close.summary.progress }} in progress</span>{% endif %}
+    {% if close.summary.blocked > 0 %}<span class="pill pill-blocked">{{ close.summary.blocked }} blocked</span>{% endif %}
+    {% if close.summary.todo > 0 %}<span class="status-pill" style="--dot: var(--todo)"><span class="dot"></span>{{ close.summary.todo }} to do</span>{% endif %}
+  </div>
+  {% endif %}
+  <p class="meta m-0 text-sm">{{ close.notice }} You can reopen it from Done, and its tasks go back to how they were.</p>
+  <div class="flex justify-end gap-2">
+    <button type="button" class="btn btn-secondary" data-close-back>Back</button>
+    <button type="button" class="btn btn-primary"
+            hx-post="{{ org_url(path="/roadmap/projects/" ~ project_id ~ "/close") }}" hx-disabled-elt="this, previous button"
+            data-close-confirm data-name="{{ project.name }}"><span class="close-idle">{{<icon name="check" class="h-4 w-4"/>}}Mark done</span><span class="close-busy">{{<icon name="loader-circle" class="spin h-4 w-4"/>}}Marking done…</span></button>
+  </div>
+</div>
+{% endif %}
+</div>

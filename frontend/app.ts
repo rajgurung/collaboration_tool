@@ -570,6 +570,54 @@ document.body.addEventListener("close-dialogs", () => {
   document.querySelectorAll("dialog[open]").forEach((dialog) => (dialog as HTMLDialogElement).close());
 });
 
+// "Mark project done": the confirm step takes the form's place in the
+// project sheet, and Back brings the form back. The form is only hidden, so
+// nothing typed is lost.
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const opener = target?.closest("[data-close-open]");
+  const back = target?.closest("[data-close-back]");
+  const sheet = (opener ?? back)?.closest("#project-sheet");
+  const form = sheet?.querySelector<HTMLElement>("#project-form");
+  const step = sheet?.querySelector<HTMLElement>("[data-close-step]");
+  if (!form || !step) return;
+  form.hidden = !!opener;
+  step.hidden = !opener;
+  const alert = step.querySelector<HTMLElement>("[data-close-alert]");
+  if (alert) alert.hidden = true;
+  (opener ? step.querySelector<HTMLElement>("[data-close-confirm]") : form.querySelector<HTMLElement>("[data-close-open]"))?.focus();
+});
+
+// The server's 403 text ("Only owners, admins and..."), or nothing.
+function refusalText(xhr?: XMLHttpRequest): string | null {
+  if (xhr?.status !== 403) return null;
+  try {
+    return (JSON.parse(xhr.responseText) as { description?: string }).description ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// A close or reopen that failed. A 409 is skipped: a stale tab's carries
+// HX-Redirect and is handled above, and a closed project's says why in its
+// own toast.
+for (const name of ["htmx:responseError", "htmx:sendError"]) {
+  document.body.addEventListener(name, (event) => {
+    const { elt, xhr } = (event as CustomEvent<{ elt?: Element; xhr?: XMLHttpRequest }>).detail;
+    if (xhr?.status === 409) return;
+    const confirm = elt?.closest<HTMLElement>("[data-close-confirm]");
+    const alert = confirm?.closest("[data-close-step]")?.querySelector<HTMLElement>("[data-close-alert]");
+    if (confirm && alert) {
+      const text = alert.querySelector("span");
+      if (text) text.textContent = refusalText(xhr) ?? `Couldn't mark ${confirm.dataset.name} done. Nothing was changed. Try again.`;
+      alert.hidden = false;
+      return;
+    }
+    const reopen = elt?.closest<HTMLElement>("[data-reopen]");
+    if (reopen) showToast({ kind: "error", message: refusalText(xhr) ?? `Couldn't reopen ${reopen.dataset.name}. Try again.` });
+  });
+}
+
 // Task board: drag a card to another column to change its status. Cards stay
 // links, so keyboards and phones open the task and change the status there.
 let dragged: HTMLElement | null = null;

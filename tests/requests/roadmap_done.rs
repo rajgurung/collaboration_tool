@@ -3,22 +3,94 @@
 use collab::{
     app::App,
     models::{
-        projects,
+        memberships, organisations, projects,
         tasks::{self, TaskParams},
+        users,
     },
 };
-use loco_rs::{app::AppContext, testing::prelude::*};
-use sea_orm::{EntityTrait, PaginatorTrait};
+use loco_rs::{app::AppContext, prelude::TenantActiveModelExt, testing::prelude::*, TestServer};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter,
+};
 use serde_json::json;
 use serial_test::serial;
 
 use super::{
+    admin::super_admin_cookie,
     mcp::{token_for, tool},
-    prepare_data::{sign_up_member, AsMember, TestMember},
+    prepare_data::{approve_as_owner, join, sign_up_member, AsMember, TestMember},
     tasks::{project_in, task_form},
 };
 
 const REFUSAL: &str = "Website is done. Reopen the project first.";
+const ORG: &str = "juniper-tea-co";
+
+/// Someone who joined Juniper Tea Co and was approved, with `role`.
+/// Returns them and their user id.
+async fn teammate(
+    request: &TestServer,
+    ctx: &AppContext,
+    name: &str,
+    role: &str,
+) -> (TestMember, i64) {
+    let email = format!("{name}@example.com");
+    let member = join(request, ctx, ORG, name, &email).await;
+    let user = users::Model::find_by_email(&ctx.db, &email).await.unwrap();
+    let pending = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user.id))
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let approved = approve_as_owner(ctx, &pending).await;
+    if role != memberships::role::MEMBER {
+        let mut m = approved.into_active_model();
+        m.role = ActiveValue::Set(role.to_string());
+        m.update(&ctx.db).await.unwrap();
+    }
+    (member, user.id)
+}
+
+/// Makes `user_id` the project's owner.
+async fn owned_by(ctx: &AppContext, project: &projects::Model, user_id: i64) -> projects::Model {
+    let mut p = project.clone().into_active_model();
+    p.owner_id = ActiveValue::Set(Some(user_id));
+    p.update(&ctx.db).await.unwrap()
+}
+
+async fn find(ctx: &AppContext, project: &projects::Model) -> projects::Model {
+    projects::Entity::find_by_id(project.id)
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+/// Posts a close or reopen (`action`) as HTMX. Returns the status and the toast.
+async fn act(
+    request: &TestServer,
+    member: &TestMember,
+    project: &projects::Model,
+    action: &str,
+) -> (u16, String) {
+    let res = request
+        .post(&member.at(&format!("/roadmap/projects/{}/{action}", project.id)))
+        .as_member(member)
+        .add_header("HX-Request", "true")
+        .await;
+    let toast = res
+        .headers()
+        .get("HX-Trigger")
+        .map(|v| v.to_str().unwrap().to_string())
+        .unwrap_or_default();
+    (res.status_code().as_u16(), toast)
+}
+
+/// The Done column on the roadmap page.
+fn done_column(html: &str) -> &str {
+    html.split(r#"data-lane="done""#).nth(1).unwrap_or_default()
+}
 
 async fn reload(ctx: &AppContext, t: &tasks::Model) -> tasks::Model {
     tasks::Entity::find_by_id(t.id)
@@ -474,6 +546,376 @@ async fn mcp_task_writes_follow_the_same_refusal() {
         let inside = reload(&ctx, &inside).await;
         assert_eq!(inside.status, "progress");
         assert_eq!(inside.status_before_close, None);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn owners_admins_and_the_project_owner_can_close() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (maya, _) = teammate(&request, &ctx, "maya", memberships::role::ADMIN).await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let spring = project_in(&ctx, ORG, "Spring tea range").await;
+        let wholesale = project_in(&ctx, ORG, "Wholesale catalogue").await;
+        let wholesale = owned_by(&ctx, &wholesale, tom_id).await;
+
+        for (who, project) in [(&ana, &website), (&maya, &spring), (&tom, &wholesale)] {
+            let (status, toast) = act(&request, who, project, "close").await;
+            assert_eq!(status, 200, "{}", project.name);
+            assert!(
+                toast.contains(&format!("{} done.", project.name)),
+                "{toast}"
+            );
+            assert!(toast.contains("roadmap-changed") && toast.contains("close-dialogs"));
+            assert!(find(&ctx, project).await.is_closed());
+
+            let (status, toast) = act(&request, who, project, "reopen").await;
+            assert_eq!(status, 200);
+            assert!(toast.contains("is back in Now."), "{toast}");
+            assert!(!find(&ctx, project).await.is_closed());
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_member_who_does_not_own_it_cannot_close_or_reopen() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let task = task_in(&ctx, ana.org_id, Some(website.id), "Checkout", "todo", &[]).await;
+        let wholesale = project_in(&ctx, ORG, "Wholesale catalogue").await;
+        owned_by(&ctx, &wholesale, tom_id).await;
+
+        let (status, _) = act(&request, &tom, &website, "close").await;
+        assert_eq!(status, 403);
+        assert!(!find(&ctx, &website).await.is_closed());
+        assert_eq!(reload(&ctx, &task).await, task);
+
+        close(&ctx, &ana, &website).await;
+        let (status, _) = act(&request, &tom, &website, "reopen").await;
+        assert_eq!(status, 403);
+        assert!(find(&ctx, &website).await.is_closed());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_box_and_reopen_show_only_to_those_allowed() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (maya, _) = teammate(&request, &ctx, "maya", memberships::role::ADMIN).await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let (leo, _) = teammate(&request, &ctx, "leo", memberships::role::MEMBER).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let website = owned_by(&ctx, &website, tom_id).await;
+        let shop = project_in(&ctx, ORG, "Shop till upgrade").await;
+        let shop = owned_by(&ctx, &shop, tom_id).await;
+        close(&ctx, &ana, &shop).await;
+
+        for (who, allowed) in [(&ana, true), (&maya, true), (&tom, true), (&leo, false)] {
+            let sheet = get(
+                &request,
+                who,
+                &format!("/roadmap/projects/{}/edit", website.id),
+            )
+            .await;
+            assert_eq!(sheet.contains("Mark project done"), allowed, "{sheet}");
+            assert_eq!(sheet.contains("data-close-confirm"), allowed);
+            let roadmap = get(&request, who, "/roadmap").await;
+            assert_eq!(done_column(&roadmap).contains("data-reopen"), allowed);
+            assert!(done_column(&roadmap).contains("Shop till upgrade"));
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_super_admin_acting_cannot_close_or_reopen() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let spring = project_in(&ctx, ORG, "Spring tea range").await;
+        close(&ctx, &ana, &spring).await;
+        let admin = super_admin_cookie(&request, &ctx).await;
+        let cookie = format!("{}; acting_org={}", admin.1.to_str().unwrap(), ana.org_id);
+
+        for (project, action) in [(&website, "close"), (&spring, "reopen")] {
+            let res = request
+                .post(&ana.at(&format!("/roadmap/projects/{}/{action}", project.id)))
+                .add_header("cookie", cookie.clone())
+                .add_header("x-org-id", ana.org_id.to_string())
+                .add_header("HX-Request", "true")
+                .await;
+            assert_eq!(res.status_code(), 403, "{}", res.text());
+            assert!(res.text().contains("Leave admin mode"), "{}", res.text());
+        }
+        assert!(!find(&ctx, &website).await.is_closed());
+        assert!(find(&ctx, &spring).await.is_closed());
+
+        // Nor do they see the box or Reopen.
+        let res = request
+            .get(&ana.at(&format!("/roadmap/projects/{}/edit", website.id)))
+            .add_header("cookie", cookie.clone())
+            .await;
+        assert_eq!(res.status_code(), 200);
+        assert!(!res.text().contains("Mark project done"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn pending_members_are_sent_away() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let pending = join(&request, &ctx, ORG, "leo", "leo@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let (status, _) = act(&request, &pending, &website, "close").await;
+        assert_ne!(status, 200);
+        assert!(!find(&ctx, &website).await.is_closed());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_toast_reports_the_real_count() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let pid = Some(website.id);
+        let first = task_in(&ctx, ana.org_id, pid, "Returns page", "todo", &[]).await;
+        task_in(&ctx, ana.org_id, pid, "Checkout", "progress", &[]).await;
+        task_in(&ctx, ana.org_id, pid, "Payments", "progress", &[]).await;
+        task_in(&ctx, ana.org_id, pid, "Couriers", "blocked", &[]).await;
+
+        let sheet = get(
+            &request,
+            &ana,
+            &format!("/roadmap/projects/{}/edit", website.id),
+        )
+        .await;
+        assert!(sheet.contains("4 open tasks will be marked done. 1 is blocked."));
+        assert!(sheet.contains("Its 4 open tasks are marked done with it."));
+        assert!(sheet.contains("No one else gets a notice."));
+
+        // Someone finishes one while the confirm is open.
+        first.set_status(&ctx.db, "done").await.unwrap();
+        let (status, toast) = act(&request, &ana, &website, "close").await;
+        assert_eq!(status, 200);
+        assert!(toast.contains("Website done. 3 tasks closed."), "{toast}");
+
+        let (_, toast) = act(&request, &ana, &website, "close").await;
+        assert!(toast.contains("Website is already done."), "{toast}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn reopen_toast_counts_restored_tasks() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let pid = Some(website.id);
+        for (title, status) in [
+            ("A", "todo"),
+            ("B", "progress"),
+            ("C", "blocked"),
+            ("D", "done"),
+        ] {
+            task_in(&ctx, ana.org_id, pid, title, status, &[]).await;
+        }
+        act(&request, &ana, &website, "close").await;
+        let (_, toast) = act(&request, &ana, &website, "reopen").await;
+        assert!(
+            toast.contains("Website is back in Now. 3 tasks reopened."),
+            "{toast}"
+        );
+        let (_, toast) = act(&request, &ana, &website, "reopen").await;
+        assert!(toast.contains("Website is already open."), "{toast}");
+
+        // Without HTMX, a redirect to the lane.
+        let res = request
+            .post(&ana.at(&format!("/roadmap/projects/{}/close", website.id)))
+            .as_member(&ana)
+            .await;
+        assert_eq!(res.status_code(), 303);
+        assert!(res.headers()["location"]
+            .to_str()
+            .unwrap()
+            .ends_with("/roadmap?lane=done"));
+        let empty = project_in(&ctx, ORG, "Empty").await;
+        let (_, toast) = act(&request, &ana, &empty, "close").await;
+        assert!(toast.contains(r#""Empty done.""#), "{toast}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_closed_project_leaves_now_and_joins_done() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let pid = Some(website.id);
+        task_in(&ctx, ana.org_id, pid, "Logo", "done", &[]).await;
+        let back = task_in(&ctx, ana.org_id, pid, "Checkout", "todo", &[]).await;
+        act(&request, &ana, &website, "close").await;
+
+        let page = get(&request, &ana, "/roadmap?lane=done").await;
+        assert!(page.contains(r#"Now<span class="seg-count">0</span>"#));
+        assert!(page.contains(r#"Done<span class="seg-count">1</span>"#));
+        assert!(page.contains(r#"data-lane="done" data-current"#));
+        let done = done_column(&page);
+        assert!(done.contains("Website") && done.contains("is-closed"));
+        assert!(done.contains("2 tasks done"));
+        assert!(done.contains("Marked done by ana"));
+        assert!(!done.contains("Edit Website"), "no pencil on a done card");
+
+        // A task set back shows as open on the card.
+        back.set_status(&ctx.db, "progress").await.unwrap();
+        let page = get(&request, &ana, "/roadmap/list?lane=done").await;
+        assert!(done_column(&page).contains("1 open task"));
+        assert!(done_column(&page).contains("1 task done"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn done_shows_the_newest_five_then_all() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        for n in 1..=14 {
+            let p = project_in(&ctx, ORG, &format!("Finished {n:02}")).await;
+            close(&ctx, &ana, &p).await;
+        }
+        let page = get(&request, &ana, "/roadmap?lane=done").await;
+        let done = done_column(&page);
+        assert_eq!(done.matches("is-closed").count(), 5);
+        assert!(done.contains("Show all 14"));
+        let newest = done.find("Finished 14").unwrap();
+        assert!(newest < done.find("Finished 13").unwrap(), "newest first");
+        assert!(!done.contains("Finished 09"));
+
+        let all = get(&request, &ana, "/roadmap/list?lane=done&all=1").await;
+        let done = done_column(&all);
+        assert_eq!(done.matches("is-closed").count(), 14);
+        assert!(done.contains("Show newest 5"));
+        assert!(
+            all.contains("/roadmap/list?lane=done&amp;all=1")
+                || all.contains("/roadmap/list?lane=done&all=1")
+        );
+    })
+    .await;
+}
+
+/// A sheet opened before the close: the edit and the save are refused with
+/// a toast, never an `HX-Redirect`, which would read as a stale tab.
+#[tokio::test]
+#[serial]
+async fn editing_a_closed_project_is_refused() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        close(&ctx, &ana, &website).await;
+        let before = find(&ctx, &website).await;
+
+        let edit = request
+            .get(&ana.at(&format!("/roadmap/projects/{}/edit", website.id)))
+            .as_member(&ana)
+            .add_header("HX-Request", "true")
+            .await;
+        let save = request
+            .post(&ana.at(&format!("/roadmap/projects/{}", website.id)))
+            .as_member(&ana)
+            .add_header("HX-Request", "true")
+            .form(&json!({
+                "name": "Website 2", "lane": "later", "status": "Active",
+                "accent": "#6cb6ff", "owner_id": "", "summary": "",
+            }))
+            .await;
+        for res in [edit, save] {
+            assert_eq!(res.status_code(), 409);
+            assert!(res.headers().get("HX-Redirect").is_none());
+            let trigger = res.headers()["HX-Trigger"].to_str().unwrap().to_string();
+            assert!(
+                trigger.contains(REFUSAL) && trigger.contains(r#""kind":"error""#),
+                "{trigger}"
+            );
+        }
+        assert_eq!(find(&ctx, &website).await, before);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn org_a_cannot_close_or_reopen_org_b() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        let theirs = project_in(&ctx, "globex", "Secret plan").await;
+        let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
+            .await
+            .unwrap();
+        let task = task_in(&ctx, globex.id, Some(theirs.id), "Secret task", "todo", &[]).await;
+
+        for action in ["close", "reopen"] {
+            let (status, _) = act(&request, &ana, &theirs, action).await;
+            assert_eq!(status, 404, "{action}");
+        }
+        assert!(!find(&ctx, &theirs).await.is_closed());
+        assert_eq!(reload(&ctx, &task).await, task);
+    })
+    .await;
+}
+
+/// Tom owns a project in Juniper Tea Co and is a member of Globex. That gives
+/// him nothing in Globex.
+#[tokio::test]
+#[serial]
+async fn owning_a_project_in_a_does_not_let_you_close_bs() {
+    request::<App, _, _>(|request, ctx| async move {
+        sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let wholesale = project_in(&ctx, ORG, "Wholesale catalogue").await;
+        owned_by(&ctx, &wholesale, tom_id).await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        let globex = organisations::Model::find_by_slug(&ctx.db, "globex")
+            .await
+            .unwrap();
+        memberships::ActiveModel {
+            user_id: ActiveValue::Set(tom_id),
+            username: ActiveValue::Set("tom".to_string()),
+            role: ActiveValue::Set(memberships::role::MEMBER.to_string()),
+            status: ActiveValue::Set(memberships::status::ACTIVE.to_string()),
+            ..Default::default()
+        }
+        .set_tenant(globex.id)
+        .unwrap()
+        .insert(&ctx.db)
+        .await
+        .unwrap();
+        let tom_in_globex = TestMember::of(&ctx, tom.cookie.clone(), globex.id).await;
+        let theirs = project_in(&ctx, "globex", "Secret plan").await;
+
+        let (status, _) = act(&request, &tom_in_globex, &theirs, "close").await;
+        assert_eq!(status, 403);
+        // His own project, asked for at Globex's address, isn't there.
+        let (status, _) = act(&request, &tom_in_globex, &wholesale, "close").await;
+        assert_eq!(status, 404);
+        assert!(!find(&ctx, &theirs).await.is_closed());
+        assert!(!find(&ctx, &wholesale).await.is_closed());
     })
     .await;
 }
