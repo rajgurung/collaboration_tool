@@ -29,6 +29,8 @@ pub struct Notice {
     pub kind: &'static str,
     pub body: String,
     pub link: String,
+    /// The chat message it quotes. Deleting the message deletes the notice.
+    pub message_id: Option<i64>,
 }
 
 /// An `@name` that is not part of an email address or a longer word.
@@ -148,6 +150,7 @@ impl Model {
                 kind: ActiveValue::Set(notice.kind.to_string()),
                 body: ActiveValue::Set(notice.body.clone()),
                 link: ActiveValue::Set(notice.link.clone()),
+                message_id: ActiveValue::Set(notice.message_id),
                 ..Default::default()
             }
             .set_tenant(org_id)?
@@ -231,9 +234,38 @@ impl Model {
             .filter(Column::ReadAt.is_null())
             .filter(Column::EmailedAt.is_null())
             .filter(Column::CreatedAt.lte(chrono::Utc::now() - wait))
+            .filter(knows_its_message())
             .order_by_asc(Column::Id)
             .all(db)
             .await?)
+    }
+
+    /// Marks these mentions emailed and returns the ones this call marked,
+    /// sorted by id: still there, still mentions, unread and not emailed
+    /// before. A notice deleted with its message, or read since it was
+    /// loaded, is not returned, so it is never emailed.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn claim_mention_emails<C: ConnectionTrait>(
+        db: &C,
+        ids: &[i64],
+    ) -> ModelResult<Vec<Self>> {
+        let mut claimed = Entity::update_many()
+            .col_expr(
+                Column::EmailedAt,
+                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
+            )
+            .filter(Column::Id.is_in(ids.to_vec()))
+            .filter(Column::Kind.eq(kind::MENTION))
+            .filter(Column::ReadAt.is_null())
+            .filter(Column::EmailedAt.is_null())
+            .filter(knows_its_message())
+            .exec_with_returning(db)
+            .await?;
+        // RETURNING has no order.
+        claimed.sort_by_key(|n| n.id);
+        Ok(claimed)
     }
 
     /// Marks everything not yet emailed to someone as emailed, so nothing is
@@ -261,20 +293,6 @@ impl Model {
 
     /// # Errors
     /// On database errors.
-    pub async fn mark_emailed<C: ConnectionTrait>(db: &C, ids: &[i64]) -> ModelResult<()> {
-        Entity::update_many()
-            .col_expr(
-                Column::EmailedAt,
-                sea_orm::sea_query::Expr::value(chrono::Utc::now()),
-            )
-            .filter(Column::Id.is_in(ids.to_vec()))
-            .exec(db)
-            .await?;
-        Ok(())
-    }
-
-    /// # Errors
-    /// On database errors.
     pub async fn mark_all_read<C: ConnectionTrait>(
         db: &C,
         org_id: i64,
@@ -292,6 +310,15 @@ impl Model {
             .await?;
         Ok(())
     }
+}
+
+/// Leaves out chat notices with no `message_id`: made by the old code in the
+/// seconds before a deploy finished, so a delete can't find them. Notices
+/// that aren't about chat (`/tasks?open=...`) never have one.
+fn knows_its_message() -> sea_orm::Condition {
+    sea_orm::Condition::any()
+        .add(Column::MessageId.is_not_null())
+        .add(Column::Link.not_like("/chat/%"))
 }
 
 impl loco_rs::prelude::TenantEntity for Entity {

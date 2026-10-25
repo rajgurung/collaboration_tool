@@ -19,10 +19,19 @@ pub struct Model {
     pub user_id: i64,
     pub actor_id: Option<i64>,
     pub emailed_at: Option<DateTimeWithTimeZone>,
+    pub message_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::messages::Entity",
+        from = "Column::MessageId",
+        to = "super::messages::Column::Id",
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    Messages,
     #[sea_orm(
         belongs_to = "super::organisations::Entity",
         from = "Column::OrganisationId",
@@ -47,6 +56,12 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Users1,
+}
+
+impl Related<super::messages::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Messages.def()
+    }
 }
 
 impl Related<super::organisations::Entity> for Entity {

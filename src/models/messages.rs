@@ -182,6 +182,26 @@ impl Model {
             .ok_or(ModelError::EntityNotFound)
     }
 
+    /// This message, locked with `FOR SHARE` until the caller's transaction
+    /// ends, or `None` once it is deleted. Reactions, replies and chat notices
+    /// are saved under it. A delete holds `FOR UPDATE`, so whichever comes
+    /// second sees the other's result.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn lock_live<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        id: i64,
+    ) -> ModelResult<Option<Self>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Id.eq(id))
+            .lock_shared()
+            .one(db)
+            .await?)
+    }
+
     /// A top-level message in this conversation and its organisation, which
     /// a thread can hang from. A reply's id is not a thread.
     ///

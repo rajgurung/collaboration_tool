@@ -501,7 +501,7 @@ const BARE_TEMPLATES: [&str; 4] = [
 ];
 
 /// Rust lines that may hold a bare tenant path, each for a reason.
-const BARE_RUST: [(&str, &str); 23] = [
+const BARE_RUST: [(&str, &str); 24] = [
     // PR 2: mailers keep their links until email links name their org.
     ("src/mailers/", ""),
     // Org-relative paths stored or built by models, prefixed when shown.
@@ -514,6 +514,11 @@ const BARE_RUST: [(&str, &str); 23] = [
         "\"/settings/claude\"",
     ),
     ("src/controllers/notifications.rs", "let link = format!(\"/"),
+    // Matches stored chat notice links; builds none.
+    (
+        "src/models/notifications.rs",
+        "Column::Link.not_like(\"/chat/%\")",
+    ),
     (
         "src/controllers/notifications.rs",
         "link: \"/roadmap?lane=done\"",

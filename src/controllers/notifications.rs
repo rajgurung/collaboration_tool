@@ -66,10 +66,15 @@ pub async fn send(
     notice: &Notice,
 ) -> Result<Vec<i64>> {
     let sent = notifications::Model::notify(&ctx.db, org_id, actor_id, recipients, notice).await?;
-    if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
-        hub.publish(org_id, &sent);
-    }
+    refresh_badges(ctx, org_id, &sent);
     Ok(sent)
+}
+
+/// Tells these people's open pages to reload the bell badge.
+pub fn refresh_badges(ctx: &AppContext, org_id: i64, user_ids: &[i64]) {
+    if let Some(hub) = ctx.shared_store.get::<NotifyHub>() {
+        hub.publish(org_id, user_ids);
+    }
 }
 
 /// Cuts text to a short quote for a notification.
@@ -121,6 +126,7 @@ pub async fn task_saved(
             kind: kind::ASSIGNED,
             body: format!("assigned you to “{}”", task.title),
             link: link.clone(),
+            message_id: None,
         },
     )
     .await?;
@@ -150,6 +156,7 @@ pub async fn task_saved(
                         kind: kind::PROJECT,
                         body,
                         link,
+                        message_id: None,
                     },
                 )
                 .await?,
@@ -184,6 +191,7 @@ pub async fn note_added(
             kind: kind::MENTION,
             body: format!("{MENTIONED_YOU} on “{}”\n{quote}", task.title),
             link: link.clone(),
+            message_id: None,
         },
     )
     .await?;
@@ -206,6 +214,7 @@ pub async fn note_added(
                     kind: kind::MENTION,
                     body: format!("mentioned everyone on “{}”\n{quote}", task.title),
                     link: link.clone(),
+                    message_id: None,
                 },
             )
             .await?,
@@ -225,6 +234,7 @@ pub async fn note_added(
             kind: kind::NOTE,
             body: format!("commented on “{}”\n{quote}", task.title),
             link,
+            message_id: None,
         },
     )
     .await?;
@@ -253,6 +263,7 @@ pub async fn project_saved(
             kind: kind::OWNER,
             body: format!("made you owner of {}", project.name),
             link: format!("/roadmap?lane={}", project.lane),
+            message_id: None,
         },
     )
     .await?;
@@ -351,6 +362,7 @@ async fn tell_per_person(
             kind,
             body: format!("{headline}\n{n} of your tasks {verb}"),
             link: link.clone(),
+            message_id: None,
         };
         told.extend(send(ctx, org_id, member.user.id, &[user], &notice).await?);
     }
@@ -363,7 +375,12 @@ async fn tell_per_person(
             1 => format!("{headline}\n1 task {verb}"),
             n => format!("{headline}\n{n} tasks {verb}"),
         };
-        let notice = Notice { kind, body, link };
+        let notice = Notice {
+            kind,
+            body,
+            link,
+            message_id: None,
+        };
         send(ctx, org_id, member.user.id, &[owner], &notice).await?;
     }
     Ok(())
@@ -400,8 +417,16 @@ pub async fn message_sent(
     };
     let quote = excerpt(&message.body);
     let link = format!("/chat/{}", conversation.id);
-    let told = send(
-        ctx,
+    // Saved under a lock on the message: one deleted meanwhile tells nobody.
+    let txn = ctx.db.begin().await?;
+    if messages::Model::lock_live(&txn, org_id, message.id)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
+    let mut told = notifications::Model::notify(
+        &txn,
         org_id,
         message.user_id,
         &visible,
@@ -409,30 +434,35 @@ pub async fn message_sent(
             kind: kind::MENTION,
             body: format!("{MENTIONED_YOU} in {place}\n{quote}"),
             link: link.clone(),
+            message_id: Some(message.id),
         },
     )
     .await?;
-    if !everyone {
-        return Ok(());
+    if everyone {
+        // Mentions notify their own author, so leave the sender out here.
+        let rest: Vec<i64> = team
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| members.contains(id) && *id != message.user_id && !told.contains(id))
+            .collect();
+        told.extend(
+            notifications::Model::notify(
+                &txn,
+                org_id,
+                message.user_id,
+                &rest,
+                &Notice {
+                    kind: kind::MENTION,
+                    body: format!("mentioned everyone in {place}\n{quote}"),
+                    link,
+                    message_id: Some(message.id),
+                },
+            )
+            .await?,
+        );
     }
-    // Mentions notify their own author, so leave the sender out here.
-    let rest: Vec<i64> = team
-        .iter()
-        .map(|(id, _)| *id)
-        .filter(|id| members.contains(id) && *id != message.user_id && !told.contains(id))
-        .collect();
-    send(
-        ctx,
-        org_id,
-        message.user_id,
-        &rest,
-        &Notice {
-            kind: kind::MENTION,
-            body: format!("mentioned everyone in {place}\n{quote}"),
-            link,
-        },
-    )
-    .await?;
+    txn.commit().await?;
+    refresh_badges(ctx, org_id, &told);
     Ok(())
 }
 
@@ -468,14 +498,31 @@ pub async fn reply_sent(
         kind,
         body: format!("{headline}{place}\n{quote}"),
         link: link.clone(),
+        message_id: Some(reply.id),
     };
-
     let mentioned: Vec<i64> = notifications::mentioned_ids(&reply.body, &team)
         .into_iter()
         .filter(can_see)
         .collect();
-    let mut told = send(
-        ctx,
+    let repliers: Vec<i64> = messages::Model::thread_stats(&ctx.db, org_id, &[parent.id])
+        .await?
+        .remove(&parent.id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.user_id)
+        .collect();
+
+    // Saved under a lock on the reply: one deleted meanwhile, or whose
+    // parent was, tells nobody.
+    let txn = ctx.db.begin().await?;
+    if messages::Model::lock_live(&txn, org_id, reply.id)
+        .await?
+        .is_none()
+    {
+        return Ok(());
+    }
+    let mut told = notifications::Model::notify(
+        &txn,
         org_id,
         author,
         &mentioned,
@@ -491,8 +538,8 @@ pub async fn reply_sent(
             .filter(|id| not_yet(id, &told))
             .collect();
         told.extend(
-            send(
-                ctx,
+            notifications::Model::notify(
+                &txn,
                 org_id,
                 author,
                 &rest,
@@ -503,8 +550,8 @@ pub async fn reply_sent(
     }
     if not_yet(&parent.user_id, &told) {
         told.extend(
-            send(
-                ctx,
+            notifications::Model::notify(
+                &txn,
                 org_id,
                 author,
                 &[parent.user_id],
@@ -513,22 +560,22 @@ pub async fn reply_sent(
             .await?,
         );
     }
-    let repliers: Vec<i64> = messages::Model::thread_stats(&ctx.db, org_id, &[parent.id])
-        .await?
-        .remove(&parent.id)
-        .unwrap_or_default()
+    let repliers: Vec<i64> = repliers
         .into_iter()
-        .map(|s| s.user_id)
         .filter(|id| not_yet(id, &told))
         .collect();
-    send(
-        ctx,
-        org_id,
-        author,
-        &repliers,
-        &notice(kind::REPLY, "replied in a thread".to_string()),
-    )
-    .await?;
+    told.extend(
+        notifications::Model::notify(
+            &txn,
+            org_id,
+            author,
+            &repliers,
+            &notice(kind::REPLY, "replied in a thread".to_string()),
+        )
+        .await?,
+    );
+    txn.commit().await?;
+    refresh_badges(ctx, org_id, &told);
     Ok(())
 }
 

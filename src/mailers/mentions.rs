@@ -65,8 +65,10 @@ impl MentionMailer {
 pub const WAIT_MINUTES: i64 = 15;
 
 /// Emails everyone who has mentions unread for [`WAIT_MINUTES`]: one email per
-/// person. Mentions are marked emailed before sending, so a failure or a
-/// restart never sends the same one twice. Returns how many emails went out.
+/// person. Mentions are claimed (marked emailed) before sending, so a failure
+/// or a restart never sends the same one twice, and the emails are built from
+/// the claimed rows only: one deleted with its message, or read, since it was
+/// loaded is left out. Returns how many emails went out.
 ///
 /// # Errors
 /// On database errors. A failed email is logged and skipped.
@@ -78,7 +80,7 @@ pub async fn send_due(ctx: &AppContext) -> Result<usize> {
         return Ok(0);
     }
     let ids: Vec<i64> = due.iter().map(|n| n.id).collect();
-    notifications::Model::mark_emailed(&ctx.db, &ids).await?;
+    let due = notifications::Model::claim_mention_emails(&ctx.db, &ids).await?;
 
     let mut by_person: BTreeMap<(i64, i64), Vec<notifications::Model>> = BTreeMap::new();
     for n in due {
