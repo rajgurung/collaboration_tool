@@ -91,10 +91,11 @@ document.addEventListener(
   true,
 );
 
-// Text being typed, or a document upload waiting or under way. A tab holding
-// either doesn't move when it goes stale; it shows one banner instead.
+// Text being typed, a chat photo waiting to be sent, or a document upload
+// waiting or under way. A tab holding any of these doesn't move when it goes
+// stale; it shows one banner instead.
 function hasUnsavedWork(): boolean {
-  if (currentUpload || uploadQueue.length) return true;
+  if (currentUpload || uploadQueue.length || document.querySelector("[data-photo-attach]:not([hidden])")) return true;
   const skip = ["hidden", "password", "search", "checkbox", "radio", "file", "submit", "button"];
   return Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).some(
     (field) =>
@@ -240,7 +241,7 @@ document.addEventListener("keydown", (event) => {
   if (!(target instanceof HTMLTextAreaElement) || !target.hasAttribute("data-enter-submits")) return;
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();
-  if (target.value.trim()) target.form?.requestSubmit();
+  if (target.value.trim() || (target.form && stagedPhotos.has(target.form))) target.form?.requestSubmit();
 });
 
 // Keep feeds marked data-autoscroll pinned to the newest message. Coming back
@@ -1327,6 +1328,9 @@ const MAX_UPLOAD = 25 * 1024 * 1024;
 const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
 const UPLOAD_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"];
 const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+// "2.4 MB", "214 KB", "900 bytes", as `documents::human_size` says it.
+const fileSize = (bytes: number) =>
+  bytes >= 1024 * 1024 ? megabytes(bytes) : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
 const uploadForm = () => document.querySelector<HTMLFormElement>("form[data-upload]");
 
 // An error row like the server's (documents/_upload_error.html), cloned from the page.
@@ -1620,37 +1624,158 @@ document.body.addEventListener("htmx:afterRequest", (event) => {
   uploadFinished(upload, successful, xhr.status);
 });
 
-// Chat photos (channels only): the photo button picks an image and posts it
-// at once, with what's typed as its caption. The message arrives over the
-// socket like any other; if it hasn't shortly after, the feed reloads.
+// Chat photos: picking one puts it in a tile above the text box, which
+// becomes its caption. Send posts both in one request, not over the socket.
+// A failed send keeps both, and Send is the retry. The message arrives over
+// the socket like any other; if it hasn't shortly after, the feed reloads.
+type Staged = { file: File; previewUrl: string; sending: boolean };
+const stagedPhotos = new WeakMap<HTMLFormElement, Staged>();
+const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const SEND_FAILED = "Didn't send. Check your connection, then tap Send to try again.";
+
+function composerParts(form: HTMLFormElement) {
+  const q = <T extends Element>(selector: string) => form.querySelector<T>(selector);
+  return {
+    attach: q<HTMLElement>("[data-photo-attach]"),
+    tile: q<HTMLElement>(".attach-tile"),
+    img: q<HTMLImageElement>("[data-attach-img]"),
+    cover: q<HTMLElement>("[data-attach-cover]"),
+    remove: q<HTMLButtonElement>("[data-attach-remove]"),
+    name: q<HTMLElement>("[data-attach-name]"),
+    status: q<HTMLElement>("[data-attach-status]"),
+    field: q<HTMLTextAreaElement>("textarea[name=body]"),
+    pick: q<HTMLButtonElement>("[data-photo-pick]"),
+    emoji: q<HTMLButtonElement>("[data-emoji-for]"),
+    send: q<HTMLButtonElement>("[data-send]"),
+    input: q<HTMLInputElement>("[data-photo-input]"),
+  };
+}
+
+// The tile's line: "2.4 MB", "Sending...", or what went wrong.
+function photoState(form: HTMLFormElement, state: "ready" | "sending" | "failed", message = "") {
+  const p = composerParts(form);
+  const photo = stagedPhotos.get(form);
+  if (!photo || !p.status || !p.field) return;
+  const sending = state === "sending";
+  p.tile?.classList.toggle("failed", state === "failed");
+  if (p.cover) {
+    p.cover.hidden = state === "ready";
+    p.cover.classList.toggle("failed", state === "failed");
+  }
+  if (p.remove) p.remove.hidden = sending;
+  p.status.textContent = sending ? "Sending..." : state === "failed" ? message : fileSize(photo.file.size);
+  p.status.classList.toggle("err", state === "failed");
+  p.status.setAttribute("role", state === "failed" ? "alert" : "status");
+  lockComposer(form, sending);
+}
+
+// While a photo sends, the caption, the buttons and Send wait.
+function lockComposer(form: HTMLFormElement, locked: boolean) {
+  const p = composerParts(form);
+  if (p.field) p.field.readOnly = locked;
+  if (p.pick) p.pick.disabled = locked;
+  if (p.emoji) p.emoji.disabled = locked;
+  if (p.send) {
+    p.send.setAttribute("aria-label", locked ? "Sending" : "Send");
+    if (locked) p.send.setAttribute("aria-disabled", "true");
+    else p.send.removeAttribute("aria-disabled");
+  }
+}
+
+function stagePhoto(form: HTMLFormElement, file: File) {
+  const p = composerParts(form);
+  if (!p.attach || !p.img || !p.name || !p.field) return;
+  unstagePhoto(form);
+  const named = namedPhoto(file);
+  const photo = { file: named, previewUrl: URL.createObjectURL(file), sending: false };
+  stagedPhotos.set(form, photo);
+  p.img.src = photo.previewUrl;
+  p.name.textContent = named.name;
+  p.attach.hidden = false;
+  p.field.dataset.placeholder ??= p.field.placeholder;
+  p.field.placeholder = "Add a caption";
+  p.field.required = false;
+  p.pick?.setAttribute("aria-label", "Change photo");
+  photoState(form, "ready");
+  p.field.focus();
+}
+
+// Back to a plain text composer. What was typed stays.
+function unstagePhoto(form: HTMLFormElement) {
+  const photo = stagedPhotos.get(form);
+  if (!photo) return;
+  URL.revokeObjectURL(photo.previewUrl);
+  stagedPhotos.delete(form);
+  const p = composerParts(form);
+  if (p.attach) p.attach.hidden = true;
+  p.img?.removeAttribute("src");
+  p.tile?.classList.remove("failed");
+  if (p.field) {
+    p.field.required = true;
+    p.field.placeholder = p.field.dataset.placeholder ?? p.field.placeholder;
+  }
+  p.pick?.setAttribute("aria-label", "Add a photo");
+}
+
 document.addEventListener("click", (event) => {
-  const button = (event.target as Element | null)?.closest<HTMLButtonElement>("[data-photo-pick]");
-  if (button && !button.disabled) button.form?.querySelector<HTMLInputElement>("[data-photo-input]")?.click();
-});
-document.addEventListener("change", (event) => {
-  const input = event.target;
-  if (!(input instanceof HTMLInputElement) || !input.hasAttribute("data-photo-input")) return;
-  const file = input.files?.[0];
-  input.value = "";
-  if (file) void sendPhoto(input, file);
+  const target = event.target as Element | null;
+  const pick = target?.closest<HTMLButtonElement>("[data-photo-pick]");
+  if (pick && !pick.disabled) pick.form?.querySelector<HTMLInputElement>("[data-photo-input]")?.click();
+  const remove = target?.closest<HTMLButtonElement>("[data-attach-remove]");
+  const form = remove?.form;
+  if (form && !stagedPhotos.get(form)?.sending) {
+    unstagePhoto(form);
+    composerParts(form).field?.focus();
+  }
 });
 
-async function sendPhoto(input: HTMLInputElement, file: File) {
-  const form = input.form;
-  const field = form?.querySelector<HTMLTextAreaElement>("textarea[name=body]");
-  const button = form?.querySelector<HTMLButtonElement>("[data-photo-pick]");
-  const url = input.dataset.photoUrl;
-  if (!form || !field || !button || !url) return;
-  const failed = (message = "Couldn't send the photo. Check your connection and try again.") =>
-    showToast({ kind: "error", message });
-  if (file.size > MAX_UPLOAD) return failed(`Too big: ${megabytes(file.size)}. The limit is 25 MB. Try saving a smaller copy.`);
+document.addEventListener("change", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.hasAttribute("data-photo-input") || !input.form) return;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  if (file.size > MAX_UPLOAD) {
+    showToast({ kind: "error", message: `Too big: ${megabytes(file.size)}. The limit is 25 MB. Try saving a smaller copy.` });
+    return;
+  }
+  // An empty type is let through: the server reads the bytes.
+  if (file.type && !PHOTO_TYPES.includes(file.type)) {
+    showToast({ kind: "error", message: "That file type can't be sent. Use a JPG, PNG or WebP photo." });
+    return;
+  }
+  stagePhoto(input.form, file);
+});
+
+// With a photo waiting, Send posts it here. Capture phase on the document
+// runs before the form's own listeners, so the ws extension never sees this
+// submit and nothing goes over the socket.
+document.addEventListener(
+  "submit",
+  (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    const photo = stagedPhotos.get(form);
+    if (!photo) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!photo.sending) void sendStagedPhoto(form, photo);
+  },
+  true,
+);
+
+async function sendStagedPhoto(form: HTMLFormElement, photo: Staged) {
+  const p = composerParts(form);
+  const url = p.input?.dataset.photoUrl;
+  if (!p.field || !url) return;
   const body = new FormData();
-  body.append("body", field.value);
-  body.append("file", namedPhoto(file));
+  body.append("body", p.field.value);
+  body.append("file", photo.file);
   const headers = { "HX-Request": "true", ...orgHeaders() };
   const probe = () => fetch(orgUrl("/orgs/current"), { headers, credentials: "same-origin" });
-  button.disabled = true;
-  button.setAttribute("aria-busy", "true");
+  photo.sending = true;
+  photoState(form, "sending");
+  let failure: string | null = null;
   try {
     // Ask first, as document uploads do, so a stale tab is caught before it sends a large body.
     if (staleRefusal(await probe())) return;
@@ -1658,19 +1783,25 @@ async function sendPhoto(input: HTMLInputElement, file: File) {
     if (staleRefusal(res)) return;
     // Railway's edge can turn the early refusal of a large body into a 502.
     if (res.status === 502 && staleRefusal(await probe())) return;
-    if (!res.ok) return failed(res.status === 422 ? await res.text() : undefined);
-    form.reset();
-    autogrow(field);
+    if (!res.ok) {
+      failure = (res.status === 422 ? await res.text() : "") || SEND_FAILED;
+      return;
+    }
     const id = /id="(message-\d+)"/.exec(await res.text())?.[1];
+    unstagePhoto(form);
+    form.reset();
+    autogrow(p.field);
     const feedUrl = form.closest<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;
     window.setTimeout(() => {
       if (id && feedUrl && !document.getElementById(id)) void htmx.ajax("GET", feedUrl, { target: "#chat-feed", swap: "innerHTML" });
     }, 1500);
   } catch {
-    failed();
+    failure = SEND_FAILED;
   } finally {
-    button.disabled = false;
-    button.removeAttribute("aria-busy");
+    photo.sending = false;
+    // Still waiting after a refusal or a stale-tab hold: Send tries again.
+    if (stagedPhotos.get(form) === photo) photoState(form, failure === null ? "ready" : "failed", failure ?? "");
+    else lockComposer(form, false);
   }
 }
 

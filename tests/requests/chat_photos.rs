@@ -231,6 +231,8 @@ async fn photos_work_in_dms_and_groups_for_members_only() {
             let page = page(&request, &alice, &format!("/chat/{}", conversation.id)).await;
             assert!(page.contains("data-photo-pick"), "{}", conversation.kind);
             assert!(page.contains(r#"accept="image/*""#));
+            assert!(page.contains(r#"aria-label="Add a photo""#));
+            assert!(page.contains("data-photo-attach hidden"), "no photo waiting yet");
 
             let res = send_photo(&request, &alice, conversation.id, None, "a.png", PNG).await;
             assert_eq!(res.status_code(), 200, "{}", conversation.kind);

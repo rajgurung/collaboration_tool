@@ -647,7 +647,7 @@
   .msg:has(+ .msg:not(.msg-start)) .msg-foot:has(> .reacts:empty),
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-receipt,
   .msg-own:is(:has(+ .msg-own), :has(+ .chat-empty + .msg-own)) .msg-foot:has(> .reacts:empty) { display: none; }
-  .composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
+  .composer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 8px 12px max(12px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
   .composer textarea { display: block; width: 100%; min-height: 44px; max-height: 140px; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 22px; padding: 11px 16px 11px 46px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; outline: none; }
   .composer.docked { padding-bottom: 8px; }
   /* A text field with the emoji button inside it, bottom left. */
@@ -662,8 +662,29 @@
     .field-emoji[aria-expanded="true"] .ic-keyboard { display: block; }
   }
   .composer textarea:focus { border-color: var(--accent); }
-  [data-photo-pick] .ic-sending, [data-photo-pick][aria-busy="true"] .ic-photo { display: none; }
-  [data-photo-pick][aria-busy="true"] .ic-sending { display: block; }
+  /* A photo waiting to be sent: a 72px tile above the text box, with its name and size. */
+  .attach { flex-basis: 100%; display: flex; align-items: center; gap: 12px; padding: 6px 4px 2px; }
+  .attach[hidden] { display: none; }
+  .attach-tile { position: relative; flex-shrink: 0; width: 72px; height: 72px; }
+  .attach-tile img { display: block; width: 100%; height: 100%; box-sizing: border-box; object-fit: cover; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--chip); }
+  .attach-tile.failed img { border: 2px solid var(--danger); }
+  /* A 24px dot with a 44px tap area hanging off the corner. */
+  .attach-x { position: absolute; top: -14px; right: -14px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: pointer; }
+  .attach-x > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; background: var(--text); color: var(--surface); box-shadow: 0 0 0 2px var(--surface); }
+  .attach-x[hidden] { display: none; }
+  .attach-cover { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 12px; background: rgba(20, 18, 15, 0.5); color: #fff; }
+  .attach-cover[hidden] { display: none; }
+  .attach-cover .ic-alert, .attach-cover.failed .ic-spin { display: none; }
+  .attach-cover.failed .ic-alert { display: block; }
+  .attach-cover.failed { background: color-mix(in srgb, var(--danger) 30%, rgba(20, 18, 15, 0.45)); }
+  .attach-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; font-size: 13px; }
+  .attach-name { color: var(--text); font-weight: 600; }
+  .attach-sub { color: var(--muted); }
+  .attach-sub.err { color: var(--danger); font-weight: 600; }
+  .composer textarea:read-only { color: var(--muted); }
+  [data-send] .ic-sending, [data-send][aria-disabled="true"] .ic-send { display: none; }
+  [data-send][aria-disabled="true"] { opacity: 0.7; cursor: default; }
+  [data-send][aria-disabled="true"] .ic-sending { display: block; }
   /* Emoji picker: a popover on desktop, docked where the keyboard was on phones. */
   :has(> .ep-pop) { position: relative; }
   .ep { display: flex; flex-direction: column; background: var(--surface); color: var(--text); }
