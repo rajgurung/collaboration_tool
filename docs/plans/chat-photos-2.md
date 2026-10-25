@@ -53,7 +53,7 @@ One migration. It adds columns only and rolls back cleanly (see
 
 ### 1. Migration and entity
 
-**New `migration/src/m20261025_120000_add_private_photos_to_messages.rs`**,
+**New `migration/src/m20261025_120100_add_private_photos_to_messages.rs`**,
 registered in `migration/src/lib.rs` after the Claude grants migration.
 
 ```sql
