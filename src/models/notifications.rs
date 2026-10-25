@@ -18,6 +18,8 @@ pub mod kind {
     pub const REPLY: &str = "reply";
     /// Someone marked a project done, closing your tasks or your project's.
     pub const CLOSED: &str = "closed";
+    /// Someone reopened a done project, putting your tasks back.
+    pub const REOPENED: &str = "reopened";
     /// From the app itself, not a person: the Claude connector changed.
     pub const CONNECTOR: &str = "connector";
 }

@@ -390,7 +390,7 @@ project, closed: &[tasks::Model])`. It does not call `task_saved`.
    "marked Website done").
 4. Link `/roadmap?lane=done`. `send` skips the actor and publishes to the hub.
 
-Reopen sends nothing (brief; mockup §8 question 2).
+Reopen sends the same kind of notice, one per person, with kind `reopened` (added after launch, PR "reopen notice").
 
 `assets/views/notifications/index.html`: `closed` uses the `status-done` icon.
 `app.css`: `.notice-closed { color: var(--done); }`.

@@ -272,6 +272,53 @@ pub async fn project_closed(
     project: &projects::Model,
     closed: &[tasks::Model],
 ) -> Result<()> {
+    let change = Change {
+        kind: kind::CLOSED,
+        verb: "closed",
+        headline: format!("marked {} done", project.name),
+        link: "/roadmap?lane=done".to_string(),
+    };
+    tell_per_person(ctx, member, project, closed, change).await
+}
+
+/// After a done project is reopened: the same shape as [`project_closed`],
+/// counting the tasks that went back to their earlier status.
+///
+/// # Errors
+/// On database errors.
+pub async fn project_reopened(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    project: &projects::Model,
+    reopened: &[tasks::Model],
+) -> Result<()> {
+    let change = Change {
+        kind: kind::REOPENED,
+        verb: "reopened",
+        headline: format!("reopened {}", project.name),
+        link: format!("/roadmap?lane={}", project.lane),
+    };
+    tell_per_person(ctx, member, project, reopened, change).await
+}
+
+/// What a close or reopen did, for [`tell_per_person`].
+struct Change {
+    kind: &'static str,
+    /// "closed" or "reopened", as in "2 of your tasks closed".
+    verb: &'static str,
+    headline: String,
+    link: String,
+}
+
+/// One notice per assignee of the changed tasks, saying how many of theirs
+/// changed, then one to the project's owner with the total if not told yet.
+async fn tell_per_person(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    project: &projects::Model,
+    changed: &[tasks::Model],
+    change: Change,
+) -> Result<()> {
     let org_id = member.org.id;
     let team: Vec<i64> = memberships::Model::team(&ctx.db, org_id)
         .await?
@@ -281,7 +328,7 @@ pub async fn project_closed(
     let assignees = task_assignees::Model::by_task(&ctx.db, org_id).await?;
     // Per person, in the order first met.
     let mut counts: Vec<(i64, usize)> = Vec::new();
-    for user in closed
+    for user in changed
         .iter()
         .filter_map(|t| assignees.get(&t.id))
         .flatten()
@@ -292,13 +339,17 @@ pub async fn project_closed(
             None => counts.push((*user, 1)),
         }
     }
-    let headline = format!("marked {} done", project.name);
-    let link = "/roadmap?lane=done".to_string();
+    let Change {
+        kind,
+        verb,
+        headline,
+        link,
+    } = change;
     let mut told = Vec::new();
     for (user, n) in counts {
         let notice = Notice {
-            kind: kind::CLOSED,
-            body: format!("{headline}\n{n} of your tasks closed"),
+            kind,
+            body: format!("{headline}\n{n} of your tasks {verb}"),
             link: link.clone(),
         };
         told.extend(send(ctx, org_id, member.user.id, &[user], &notice).await?);
@@ -307,16 +358,12 @@ pub async fn project_closed(
         .owner_id
         .filter(|id| team.contains(id) && !told.contains(id));
     if let Some(owner) = owner {
-        let body = match closed.len() {
+        let body = match changed.len() {
             0 => headline,
-            1 => format!("{headline}\n1 task closed"),
-            n => format!("{headline}\n{n} tasks closed"),
+            1 => format!("{headline}\n1 task {verb}"),
+            n => format!("{headline}\n{n} tasks {verb}"),
         };
-        let notice = Notice {
-            kind: kind::CLOSED,
-            body,
-            link,
-        };
+        let notice = Notice { kind, body, link };
         send(ctx, org_id, member.user.id, &[owner], &notice).await?;
     }
     Ok(())
