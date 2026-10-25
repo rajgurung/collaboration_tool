@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadmap: done projects and a progress donut · mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+/* ---------- Tokens: copied from frontend/styles/app.css ----------
+   Scoped to [data-theme] on any element so light and dark copies sit side by side. */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f3ef; --side: #eceae4; --surface: #ffffff; --lane: #f8f7f4; --line: #e2dfd7; --line-soft: #eceae4;
+  --chip: #e9e7e0; --text: #1a1814; --muted: #625e57; --link: #8a5300; --accent: #f2a93b; --accent-hover: #f6b858;
+  --on-accent: #1a1814; --active-bg: #fbebd0; --scrim: rgba(20, 18, 15, 0.45);
+  --todo: #8a867d; --progress: #3b6fe0; --blocked: #d4552f; --blocked-bg: #fce9e2; --done: #2f9e6b; --danger: #c2410c; --on-danger: #ffffff;
+  --shadow: 0 1px 2px rgba(23, 20, 15, 0.08);
+  --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
+  --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
+  --canvas: #e4e1d9;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121214; --side: #17171a; --surface: #1f1f23; --lane: #18181c; --line: #2c2c32; --line-soft: #29292f;
+  --chip: #26262b; --text: #edece8; --muted: #a6a29b; --link: #ffc77a; --accent: #ffb454; --accent-hover: #ffc475;
+  --on-accent: #1b1300; --active-bg: #4a3618; --scrim: rgba(0, 0, 0, 0.6);
+  --todo: #a6a29b; --progress: #7c9dff; --blocked: #ff8466; --blocked-bg: #3a2019; --done: #4cc38a; --danger: #ff8466; --on-danger: #1b1300;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45); --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
+  --canvas: #0b0b0c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--canvas); color: var(--text); font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; cursor: pointer; color: inherit; }
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ic { flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.meta { font-size: 13px; color: var(--muted); }
+.truncate-1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tnum { font-variant-numeric: tabular-nums; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ---------- Mockup chrome (not part of the app) ---------- */
+.mock-bar { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 32px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.mock-bar h1 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; min-width: 260px; }
+.mock-bar nav { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; font-weight: 600; color: var(--link); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
+.seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.section { padding: 36px 32px 48px; border-bottom: 1px solid var(--line); }
+.section > h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+.section > p.lead { margin: 0 0 24px; max-width: 860px; color: var(--muted); }
+.shots { display: flex; flex-wrap: wrap; gap: 36px 32px; align-items: flex-start; }
+.shot { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.shot-wide { flex-basis: 100%; }
+.shot-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.ann { width: 360px; padding: 16px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; }
+.ann-wide { width: auto; max-width: 860px; }
+.ann h3 { margin: 0 0 8px; font-size: 15px; }
+.ann ol, .ann ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ann p + p, .ann p + ul, .ann ul + p, .ann ol + h3, .ann ul + h3, .ann p + h3, .ann table + p { margin-top: 10px; }
+.ann code, .lead code { font-size: 12.5px; padding: 1px 4px; border-radius: 4px; background: var(--chip); }
+.ann table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ann th, .ann td { padding: 6px 8px 6px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line-soft); }
+.ann th { font-weight: 700; color: var(--muted); }
+.q { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--active-bg); color: var(--text); font-size: 13.5px; }
+.q b { display: block; margin-bottom: 2px; }
+
+.pair { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.pair.stack { flex-direction: column; flex-wrap: nowrap; width: 100%; }
+.th { color: var(--text); }
+body[data-mode="light"] .th-dark, body[data-mode="dark"] .th-light { display: none; }
+body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { display: none; }
+.desk-holder { position: relative; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow-lift); }
+.specimen { padding: 16px; border-radius: 16px; background: var(--bg); border: 1px solid var(--line); }
+.spec-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ---------- Device frames ---------- */
+.frame-phone { box-sizing: content-box; position: relative; display: flex; flex-direction: column; width: 390px; height: 844px; overflow: hidden; border: 10px solid #0e0e10; border-radius: 48px; background: var(--bg); box-shadow: var(--shadow-lift); }
+.statusbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 6px 30px 0; font-size: 15px; font-weight: 700; background: var(--bg); }
+.home-ind { position: absolute; left: 50%; bottom: 8px; z-index: 60; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: var(--text); opacity: 0.85; }
+.phone-body { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.frame-desk { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); width: 1440px; height: 900px; overflow: hidden; background: var(--bg); transform-origin: top left; }
+
+/* ---------- App components, copied from app.css ---------- */
+.avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
+.avatar-xs { width: 22px; height: 22px; font-size: 10px; font-weight: 700; }
+.avatar-sm { width: 28px; height: 28px; font-size: 12px; }
+.avatar-md { width: 36px; height: 36px; font-size: 14px; }
+.avatar-stack { display: inline-flex; }
+.avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
+.avatar-stack > .avatar + .avatar { margin-left: -6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-tall { min-height: 44px; }
+.btn-text-danger { background: none; border: 0; padding: 8px 0; color: var(--danger); font-weight: 600; font-size: 14px; }
+.icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--text); flex-shrink: 0; }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; box-shadow: var(--shadow-1); }
+.list { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-1); }
+.list-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; }
+.list > * + * { border-top: 1px solid var(--line-soft); }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.section-head a { color: var(--link); font-size: 15px; padding: 10px 0; }
+.empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 15px; }
+.text-link { color: var(--link); font-weight: 600; background: none; border: 0; padding: 0; }
+.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
+.pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 10px; background: var(--chip); font-size: 12px; font-weight: 600; }
+.pill-muted { font-weight: 500; color: var(--muted); }
+.pill-blocked { background: var(--blocked-bg); color: var(--blocked); }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--dot) 14%, transparent); font-size: 12.5px; font-weight: 600; }
+.status-pill .dot { background: var(--dot); }
+.dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: var(--dot, var(--muted)); }
+.dot-ring { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+.bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 3px; background: var(--bar, var(--accent)); }
+.field { display: grid; gap: 6px; }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.field-error { display: flex; align-items: flex-start; gap: 5px; font-size: 13px; color: var(--danger); }
+.input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 12px; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+.alert { padding: 12px 14px; border-radius: 12px; font-size: 14px; border: 1px solid var(--line); display: flex; gap: 8px; align-items: flex-start; }
+.alert-error { background: var(--blocked-bg); color: var(--blocked); border-color: transparent; }
+.status-todo { color: var(--todo); } .status-progress { color: var(--progress); } .status-blocked { color: var(--blocked); } .status-done { color: var(--done); }
+.toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.toast-error { background: var(--danger); color: var(--on-danger); }
+.toast-region { position: absolute; z-index: 80; display: grid; gap: 8px; pointer-events: none; }
+.phone-body .toast-region { left: 16px; right: 16px; bottom: 96px; justify-items: center; }
+.frame-desk .toast-region { right: 24px; bottom: 24px; justify-items: end; }
+
+/* Shell */
+.sidebar { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); }
+.org-switch { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 16px; padding: 0 8px; }
+.logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; }
+.side-link { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-weight: 500; }
+.side-link[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.side-link[aria-current="page"] .ic { color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 0 8px 0 16px; background: var(--bg); }
+.topbar h1 { flex: 1; min-width: 0; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.frame-desk .topbar { padding: 16px 32px 4px; gap: 8px; }
+.bell-btn { position: relative; }
+.bell-dot { position: absolute; top: 10px; right: 11px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+.tabbar { position: absolute; inset: auto 0 0 0; z-index: 40; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 8px 8px 26px; background: var(--surface); border-top: 1px solid var(--line); }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.tab-icon { display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.tab[aria-current="page"] { color: var(--text); font-weight: 600; }
+.tab[aria-current="page"] .tab-icon { background: var(--active-bg); }
+.page { padding: 4px 16px 110px; display: flex; flex-direction: column; gap: 12px; }
+.d-main { min-width: 0; display: flex; flex-direction: column; }
+.d-page { padding: 8px 32px 48px; display: flex; flex-direction: column; gap: 24px; }
+
+/* Home (as today) */
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.frame-desk .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.phone-body .stat { gap: 10px; padding: 12px; }
+.stat > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
+.phone-body .stat-icon { width: 30px; height: 30px; border-radius: 9px; }
+.stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.project-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.home-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 28px; align-items: start; }
+.cards-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.decision { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* Roadmap (as today) */
+.segmented { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 4px; padding: 4px; border-radius: 12px; background: var(--chip); }
+.segmented > * { min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; display: grid; place-items: center; }
+.segmented > [aria-current="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.roadmap-col { display: flex; flex-direction: column; gap: 12px; }
+.roadmap-cards { display: grid; gap: 12px; }
+.roadmap-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.roadmap-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.roadmap-empty { padding: 28px 16px; border: 1.5px dashed var(--line); border-radius: 14px; text-align: center; color: var(--muted); font-size: 14px; }
+.frame-desk .roadmap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.frame-desk .roadmap-col { padding: 14px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--lane); }
+.roadmap-col-head { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 4px; }
+.roadmap-col-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
+
+/* Sheet */
+.m-scrim { position: absolute; inset: 0; z-index: 45; background: var(--scrim); }
+.m-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; flex-direction: column; max-height: calc(100% - 48px); border-radius: 20px 20px 0 0; background: var(--surface); }
+.sheet-handle { display: grid; place-items: center; padding-top: 8px; flex-shrink: 0; }
+.sheet-handle::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+.m-sheet .sheet-body { min-height: 0; overflow-y: auto; padding: 8px 20px 34px; }
+.d-modal { position: absolute; z-index: 50; left: calc(248px + (100% - 248px) / 2); top: 50%; transform: translate(-50%, -50%); width: 560px; border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lift); }
+.d-modal .sheet-body { padding: 20px 24px 24px; }
+.form { display: grid; gap: 16px; }
+.form h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.m-sheet .grid-3 { grid-template-columns: 1fr; }
+.swatches { display: flex; gap: 12px; }
+.swatch { width: 36px; height: 36px; border-radius: 50%; }
+.swatch.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+.form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.form-foot .btn-text-danger { margin-right: auto; }
+.textarea { min-height: 72px; align-items: flex-start; font-size: 16px; line-height: 1.45; }
+
+/* ======================= NEW in this feature ======================= */
+
+/* 1. Four roadmap columns on desktop (app.css: repeat(3) becomes repeat(4)). */
+.frame-desk .roadmap.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* 2. Lane switcher: the count gets its own span so it can be quieter, and can
+      drop under the label on very narrow screens. */
+.seg-count { margin-left: 5px; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.segmented > [aria-current="true"] .seg-count { color: var(--muted); }
+.segmented > * > span.seg-in { display: inline-flex; align-items: baseline; white-space: nowrap; }
+.segmented.narrow > * > span.seg-in { flex-direction: column; align-items: center; line-height: 1.15; }
+.segmented.narrow .seg-count { margin-left: 0; font-size: 11.5px; }
+.segmented.narrow > * { min-height: 44px; }
+
+/* 3. A closed project's card: same card, quieter. No shadow, no progress bar,
+      the project colour faded, a "Done" badge that looks nothing like the grey status pill. */
+.roadmap-card.is-closed { box-shadow: none; gap: 10px; }
+.roadmap-card.is-closed::before { background: color-mix(in srgb, var(--accent-bar) 40%, var(--surface)); }
+.closed-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px 3px 5px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); background: color-mix(in srgb, var(--done) 10%, var(--surface)); font-size: 12px; font-weight: 700; color: var(--text); }
+.closed-badge .ic { color: var(--done); }
+.closed-foot { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-bottom: -6px; }
+.closed-foot .meta { flex: 1; min-width: 0; }
+.reopen { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; margin-right: -6px; padding: 0 6px; border: 0; border-radius: 8px; background: none; color: var(--link); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.reopen:hover { background: var(--chip); }
+.reopen:disabled { color: var(--muted); cursor: default; }
+.phone-body .reopen, .specimen .reopen { min-height: 44px; }
+.roadmap-more { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border-radius: 12px; font-size: 14px; font-weight: 600; color: var(--link); }
+.roadmap-more:hover { background: var(--chip); }
+
+/* 4. "Mark project done" in the edit sheet. */
+.close-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--lane); }
+.close-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.close-row-text b { font-size: 15px; }
+.m-sheet .close-row { flex-direction: column; align-items: stretch; }
+.m-sheet .close-row .btn { min-height: 44px; }
+.btn .ic.done { color: var(--done); }
+
+/* 5. The confirm step. */
+.confirm { display: flex; flex-direction: column; gap: 14px; }
+.confirm h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.confirm-lead { font-size: 16px; font-weight: 500; line-height: 1.45; }
+.confirm-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.m-sheet .form-foot .btn, .m-sheet .confirm .btn { min-height: 44px; }
+
+/* 6. The donut on Home. */
+.donut-card { display: flex; align-items: center; gap: 20px; padding: 16px; }
+.donut { flex-shrink: 0; display: block; }
+.donut-pct { font-size: 25px; font-weight: 700; letter-spacing: -0.02em; fill: var(--text); }
+.donut-sub { font-size: 12px; font-weight: 600; fill: var(--muted); }
+.donut-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.donut-title { font-size: 15px; font-weight: 700; }
+.legend { margin: 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.legend li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.legend li .lbl { flex: 1; min-width: 0; }
+.legend li .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.legend li.zero { color: var(--muted); }
+.legend li.zero .n { font-weight: 500; }
+.frame-desk .legend { grid-template-columns: repeat(2, minmax(0, 170px)); column-gap: 28px; }
+
+/* 7. Bell notice kind for a close. */
+.notice { width: 100%; align-items: flex-start; padding: 14px; border: 0; background: transparent; text-align: left; }
+.notice-unread { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.notice-kind { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 2px var(--surface); color: var(--muted); }
+.notice-mention { color: var(--progress); }
+.notice-assigned { color: var(--accent); }
+.notice-note { color: var(--done); }
+.notice-closed { color: var(--done); }
+.notice-dot { flex-shrink: 0; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+</style>
+</head>
+<body data-view="both" data-mode="light">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-list-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></symbol>
+  <symbol id="i-meetings" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></symbol>
+  <symbol id="i-log-out" viewBox="0 0 24 24"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-at-sign" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
+  <symbol id="i-user-round" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></symbol>
+  <symbol id="i-status-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-status-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+  <symbol id="i-status-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="i-status-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+</svg>
+
+<header class="mock-bar">
+  <h1>Roadmap: done projects and a progress donut · mockup</h1>
+  <nav aria-label="Sections">
+    <a href="#roadmap">1 Done column</a><a href="#switcher">2 Phone switcher</a><a href="#close">3 Mark done</a><a href="#closed">4 A done project</a><a href="#donut">5 Home donut</a><a href="#bell">6 Bell</a><a href="#roles">7 Roles</a><a href="#questions">8 Questions</a>
+  </nav>
+  <div class="seg" role="group" aria-label="Theme"><button type="button" data-mode-set="light" aria-pressed="true">Light</button><button type="button" data-mode-set="dark" aria-pressed="false">Dark</button><button type="button" data-mode-set="both" aria-pressed="false">Light and dark</button></div>
+  <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
+</header>
+
+<!-- ============================== 1 ============================== -->
+<section class="section" id="roadmap">
+  <h2>1. Desktop roadmap: a fourth column, Done</h2>
+  <p class="lead">Ana (owner) has just marked Website done. It sits at the top of Done with today's date. The column shows the newest 5 of 14, then "Show all 14". Done cards keep their name, colour, owner and summary, but drop the shadow, the pencil and the progress bar.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · owner, 14 done projects, toast after marking Website done</span><div id="d-roadmap"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Four equal columns. At 1440 each is about 270px wide, the same card layout as today, one card per row.</li>
+        <li>Done comes last, after Later, reading left to right like the board's To do to Done.</li>
+        <li>The hint under the title says what the column is: "Finished projects, newest first".</li>
+        <li>"Show all 14" is a link under the 5th card, like "All done tasks" on the board. It reloads the lane with every done project; the link then reads "Show newest 5".</li>
+        <li>Toast copy from the brief: "Website done. 4 tasks closed."</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>The done card</h3>
+      <ol>
+        <li>Badge "Done 25 Oct" with a green tick, outlined and fully rounded. The free-text status pill is grey with square-ish corners, so the two never look alike.</li>
+        <li>The free-text status ("Active") is hidden on done cards. "Active" on a finished project would only confuse.</li>
+        <li>The progress bar goes. It would always read 100%, and the badge says it better.</li>
+        <li>The colour strip fades to 40% so the column reads as calm. All text stays at full contrast; nothing is dimmed with opacity.</li>
+        <li>"By Ana" (who marked it done; full wording in the tooltip and screen-reader text) sits in the footer, with Reopen beside it for owners, admins and the project's owner. Reopen is a quiet text button in the link colour, not an outlined button: it repeats on every card in the column, and the longer "Marked done by Maya" wrapped onto two lines at 270px.</li>
+      </ol>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · empty Done column (nothing marked done yet), member Tom</span><div id="d-roadmap-empty"></div></div>
+  </div>
+</section>
+
+<!-- ============================== 2 ============================== -->
+<section class="section" id="switcher">
+  <h2>2. Phone: the lane switcher with four segments</h2>
+  <p class="lead">It fits at 390px with no change to the control. The switcher is 358px wide, so each segment is 84px. The longest likely label, "Later 12", is about 62px at 14px semibold. The count moves into its own muted span so the four words stay easy to scan. Below 360px (iPhone SE first generation, or large text) the count drops under the word, and each segment grows to 44px tall.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · 390 · Now lane, before</span><div id="p-now"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · 390 · Done lane, 14 projects</span><div id="p-done"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · 390 · Done lane, empty</span><div id="p-done-empty"></div></div>
+    <div class="shot"><span class="shot-label">Switcher at real size</span><div id="spec-switch"></div></div>
+    <div class="ann">
+      <h3>Why not something else</h3>
+      <ul>
+        <li>A scrolling chip row would hide Done off the right edge, the one lane people will look for.</li>
+        <li>Dropping counts loses "how many in Now", which people use today.</li>
+        <li>A "Done" link under the cards would make Done feel like a different page from the lanes.</li>
+      </ul>
+      <p>Markup change: <code>{{ l.label }}&lt;span class="seg-count"&gt;{{ l.count }}&lt;/span&gt;</code>, plus one media query for under 360px.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 3 ============================== -->
+<section class="section" id="close">
+  <h2>3. Marking a project done</h2>
+  <p class="lead">There is no project page today. Tapping the pencil opens the edit sheet, and that is where people manage a project, so "Mark project done" lives there, as the brief says. It sits in its own box above the buttons, apart from Save and Delete. Tapping it swaps the sheet to a confirm step. It does not stack a second sheet.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · edit sheet scrolled to the end, owner Ana</span><div id="p-edit"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · confirm</span><div id="p-confirm"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · saving</span><div id="p-confirm-busy"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · error</span><div id="p-confirm-error"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · after: Done lane and toast</span><div id="p-after"></div></div>
+    <div class="ann">
+      <h3>Confirm copy, by case</h3>
+      <table>
+        <tr><th>Tasks</th><th>Sentence</th></tr>
+        <tr><td>4 open, 1 blocked</td><td>4 open tasks will be marked done. 1 is blocked.</td></tr>
+        <tr><td>3 open, 2 blocked</td><td>3 open tasks will be marked done. 2 are blocked.</td></tr>
+        <tr><td>1 open, blocked</td><td>1 open task will be marked done. It is blocked.</td></tr>
+        <tr><td>2 open, none blocked</td><td>2 open tasks will be marked done.</td></tr>
+        <tr><td>All 9 done</td><td>All 9 tasks are already done.</td></tr>
+        <tr><td>No tasks</td><td>It has no tasks.</td></tr>
+      </table>
+      <p>Pills under the sentence break the open tasks down by status, using the board's status colours. Blocked uses the coral pill people already know.</p>
+      <p>"Who gets a notice" names the assignees and the project owner, without the person closing. With 5 or more names: "Maya, Tom and 3 others get a notice."</p>
+    </div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>The box line tells you before you tap: "Its 4 open tasks are marked done with it."</li>
+        <li>Confirm is a step in the same sheet. Back returns to the form with nothing lost.</li>
+        <li>The confirm button is the amber primary, "Mark done". It is not red: the action can be undone.</li>
+        <li>While saving, both buttons are disabled and the primary shows a spinner with "Marking done…".</li>
+        <li>On error the sheet stays open with a coral alert: "Couldn't mark Website done. Nothing was changed. Try again." The button comes back.</li>
+        <li>On success the sheet closes, the lane reloads (<code>roadmap-changed</code>) and the toast shows. On a phone the switcher stays on Now. Website has left it, and "Done 14" counts up.</li>
+      </ol>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · edit sheet with the new box, owner Ana</span><div id="d-edit"></div></div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · confirm</span><div id="d-confirm"></div></div>
+  </div>
+</section>
+
+<!-- ============================== 4 ============================== -->
+<section class="section" id="closed">
+  <h2>4. A done project</h2>
+  <p class="lead">The done card is the closed project's whole view. It has no project page and no edit sheet. It shows the closed state, who marked it done, when, and how many tasks. Owners, admins and the project's owner get Reopen. Everyone else sees the same card without it.</p>
+  <div class="shots">
+    <div class="shot"><span class="shot-label">Done card states at phone width</span><div id="spec-closed"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Reopen is one tap, with no confirm. It is the undo for a mistake, and marking done again is always possible.</li>
+        <li>While reopening, the button shows a spinner and "Reopening…".</li>
+        <li>After it: the card leaves Done and goes back to its old lane. Toast: "Website is back in Now. 3 tasks reopened." The count is the tasks that went back to an earlier status.</li>
+        <li>If someone set a task back to in progress after the close, the card shows a blue "1 open task" pill. The project stays done.</li>
+        <li>"12 tasks done" is plain text, not a link. The tasks still show in Tasks with the Done filter.</li>
+        <li>Dates: "25 Oct" this year, "12 Dec 2025" for earlier years.</li>
+      </ol>
+    </div>
+    <div class="shot"><span class="shot-label">Task form: a closed project, refused</span><div id="spec-refuse"></div></div>
+    <div class="ann">
+      <h3>Adding a task to a done project</h3>
+      <p>Done projects are left out of the Project picker, so this only happens when a form was opened before the close. The server refuses it and the form shows the error under Project, in the brief's words, with the project named.</p>
+      <p>A failed reopen shows the error toast: "Couldn't reopen Website. Try again."</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 5 ============================== -->
+<section class="section" id="donut">
+  <h2>5. Home: a donut at the top of "Roadmap: now"</h2>
+  <p class="lead">One donut for the whole organisation: the 50 tasks in the three "now" projects, by status. Done 31, in progress 9, blocked 3, to do 7, so the centre reads 62%. It sits in a card above the project cards, 120px, with the legend beside it. It is drawn on the server as plain SVG circles, using the status colours.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · 390 · Home</span><div id="p-home"></div></div>
+    <div class="shot"><span class="shot-label">States at phone width</span><div id="spec-donut"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>The order goes clockwise from 12 o'clock: done, in progress, blocked, to do. That is how close the work is to finished, and the legend follows the same order.</li>
+        <li>Status colours from the tokens, so the light and dark versions are each set by design. Each colour stands out against the card at 3:1 or more (light: done 3.4, in progress 4.6, blocked 4.1, to do 3.6; dark: 6.3 to 7.4).</li>
+        <li>Neighbouring colours are too close to each other, so a 2px gap in the card colour separates every segment. Colour never works alone: each legend row names the status and gives its count.</li>
+        <li>Title beside the ring: "31 of 50 tasks done", and "In 3 projects in Now" under it. The numbers add up on screen.</li>
+        <li>For screen readers: <code>role="img"</code> with the label "Now: 62% done. 31 done, 9 in progress, 3 blocked, 7 to do." The legend is real text as well.</li>
+        <li>Statuses with no tasks stay in the legend as a muted "0", so the list never changes shape.</li>
+        <li>Not tappable. Filtering by segment is out of scope.</li>
+      </ol>
+    </div>
+    <div class="ann">
+      <h3>Empty states</h3>
+      <ul>
+        <li>No projects in Now: today's empty card, unchanged: Nothing in the "now" lane. Add a project.</li>
+        <li>Projects in Now but no tasks: no donut. The project cards show as today, each with "No tasks yet". An empty ring would say nothing.</li>
+        <li>Everything done: a full green ring, "100% done", with the other three at 0.</li>
+      </ul>
+      <p>SVG sketch: <code>&lt;circle r="50" stroke-width="14" stroke="var(--done)" stroke-dasharray="len gap"&gt;</code> per status, rotated −90°. One status at 100% draws a single full circle with no gap.</p>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Home</span><div id="d-home"></div></div>
+  </div>
+</section>
+
+<!-- ============================== 6 ============================== -->
+<section class="section" id="bell">
+  <h2>6. The bell notice</h2>
+  <p class="lead">Maya had 2 of Website's open tasks. Maya gets one notice, not two. Its kind is a new "closed" icon: a green circle tick in the badge on Ana's avatar. Tapping it opens the roadmap on the Done lane.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · Maya's notifications</span><div id="p-bell"></div></div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Maya's notifications</span><div id="d-bell"></div></div>
+    <div class="ann">
+      <h3>Copy</h3>
+      <table>
+        <tr><th>Who</th><th>Headline · second line</th></tr>
+        <tr><td>Assignee</td><td><b>Ana</b> marked Website done · 2 of your tasks closed</td></tr>
+        <tr><td>Assignee, 1 task</td><td><b>Ana</b> marked Website done · 1 of your tasks closed</td></tr>
+        <tr><td>Project owner</td><td><b>Ana</b> marked Website done · 4 tasks closed</td></tr>
+        <tr><td>Both</td><td>One notice, the assignee version</td></tr>
+        <tr><td>The person closing</td><td>Nothing</td></tr>
+      </table>
+      <p>It uses the existing row: headline on the first line, the count on the second, the time on the right. The kind icon uses <code>--done</code> like notes and replies already do.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 7 ============================== -->
+<section class="section" id="roles">
+  <h2>7. What each role sees</h2>
+  <p class="lead">The bottom of the edit sheet and the done card, for the three roles. Tom owns Wholesale catalogue but is a member. Leo is a member who owns nothing here.</p>
+  <div class="shots">
+    <div class="shot"><span class="shot-label">Edit sheet foot and done card, by role</span><div id="spec-roles"></div></div>
+    <div class="ann">
+      <table>
+        <tr><th></th><th>Owner, admin</th><th>Project's owner</th><th>Other member</th></tr>
+        <tr><td>Edit an open project</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Mark project done</td><td>Yes</td><td>Yes</td><td>No box shown</td></tr>
+        <tr><td>Reopen</td><td>Yes</td><td>Yes</td><td>No button</td></tr>
+        <tr><td>Delete project</td><td>Yes</td><td>No</td><td>No</td></tr>
+        <tr><td>See Done, donut, notices</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      </table>
+      <p>Someone waiting for approval sees none of this. They cannot open Home or the roadmap today.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== 8 ============================== -->
+<section class="section" id="questions">
+  <h2>8. Left open by the brief</h2>
+  <div class="ann ann-wide">
+    <ol>
+      <li><b>There is no project page.</b> The task asked for one. The brief puts the action in the edit sheet. This mockup keeps it that way: the done card is the closed project's view.</li>
+      <li><b>Reopen sends no notice.</b> The brief covers only the close. Maya will see their tasks come back with no word of why. Worth adding a "Ana reopened Website" notice later.</li>
+      <li><b>The donut can drop when you close.</b> Closing Website takes its 8 done tasks out of the count: 62% becomes 61%. That is right for "current work", but someone may expect it to go up.</li>
+      <li><b>The count can change while the confirm is open.</b> The confirm says "4 open tasks". If someone finishes one before Ana taps, the server closes 3. Suggest the toast reports the real number. It does already, "3 tasks closed", so no extra screen.</li>
+      <li><b>The free-text status stays "Active" after a close.</b> It is hidden on done cards and comes back on reopen. Should a close clear it? I would leave it alone.</li>
+      <li><b>Show all</b> reloads the lane with every done project. With hundreds, one long list. Fine for a team of four for years.</li>
+    </ol>
+  </div>
+</section>
+
+<script>
+const COLORS = { Ana: "#c9d76a", Maya: "#6cb6ff", Tom: "#72e5b4", Leo: "#ffb454" };
+const ic = (name, size = 18, cls = "") => `<svg class="ic ${cls}" width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const av = (n, size = "sm") => `<span class="avatar avatar-${size}" style="background:${COLORS[n] || "#e8dfce"}" aria-hidden="true">${n[0]}</span>`;
+function both(html, stack = false) {
+  return `<div class="pair${stack ? " stack" : ""}"><div class="th th-light" data-theme="light">${html}</div><div class="th th-dark" data-theme="dark">${html}</div></div>`;
+}
+const put = (id, html) => { document.getElementById(id).innerHTML = both(html); };
+const putDesk = (id, html) => { document.getElementById(id).innerHTML = both(`<div class="desk-holder">${html}</div>`, true); };
+
+/* ---------- Data: Juniper Tea Co ---------- */
+const WEBSITE = { name: "Website", accent: "#6cb6ff", owner: "Ana", status: "Active", summary: "New shop site with the spring range and online ordering.", done: 8, total: 12, blocked: 1, people: ["Ana", "Maya", "Tom"] };
+const NOW = [
+  WEBSITE,
+  { name: "Spring tea range", accent: "#72e5b4", owner: "Maya", status: "Active", summary: "Five new blends, their packaging and launch photos.", done: 9, total: 14, blocked: 1, people: ["Maya", "Leo"] },
+  { name: "Wholesale catalogue", accent: "#ffb454", owner: "Tom", status: "In review", summary: "Price list and tasting samples for 20 cafés.", done: 14, total: 24, blocked: 1, people: ["Tom", "Ana", "Leo"] },
+];
+const NEXT = [
+  { name: "Tea tasting evenings", accent: "#df85ff", owner: "Leo", status: "Planned", summary: "Monthly tastings in the shop, ticketed.", done: 0, total: 6, blocked: 0 },
+  { name: "Gift box redesign", accent: "#ff758f", owner: "Maya", status: "Planned", summary: "Recyclable boxes for the winter range.", done: 2, total: 5, blocked: 0 },
+];
+const LATER = [
+  { name: "Ship to Europe", accent: "#c9d76a", owner: "Ana", status: "Idea", summary: "Customs, couriers and prices in euros.", done: 0, total: 0, blocked: 0 },
+  { name: "Subscription box", accent: "#6cb6ff", owner: "Leo", status: "Idea", summary: "", done: 0, total: 3, blocked: 0 },
+];
+const DONE_BEFORE = [
+  { name: "Autumn photo shoot", accent: "#ff758f", owner: "Maya", summary: "Product shots for the autumn blends.", date: "21 Oct", by: "Maya", tasks: 7 },
+  { name: "Shop till upgrade", accent: "#c9d76a", owner: "Ana", summary: "New card reader and stock sync.", date: "14 Oct", by: "Ana", tasks: 4 },
+  { name: "Instagram shop", accent: "#df85ff", owner: "Tom", summary: "Tag products in posts and stories.", date: "2 Oct", by: "Tom", tasks: 9 },
+  { name: "Supplier contracts", accent: "#ffb454", owner: "Leo", summary: "Renew the three Darjeeling estates.", date: "19 Sep", by: "Ana", tasks: 6 },
+  { name: "Diwali hampers", accent: "#72e5b4", owner: "Maya", summary: "", date: "3 Sep", by: "Maya", tasks: 11 },
+];
+const WEBSITE_DONE = { name: "Website", accent: "#6cb6ff", owner: "Ana", summary: WEBSITE.summary, date: "25 Oct", by: "Ana", tasks: 12 };
+const DONE_AFTER = [WEBSITE_DONE, ...DONE_BEFORE.slice(0, 4)];
+
+/* ---------- Shell ---------- */
+function sidebar(active, me = "Ana") {
+  const links = [["house", "Home"], ["bell", "Notifications"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["map", "Roadmap"], ["meetings", "Meetings"], ["folder", "Documents"], ["users", "Members"]];
+  return `<nav class="sidebar"><div class="org-switch"><span class="logo">H</span><strong class="truncate-1" style="flex:1;font-size:15px">Juniper Tea Co</strong><span class="meta">${ic("chevrons-up-down", 16)}</span></div>${links.map(([i, l]) => `<a class="side-link"${l === active ? ' aria-current="page"' : ""}>${ic(i, 20)}<span style="flex:1">${l}</span>${l === "Chat" ? '<span class="badge">3</span>' : ""}${l === "Notifications" && me === "Maya" ? '<span class="badge">1</span>' : ""}</a>`).join("")}<div class="side-foot">${av(me, "md")}<span class="truncate-1" style="flex:1;font-size:14px;font-weight:500">${me}</span><span class="icon-btn">${ic("sun-moon", 20)}</span><span class="icon-btn">${ic("log-out", 20)}</span></div></nav>`;
+}
+const desk = (active, main, me, overlay = "") => `<div class="frame-desk">${sidebar(active, me)}<div class="d-main">${main}</div>${overlay}</div>`;
+const phone = (inner) => `<div class="frame-phone"><div class="statusbar"><span>9:41</span><span style="font-size:13px">●●● ▮</span></div><div class="phone-body">${inner}</div><span class="home-ind"></span></div>`;
+function tabbar(cur) {
+  const t = [["house", "Home"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["ellipsis", "More"]];
+  return `<nav class="tabbar">${t.map(([i, l]) => `<a class="tab"${l === cur ? ' aria-current="page"' : ""}><span class="tab-icon">${ic(i, 22)}</span>${l}</a>`).join("")}</nav>`;
+}
+const bell = (dot) => `<a class="icon-btn bell-btn" aria-label="Notifications">${ic("bell", 22)}${dot ? '<span class="bell-dot"></span>' : ""}</a>`;
+const toast = (msg, cls = "") => `<div class="toast-region" role="status"><div class="toast ${cls}">${msg}</div></div>`;
+const sheet = (body, end = false) => `<div class="m-scrim"></div><div class="m-sheet" role="dialog"><div class="sheet-handle"></div><div class="sheet-body${end ? " scroll-end" : ""}">${body}</div></div>`;
+const modal = (body) => `<div class="m-scrim"></div><div class="d-modal" role="dialog"><div class="sheet-body">${body}</div></div>`;
+
+/* ---------- Roadmap cards ---------- */
+function openCard(p, o = {}) {
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  return `<article class="roadmap-card" style="--accent-bar:${p.accent}">
+    <div style="display:flex;align-items:center;gap:10px"><h3 class="truncate-1" style="margin:0;flex:1;font-size:16px;font-weight:700">${p.name}</h3>${av(p.owner)}<span class="icon-btn meta" style="width:36px;height:36px;margin:-8px -8px -8px 0">${ic("pencil", 16)}</span></div>
+    ${p.summary ? `<p style="font-size:14px;line-height:1.6;color:var(--muted)">${p.summary}</p>` : ""}
+    <div style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1;--bar:${p.accent}"><span style="width:${pct}%"></span></span><span class="tnum" style="width:36px;text-align:right;font-size:13px;font-weight:600">${pct}%</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px"><span class="pill">${p.status}</span><span class="pill pill-muted">${p.total ? `${p.done} of ${p.total} tasks done` : "No tasks yet"}</span>${p.blocked ? `<span class="pill pill-blocked">${p.blocked} blocked</span>` : ""}</div>
+  </article>`;
+}
+function closedCard(p, o = {}) {
+  const canReopen = o.reopen !== false;
+  const btn = o.busy
+    ? `<button class="reopen" disabled>${ic("loader-circle", 16, "spin")}Reopening…</button>`
+    : `<button class="reopen" aria-label="Reopen ${p.name}">${ic("rotate-ccw", 15)}Reopen</button>`;
+  return `<article class="roadmap-card is-closed" style="--accent-bar:${p.accent}">
+    <div style="display:flex;align-items:center;gap:10px"><h3 class="truncate-1" style="margin:0;flex:1;font-size:16px;font-weight:700">${p.name}</h3>${av(p.owner)}</div>
+    ${p.summary ? `<p class="truncate-1" style="font-size:14px;color:var(--muted)">${p.summary}</p>` : ""}
+    <div style="display:flex;flex-wrap:wrap;gap:8px"><span class="closed-badge">${ic("status-done", 15)}Done ${p.date}</span><span class="pill pill-muted">${p.tasks} tasks done</span>${o.reopened ? `<span class="status-pill" style="--dot:var(--progress)"><span class="dot"></span>1 open task</span>` : ""}</div>
+    <div class="closed-foot"><span class="meta truncate-1" title="Marked done by ${p.by}">By ${p.by}</span>${canReopen ? btn : ""}</div>
+  </article>`;
+}
+
+const LANE_INFO = {
+  now: ["Now", "What the team is building right now"],
+  next: ["Next", "Starting once the current work lands"],
+  later: ["Later", "Ideas we are keeping for later"],
+  done: ["Done", "Finished projects, newest first"],
+};
+function laneCards(key, s) {
+  if (key === "done") {
+    if (!s.done.length) return `<div class="roadmap-empty">Nothing done yet. Finished projects land here.</div>`;
+    return s.done.map((p) => closedCard(p, { reopen: s.canReopen })).join("") + (s.doneTotal > 5 ? `<a class="roadmap-more">Show all ${s.doneTotal}${ic("chevron-down", 16)}</a>` : "");
+  }
+  const list = s[key];
+  return list.length ? list.map((p) => openCard(p)).join("") : `<div class="roadmap-empty">No projects here yet.</div>`;
+}
+function deskRoadmap(s, me = "Ana", overlay = "") {
+  const cols = ["now", "next", "later", "done"].map((k) => {
+    const n = k === "done" ? s.doneTotal : s[k].length;
+    return `<section class="roadmap-col"><header class="roadmap-col-head"><span style="display:flex;align-items:center;gap:8px"><h2>${LANE_INFO[k][0]}</h2><span class="meta tnum">${n}</span></span><span class="meta">${LANE_INFO[k][1]}</span></header><div class="roadmap-cards">${laneCards(k, s)}</div></section>`;
+  }).join("");
+  const main = `<header class="topbar"><h1>Roadmap</h1><button class="btn btn-primary">${ic("plus", 16)}Project</button></header><main class="d-page"><div class="roadmap four">${cols}</div></main>`;
+  return desk("Roadmap", main, me, overlay + (s.toast ? toast(s.toast) : ""));
+}
+function switcher(s, cur, narrow = false) {
+  const items = ["now", "next", "later", "done"].map((k) => [LANE_INFO[k][0], k === "done" ? s.doneTotal : s[k].length, k]);
+  return `<nav class="segmented${narrow ? " narrow" : ""}" aria-label="Lane">${items.map(([l, n, k]) => `<a${k === cur ? ' aria-current="true"' : ""}><span class="seg-in">${l}<span class="seg-count">${n}</span></span></a>`).join("")}</nav>`;
+}
+function phoneRoadmap(s, cur, extra = "") {
+  return phone(`<header class="topbar"><h1>Roadmap</h1><button class="btn btn-primary">${ic("plus", 16)}Project</button>${bell()}</header><main class="page">${switcher(s, cur)}<p class="meta" style="padding:0 4px;font-size:14px">${LANE_INFO[cur][1]}</p><div class="roadmap-cards">${laneCards(cur, s)}</div></main>${tabbar("More")}${extra}${s.toast ? toast(s.toast) : ""}`);
+}
+
+const BEFORE = { now: NOW, next: NEXT, later: LATER, done: DONE_BEFORE, doneTotal: 13, canReopen: true };
+const AFTER = { now: NOW.slice(1), next: NEXT, later: LATER, done: DONE_AFTER, doneTotal: 14, canReopen: true };
+const EMPTY = { now: NOW, next: NEXT, later: LATER, done: [], doneTotal: 0, canReopen: false };
+
+/* 1 */
+putDesk("d-roadmap", deskRoadmap({ ...AFTER, toast: "Website done. 4 tasks closed." }));
+putDesk("d-roadmap-empty", deskRoadmap(EMPTY, "Tom"));
+
+/* 2 */
+put("p-now", phoneRoadmap(BEFORE, "now"));
+put("p-done", phoneRoadmap(AFTER, "done"));
+put("p-done-empty", phoneRoadmap(EMPTY, "done"));
+document.getElementById("spec-switch").innerHTML = both(`<div class="specimen" style="width:390px"><p class="spec-label">390 · each segment 84px</p>${switcher(AFTER, "done")}<p class="spec-label" style="margin-top:16px">Big counts still fit</p>${switcher({ now: Array(3), next: Array(12), later: Array(12), doneTotal: 128 }, "now")}</div><div class="specimen" style="width:320px;margin-top:16px"><p class="spec-label">Under 360 · count drops under the word</p>${switcher(AFTER, "done", true)}</div>`);
+
+/* 3: the edit form and the confirm */
+function editForm(o = {}) {
+  const role = o.role || "owner";
+  const showClose = role !== "member";
+  const closeBox = showClose ? `<div class="close-row"><div class="close-row-text"><b>Finished with this project?</b><span class="meta">Its 4 open tasks are marked done with it. You can reopen it later.</span></div><button class="btn btn-secondary">${ic("status-done", 17, "done")}Mark project done</button></div>` : "";
+  const del = role === "owner" ? `<button class="btn-text-danger">Delete project</button>` : "";
+  if (o.footOnly) return `<div class="form">${closeBox}<div class="form-foot">${del}<button class="btn btn-secondary">Cancel</button><button class="btn btn-primary">Save project</button></div></div>`;
+  return `<div class="form">
+    <div><h2>Edit project</h2><p class="meta" style="margin-top:4px;font-size:14px">A workstream on the roadmap, with one owner.</p></div>
+    <label class="field"><span class="field-label">Name</span><span class="input">Website</span></label>
+    <div class="grid-3">
+      <label class="field"><span class="field-label">Lane</span><span class="input">Now${ic("chevron-down", 16)}</span></label>
+      <label class="field"><span class="field-label">Status</span><span class="input">Active</span></label>
+      <label class="field"><span class="field-label">Owner</span><span class="input">Ana${ic("chevron-down", 16)}</span></label>
+    </div>
+    <div class="field"><span class="field-label">Colour</span><div class="swatches">${["#ffb454", "#df85ff", "#72e5b4", "#6cb6ff", "#ff758f", "#c9d76a"].map((c) => `<span class="swatch${c === "#6cb6ff" ? " on" : ""}" style="background:${c}"></span>`).join("")}</div></div>
+    <label class="field"><span class="field-label">Summary</span><span class="input textarea">New shop site with the spring range and online ordering.</span></label>
+    ${closeBox}
+    <div class="form-foot">${del}<button class="btn btn-secondary">Cancel</button><button class="btn btn-primary">Save project</button></div>
+  </div>`;
+}
+function confirmStep(o = {}) {
+  const busy = o.busy;
+  return `<div class="confirm">
+    <h2>Mark Website done?</h2>
+    ${o.error ? `<div class="alert alert-error" role="alert">${ic("circle-alert", 18)}<span>Couldn't mark Website done. Nothing was changed. Try again.</span></div>` : ""}
+    <p class="confirm-lead">4 open tasks will be marked done. 1 is blocked.</p>
+    <div class="confirm-pills"><span class="status-pill" style="--dot:var(--progress)"><span class="dot"></span>2 in progress</span><span class="pill pill-blocked">1 blocked</span><span class="status-pill" style="--dot:var(--todo)"><span class="dot"></span>1 to do</span></div>
+    <p class="meta" style="font-size:14px">Maya and Tom get a notice. You can reopen it from Done, and its tasks go back to how they were.</p>
+    <div class="form-foot"><button class="btn btn-secondary"${busy ? " disabled" : ""}>Back</button>${busy ? `<button class="btn btn-primary" disabled>${ic("loader-circle", 16, "spin")}Marking done…</button>` : `<button class="btn btn-primary">${ic("check", 16)}Mark done</button>`}</div>
+  </div>`;
+}
+put("p-edit", phoneRoadmap(BEFORE, "now", sheet(editForm(), true)));
+put("p-confirm", phoneRoadmap(BEFORE, "now", sheet(confirmStep())));
+put("p-confirm-busy", phoneRoadmap(BEFORE, "now", sheet(confirmStep({ busy: true }))));
+put("p-confirm-error", phoneRoadmap(BEFORE, "now", sheet(confirmStep({ error: true }))));
+put("p-after", phoneRoadmap({ ...AFTER, toast: "Website done. 4 tasks closed." }, "now"));
+putDesk("d-edit", deskRoadmap(BEFORE, "Ana", modal(editForm())));
+putDesk("d-confirm", deskRoadmap(BEFORE, "Ana", modal(confirmStep())));
+
+/* 4 */
+const W = 358;
+document.getElementById("spec-closed").innerHTML = both(`<div class="specimen" style="width:${W + 32}px;display:grid;gap:14px">
+  <p class="spec-label">Owner, admin or project owner</p>${closedCard(WEBSITE_DONE)}
+  <p class="spec-label">Reopening</p>${closedCard(WEBSITE_DONE, { busy: true })}
+  <p class="spec-label">A task set back to in progress</p>${closedCard(WEBSITE_DONE, { reopened: true })}
+  <p class="spec-label">Member (not the project owner)</p>${closedCard(DONE_BEFORE[2], { reopen: false })}
+  <p class="spec-label">Done in an earlier year</p>${closedCard({ name: "Christmas market stall", accent: "#ff758f", owner: "Leo", summary: "", date: "12 Dec 2025", by: "Leo", tasks: 5 })}
+</div>`);
+document.getElementById("spec-refuse").innerHTML = both(`<div class="specimen" style="width:${W + 32}px;display:grid;gap:14px;background:var(--surface)">
+  <label class="field"><span class="field-label">Title</span><span class="input">Write the returns page</span></label>
+  <label class="field"><span class="field-label">Project</span><span class="input" aria-invalid="true">Website${ic("chevron-down", 16)}</span><span class="field-error">${ic("circle-alert", 14)}Website is done. Reopen the project first.</span></label>
+  <div class="form-foot"><button class="btn btn-secondary btn-tall">Cancel</button><button class="btn btn-primary btn-tall">Add task</button></div>
+</div><div class="specimen" style="width:${W + 32}px;margin-top:14px;position:relative;height:84px"><div class="toast-region" style="left:16px;right:16px;bottom:16px;justify-items:center"><div class="toast toast-error">Couldn't reopen Website. Try again.</div></div></div>`);
+
+/* 5: the donut */
+const STAT = [["done", "Done"], ["progress", "In progress"], ["blocked", "Blocked"], ["todo", "To do"]];
+function donut(c) {
+  const total = c.done + c.progress + c.blocked + c.todo;
+  const pct = Math.round((c.done / total) * 100);
+  const r = 50, C = 2 * Math.PI * r, gap = 2;
+  const parts = STAT.filter(([k]) => c[k] > 0);
+  let off = 0;
+  const arcs = parts.map(([k]) => {
+    const len = (c[k] / total) * C;
+    const draw = parts.length > 1 ? Math.max(len - gap, 0.5) : C;
+    const s = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--${k})" stroke-width="14" stroke-dasharray="${draw.toFixed(2)} ${(C - draw).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
+    off += len;
+    return s;
+  }).join("");
+  const label = `Now: ${pct}% done. ${c.done} done, ${c.progress} in progress, ${c.blocked} blocked, ${c.todo} to do.`;
+  return `<div class="card donut-card">
+    <svg class="donut" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="${label}">${arcs}<text x="60" y="62" text-anchor="middle" class="donut-pct">${pct}%</text><text x="60" y="80" text-anchor="middle" class="donut-sub">done</text></svg>
+    <div class="donut-side"><div><div class="donut-title">${c.done} of ${total} tasks done</div><div class="meta">In ${c.projects} projects in Now</div></div>
+      <ul class="legend">${STAT.map(([k, l]) => `<li class="${c[k] ? "" : "zero"}"><span class="dot" style="--dot:var(--${k})"></span><span class="lbl">${l}</span><span class="n">${c[k]}</span></li>`).join("")}</ul>
+    </div></div>`;
+}
+const NOWCOUNT = { done: 31, progress: 9, blocked: 3, todo: 7, projects: 3 };
+function homeCard(p) {
+  const pct = Math.round((p.done / p.total) * 100);
+  return `<a class="project-card" style="--accent-bar:${p.accent}"><span style="display:flex;align-items:center;gap:8px"><span class="truncate-1" style="flex:1;font-weight:700">${p.name}</span><span class="pill ${p.blocked ? "pill-blocked" : ""}">${p.status}</span></span><span style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1;--bar:${p.accent}"><span style="width:${pct}%"></span></span><span class="meta tnum">${pct}%</span></span><span style="display:flex;align-items:center;gap:8px"><span class="meta" style="flex:1">${p.done} of ${p.total} done${p.blocked ? ` · <span style="font-weight:600;color:var(--blocked)">${p.blocked} blocked</span>` : ""}</span><span class="avatar-stack">${(p.people || []).map((n) => av(n, "xs")).join("")}</span></span></a>`;
+}
+const statsHtml = (vals) => `<div class="stats">${[["var(--progress)", "Your open tasks"], ["var(--blocked)", "Blocked"], ["var(--accent)", "Due this week"], ["var(--done)", "Unread messages"]].map(([c, l], i) => `<a class="stat" style="--dot:${c}"><span class="stat-icon"><span class="dot dot-ring"></span></span><span><span class="stat-value">${vals[i]}</span><span class="meta">${l}</span></span></a>`).join("")}</div>`;
+const roadmapNow = (cardsCls = "") => `<section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Roadmap: now</h2><a>Full roadmap</a></div>${donut(NOWCOUNT)}<div class="${cardsCls}" style="display:grid;gap:12px">${NOW.map(homeCard).join("")}</div></section>`;
+put("p-home", phone(`<header class="topbar"><h1 style="font-size:17px;flex:1">Juniper Tea Co</h1><a class="icon-btn">${av("Ana")}</a>${bell()}</header><main class="page" style="gap:24px"><div><p class="meta" style="font-size:14px;margin-bottom:4px">Sunday 25 October</p><p style="font-size:28px;font-weight:700;letter-spacing:-0.02em">Good morning, Ana</p></div>${statsHtml([5, 3, 4, 3])}${roadmapNow()}</main>${tabbar("Home")}`));
+document.getElementById("spec-donut").innerHTML = both(`<div class="specimen" style="width:390px;display:grid;gap:10px">
+  <p class="spec-label">Typical: 62%</p>${donut(NOWCOUNT)}
+  <p class="spec-label">After Website is marked done: 61%</p>${donut({ done: 23, progress: 7, blocked: 2, todo: 6, projects: 2 })}
+  <p class="spec-label">Everything done</p>${donut({ done: 19, progress: 0, blocked: 0, todo: 0, projects: 2 })}
+  <p class="spec-label">Projects in Now, no tasks yet: no donut</p><div style="display:grid;gap:12px"><a class="project-card" style="--accent-bar:#df85ff"><span style="display:flex;align-items:center;gap:8px"><span style="flex:1;font-weight:700">Tea tasting evenings</span><span class="pill">Planned</span></span><span style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1"><span style="width:0"></span></span><span class="meta">0%</span></span><span class="meta">No tasks yet</span></a></div>
+  <p class="spec-label">Nothing in Now: today's empty card</p><div class="card empty">Nothing in the "now" lane. <a class="text-link">Add a project</a></div>
+</div>`);
+putDesk("d-home", desk("Home", `<main class="d-page" style="padding-top:24px"><div style="display:flex;align-items:flex-end;gap:12px"><div style="flex:1"><p class="meta" style="font-size:14px;margin-bottom:4px">Sunday 25 October</p><p style="font-size:32px;font-weight:700;letter-spacing:-0.02em">Good morning, Ana</p></div><button class="btn btn-primary">${ic("plus", 16)}New task</button></div>${statsHtml([5, 3, 4, 3])}
+  <div class="home-grid"><div style="display:flex;flex-direction:column;gap:24px">${roadmapNow("cards-3")}
+    <section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>My tasks</h2><a>All tasks</a></div><div class="list">
+      <a class="list-row"><span class="status-progress">${ic("status-progress", 20)}</span><span style="flex:1;min-width:0;display:flex;flex-direction:column"><span class="truncate-1" style="font-weight:600">Write the returns page</span><span class="meta"><span class="dot" style="--dot:#6cb6ff"></span> Website · due Tue</span></span></a>
+      <a class="list-row"><span class="status-blocked">${ic("status-blocked", 20)}</span><span style="flex:1;min-width:0;display:flex;flex-direction:column"><span class="truncate-1" style="font-weight:600">Send samples to Café Lhasa</span><span class="meta"><span class="dot" style="--dot:#ffb454"></span> Wholesale catalogue</span></span></a>
+    </div></section></div>
+    <div style="display:flex;flex-direction:column;gap:24px"><section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Recent chat</h2><a>All chats</a></div><div class="list">
+      <a class="list-row"><span style="display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--chip);color:var(--muted)">${ic("hash", 18)}</span><span style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="display:flex;justify-content:space-between"><b>spring-launch</b><span class="meta">09:12</span></span><span class="truncate-1 meta" style="font-size:14px">Maya: Labels arrive Thursday</span></span><span class="badge">3</span></a>
+      <a class="list-row">${av("Tom", "md")}<span style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="display:flex;justify-content:space-between"><span style="font-weight:600">Tom</span><span class="meta">Yesterday</span></span><span class="truncate-1 meta" style="font-size:14px">Price list is ready for a look</span></span></a>
+    </div></section>
+    <section style="display:flex;flex-direction:column;gap:8px"><div class="section-head"><h2>Latest decision</h2><a>Meetings</a></div><figure class="decision"><blockquote style="margin:0;font-size:15px;font-weight:500;line-height:1.6">Launch the spring range on 1 November, with or without the new gift boxes.</blockquote><figcaption class="meta">Weekly check-in · 21 Oct</figcaption></figure></section></div>
+  </div></main>`));
+
+/* 6: bell */
+function noticeRows() {
+  const rows = [
+    { who: "Ana", head: "marked Website done", sub: "2 of your tasks closed", at: "now", kind: "closed", icon: "status-done", unread: true },
+    { who: "Tom", head: "mentioned you in #spring-launch", sub: "@Maya can you check the label proofs?", at: "09:40", kind: "mention", icon: "at-sign" },
+    { who: "Leo", head: "assigned you to “Order 200 tins”", sub: "Spring tea range", at: "Yesterday", kind: "assigned", icon: "user-round" },
+  ];
+  return `<div class="list">${rows.map((n) => `<button class="list-row notice${n.unread ? " notice-unread" : ""}"><span style="position:relative;flex-shrink:0">${av(n.who, "md")}<span class="notice-kind notice-${n.kind}">${ic(n.icon, 12)}</span></span><span style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-size:15px${n.unread ? ";font-weight:600" : ""}"><strong>${n.who}</strong> ${n.head}</span><span class="truncate-1" style="font-size:14px;color:var(--muted)">${n.sub}</span></span><span class="meta" style="flex-shrink:0;align-self:flex-start;padding-top:2px">${n.at}</span>${n.unread ? '<span class="notice-dot" aria-label="Unread"></span>' : ""}</button>`).join("")}</div>`;
+}
+put("p-bell", phone(`<header class="topbar"><h1>Notifications</h1><button class="btn btn-secondary">${ic("check", 16)}Mark all read</button></header><main class="page">${noticeRows()}</main>${tabbar("More")}`));
+putDesk("d-bell", desk("Notifications", `<header class="topbar"><h1>Notifications</h1><button class="btn btn-secondary">${ic("check", 16)}Mark all read</button></header><main class="d-page"><div style="max-width:760px">${noticeRows()}</div></main>`, "Maya"));
+
+/* 7: roles */
+document.getElementById("spec-roles").innerHTML = both(`<div style="display:flex;flex-wrap:wrap;gap:16px">
+  <div class="specimen" style="width:420px;display:grid;gap:12px;background:var(--surface)"><p class="spec-label">Ana · owner (or Maya · admin)</p>${editForm({ footOnly: true, role: "owner" })}${closedCard(WEBSITE_DONE)}</div>
+  <div class="specimen" style="width:420px;display:grid;gap:12px;background:var(--surface)"><p class="spec-label">Tom · member, owns this project</p>${editForm({ footOnly: true, role: "projectOwner" })}${closedCard(DONE_BEFORE[2])}</div>
+  <div class="specimen" style="width:420px;display:grid;gap:12px;background:var(--surface)"><p class="spec-label">Leo · member, not the owner</p>${editForm({ footOnly: true, role: "member" })}${closedCard(DONE_BEFORE[2], { reopen: false })}</div>
+</div>`);
+
+/* ---------- Desktop frames, scaled to fit ---------- */
+function renderDesk() {
+  document.querySelectorAll(".desk-holder").forEach((h) => {
+    const frame = h.firstElementChild;
+    const avail = h.closest(".shot").clientWidth;
+    const z = Math.min(1440, avail || 1440) / 1440;
+    h.style.width = `${1440 * z}px`;
+    h.style.height = `${900 * z}px`;
+    frame.style.transform = `scale(${z})`;
+  });
+}
+document.querySelectorAll(".scroll-end").forEach((e) => { e.scrollTop = e.scrollHeight; });
+renderDesk();
+addEventListener("resize", renderDesk);
+document.querySelectorAll("[data-mode-set]").forEach((b) => b.addEventListener("click", () => {
+  const m = b.dataset.modeSet;
+  document.body.dataset.mode = m;
+  document.documentElement.dataset.theme = m === "dark" ? "dark" : "light";
+  document.querySelectorAll("[data-mode-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+document.querySelectorAll("[data-view-set]").forEach((b) => b.addEventListener("click", () => {
+  document.body.dataset.view = b.dataset.viewSet;
+  document.querySelectorAll("[data-view-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+</script>
+</body>
+</html>
