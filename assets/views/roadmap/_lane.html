@@ -42,7 +42,7 @@
         {% set more_path = org_url(path="/roadmap?lane=done") if l.show_all else org_url(path="/roadmap?lane=done&all=1") %}
         {% set more_list = org_url(path="/roadmap/list?lane=done") if l.show_all else org_url(path="/roadmap/list?lane=done&all=1") %}
         <a class="roadmap-more" href="{{ more_path }}"
-           hx-get="{{ more_list }}" hx-target="#roadmap-lane" hx-swap="outerHTML" hx-push-url="{{ more_path }}">{% if l.show_all %}Show newest 5{% else %}Show all {{ l.count }}{{<icon name="chevron-down" class="h-4 w-4"/>}}{% endif %}</a>
+           hx-get="{{ more_list }}" hx-target="#roadmap-lane" hx-swap="outerHTML" hx-push-url="{{ more_path }}">{% if l.show_all %}Show newest {{ l.shown }}{% else %}Show all {{ l.count }}{{<icon name="chevron-down" class="h-4 w-4"/>}}{% endif %}</a>
         {% endif %}
         {% else %}
         {% for card in l.cards %}

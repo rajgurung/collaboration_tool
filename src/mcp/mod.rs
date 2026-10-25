@@ -37,7 +37,8 @@ use crate::{
 const INSTRUCTIONS: &str = "Collab Tool is a small team's workspace. Tasks usually belong to a \
 project; a task with no project is a chore. Projects sit in roadmap lanes: now, next or later. \
 A project can be marked done in the web app; list_projects shows it as closed, a closed project \
-is not current work whatever its lane, and it takes no new tasks. Task statuses are todo, progress, blocked and done; priorities are high, medium and low. A \
+is not current work whatever its lane, and it takes no new tasks. Task statuses are todo, \
+progress, blocked and done; priorities are high, medium and low. A \
 project's status is free text such as \"Active\" or \"Planned\". People are referred to by \
 username; \"me\" means the person you are acting for. Changes notify teammates exactly as they \
 would in the web app.";

@@ -190,6 +190,7 @@ async fn lane_data(
         "current": lane == DONE,
         "cards": cards,
         "more": count > DONE_SHOWN,
+        "shown": DONE_SHOWN,
         "show_all": show_all,
     }));
     Ok(serde_json::json!({ "lane": lane, "lanes": lanes, "show_all": show_all }))
@@ -472,7 +473,14 @@ async fn close(
     closable(&ctx, &member, id).await?;
     let closed = projects::Model::close(&ctx.db, member.org.id, id, member.user.id).await?;
     if !closed.already {
-        super::notifications::project_closed(&ctx, &member, &closed.project, &closed.tasks).await?;
+        // The close is already committed, so a failed notice must not turn
+        // the reply into "nothing was changed".
+        if let Err(err) =
+            super::notifications::project_closed(&ctx, &member, &closed.project, &closed.tasks)
+                .await
+        {
+            tracing::error!(error = %err, project_id = id, "could not send the closed notices");
+        }
     }
     let name = &closed.project.name;
     tracing::info!(
