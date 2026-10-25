@@ -1,0 +1,17 @@
+{# The tasks in the open "now" projects, by status. Colours come from classes so they follow dark mode. #}
+<div class="card donut-card">
+  <svg class="donut" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="{{ donut.label }}">
+    {% for a in donut.arcs %}<circle class="donut-arc donut-{{ a.key }}" cx="60" cy="60" r="50" fill="none" stroke-width="14" stroke-dasharray="{{ a.dash }} {{ a.gap }}" stroke-dashoffset="{{ a.offset }}" transform="rotate(-90 60 60)"/>{% endfor %}
+    <text x="60" y="62" text-anchor="middle" class="donut-pct">{{ donut.pct }}%</text>
+    <text x="60" y="80" text-anchor="middle" class="donut-sub">done</text>
+  </svg>
+  <div class="donut-side">
+    <div>
+      <div class="donut-title">{{ donut.done }} of {{ donut.total }} tasks done</div>
+      <div class="meta">In {{ now_projects }} {% if now_projects == 1 %}project{% else %}projects{% endif %} in Now</div>
+    </div>
+    <ul class="legend">
+      {% for s in donut.legend %}<li {% if s.count == 0 %}class="zero"{% endif %}><span class="dot" style="--dot: var(--{{ s.key }})"></span><span class="lbl">{{ s.label }}</span><span class="n">{{ s.count }}</span></li>{% endfor %}
+    </ul>
+  </div>
+</div>

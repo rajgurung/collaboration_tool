@@ -61,6 +61,7 @@
       <section class="flex flex-col gap-2">
         <div class="section-head"><h2>Roadmap: now</h2><a href="{{ org_url(path="/roadmap") }}">Full roadmap</a></div>
         {% if roadmap_now | length > 0 %}
+        {% if donut %}{% include "dashboard/_donut.html" %}{% endif %}
         <div class="grid gap-3 sm:grid-cols-2 min-[1200px]:grid-cols-3">
           {% for p in roadmap_now %}
           <a href="{{ org_url(path="/roadmap") }}" class="project-card" style="--accent-bar: {{ p.accent }}">

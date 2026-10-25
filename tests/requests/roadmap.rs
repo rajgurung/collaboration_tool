@@ -81,7 +81,7 @@ async fn creating_a_project_shows_it_in_its_lane() {
             .unwrap()
             .contains("Design system"));
         assert!(page.contains(r#"data-lane="now" data-current"#));
-        assert!(page.contains("Next 1"));
+        assert!(page.contains(r#"Next<span class="seg-count">1</span>"#));
     })
     .await;
 }
@@ -101,7 +101,7 @@ async fn invalid_projects_rerender_the_form_with_errors() {
             .form(&form)
             .await;
         assert_eq!(res.status_code(), 422);
-        assert_eq!(res.headers().get("HX-Retarget").unwrap(), "#project-form");
+        assert_eq!(res.headers().get("HX-Retarget").unwrap(), "#project-sheet");
         let body = res.text();
         for message in [
             "Give the project a name",

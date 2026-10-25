@@ -22,6 +22,7 @@ pub struct Model {
     /// serialized, so no uuid reaches a page.
     #[serde(skip)]
     pub claude_grant_id: Option<Uuid>,
+    pub status_before_close: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

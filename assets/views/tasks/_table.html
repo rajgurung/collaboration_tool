@@ -11,6 +11,7 @@
       {{<icon name="chevron-right" class="lane-chevron h-4 w-4"/>}}
       {% if lane.person %}{{<avatar name={lane.name} color={lane.color} size="xs"/>}}{% else %}<span class="lane-mark" style="--dot: {{ lane.color }}"></span>{% endif %}
       <span class="lane-name">{{ lane.name }}</span>
+      {% if lane.closed %}<span class="lane-done">{{<icon name="status-done" class="h-3.5 w-3.5"/>}}Done</span>{% endif %}
       <span class="meta">{{ lane.total }} {% if lane.total == 1 %}task{% else %}tasks{% endif %} · {{ lane.done }} done</span>
       <span class="lane-progress" aria-hidden="true"><span style="width: {{ lane.pct }}%; background: {{ lane.color }}"></span></span>
       <span class="meta tabular-nums w-9 text-right">{{ lane.pct }}%</span>

@@ -8,7 +8,7 @@ use crate::{
     controllers::chat,
     extractors::current_member::CurrentMember,
     models::{guide, meetings, memberships, organisations, projects, task_assignees, tasks},
-    views::{layout::avatar_color, time},
+    views::{donut, layout::avatar_color, time},
 };
 
 /// How many of your open tasks Home lists.
@@ -138,10 +138,29 @@ async fn index(
         .filter(|t| t.status != "done" && t.due_on.is_some_and(|d| d <= week_end))
         .count();
 
+    // The donut: the tasks in the open "now" projects, by status. Chores and
+    // closed projects are left out, so it measures current work.
+    let now_ids: Vec<i64> = all_projects
+        .iter()
+        .filter(|p| p.in_lane("now"))
+        .map(|p| p.id)
+        .collect();
+    let now_tasks: Vec<&tasks::Model> = all_tasks
+        .iter()
+        .filter(|t| t.project_id.is_some_and(|id| now_ids.contains(&id)))
+        .collect();
+    let count = |status: &str| now_tasks.iter().filter(|t| t.status == status).count();
+    let donut = donut::of(
+        count("done"),
+        count("progress"),
+        count("blocked"),
+        count("todo"),
+    );
+
     // The "now" lane: progress from finished tasks, stuck work, and who is on it.
     let roadmap_now: Vec<serde_json::Value> = all_projects
         .iter()
-        .filter(|p| p.lane == "now")
+        .filter(|p| p.in_lane("now"))
         .map(|p| {
             let theirs: Vec<&tasks::Model> = all_tasks
                 .iter()
@@ -224,6 +243,8 @@ async fn index(
                 "unread": unread,
                 "my_tasks": my_tasks,
                 "roadmap_now": roadmap_now,
+                "donut": donut,
+                "now_projects": now_ids.len(),
                 "recent_chats": recent,
                 "decision": decision,
                 "guide": guide,

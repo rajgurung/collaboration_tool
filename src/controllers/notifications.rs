@@ -259,6 +259,69 @@ pub async fn project_saved(
     Ok(())
 }
 
+/// After a project is marked done: one notice per person, not one per task.
+/// Each assignee of a task the close changed hears how many of theirs it
+/// closed; the project's owner, if not told already, hears the total. Only
+/// people on the team. Never `task_saved`, which would send one per task.
+///
+/// # Errors
+/// On database errors.
+pub async fn project_closed(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    project: &projects::Model,
+    closed: &[tasks::Model],
+) -> Result<()> {
+    let org_id = member.org.id;
+    let team: Vec<i64> = memberships::Model::team(&ctx.db, org_id)
+        .await?
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    let assignees = task_assignees::Model::by_task(&ctx.db, org_id).await?;
+    // Per person, in the order first met.
+    let mut counts: Vec<(i64, usize)> = Vec::new();
+    for user in closed
+        .iter()
+        .filter_map(|t| assignees.get(&t.id))
+        .flatten()
+        .filter(|id| team.contains(id))
+    {
+        match counts.iter_mut().find(|(id, _)| id == user) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((*user, 1)),
+        }
+    }
+    let headline = format!("marked {} done", project.name);
+    let link = "/roadmap?lane=done".to_string();
+    let mut told = Vec::new();
+    for (user, n) in counts {
+        let notice = Notice {
+            kind: kind::CLOSED,
+            body: format!("{headline}\n{n} of your tasks closed"),
+            link: link.clone(),
+        };
+        told.extend(send(ctx, org_id, member.user.id, &[user], &notice).await?);
+    }
+    let owner = project
+        .owner_id
+        .filter(|id| team.contains(id) && !told.contains(id));
+    if let Some(owner) = owner {
+        let body = match closed.len() {
+            0 => headline,
+            1 => format!("{headline}\n1 task closed"),
+            n => format!("{headline}\n{n} tasks closed"),
+        };
+        let notice = Notice {
+            kind: kind::CLOSED,
+            body,
+            link,
+        };
+        send(ctx, org_id, member.user.id, &[owner], &notice).await?;
+    }
+    Ok(())
+}
+
 /// After a chat message is saved: tells mentioned people who can see the
 /// conversation. Mentioning someone outside a group or DM does nothing.
 /// `@everyone` tells the conversation's other members, once each; people also

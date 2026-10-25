@@ -23,6 +23,8 @@ pub struct Model {
     /// serialized, so no uuid reaches a page.
     #[serde(skip)]
     pub claude_grant_id: Option<Uuid>,
+    pub closed_at: Option<DateTimeWithTimeZone>,
+    pub closed_by_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

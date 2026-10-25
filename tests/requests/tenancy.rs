@@ -228,6 +228,8 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/roadmap/projects/{}", globex.project.id), serde_json::json!({
                 "name": "hijacked", "lane": "now", "status": "x", "accent": "#ffb454", "owner_id": "", "summary": ""
             })),
+            (format!("/roadmap/projects/{}/close", globex.project.id), serde_json::json!({})),
+            (format!("/roadmap/projects/{}/reopen", globex.project.id), serde_json::json!({})),
             (format!("/tasks/{}/status", globex.task.id), serde_json::json!({ "status": "done" })),
             (format!("/tasks/{}", globex.task.id), serde_json::json!({ "title": "hijacked", "project_id": "1", "priority": "high" })),
             (format!("/tasks/{}/delete", globex.task.id), serde_json::json!({})),

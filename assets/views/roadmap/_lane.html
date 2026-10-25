@@ -1,7 +1,7 @@
 <div id="roadmap-lane" class="flex flex-col gap-3"
-     hx-get="{{ org_url(path="/roadmap/list?lane=" ~ (lane)) }}" hx-trigger="roadmap-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
+     hx-get="{{ org_url(path="/roadmap/list?lane=" ~ (lane)) }}{% if show_all %}&all=1{% endif %}" hx-trigger="roadmap-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
   <nav class="segmented mobile-only" aria-label="Lane">
-    {% for l in lanes %}<a href="{{ org_url(path="/roadmap?lane=" ~ (l.key)) }}" {% if l.current %}aria-current="true"{% endif %}>{{ l.label }} {{ l.count }}</a>{% endfor %}
+    {% for l in lanes %}<a href="{{ org_url(path="/roadmap?lane=" ~ (l.key)) }}" {% if l.current %}aria-current="true"{% endif %}><span class="seg-in">{{ l.label }}<span class="seg-count">{{ l.count }}</span></span></a>{% endfor %}
   </nav>
   <div class="roadmap">
     {% for l in lanes %}
@@ -12,6 +12,39 @@
       </header>
       <p class="meta m-0 px-1 text-sm mobile-only">{{ l.hint }}</p>
       <div class="roadmap-cards">
+        {% if l.key == "done" %}
+        {% for card in l.cards %}
+        <article class="roadmap-card is-closed" style="--accent-bar: {{ card.accent }}">
+          <div class="flex items-center gap-2.5">
+            <h3 class="truncate-1 m-0 flex-1 text-base font-bold">{{ card.name }}</h3>
+            {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} size="sm"/>}}{% endif %}
+          </div>
+          {% if card.summary %}<p class="truncate-1 m-0 text-sm text-muted">{{ card.summary }}</p>{% endif %}
+          <div class="flex flex-wrap gap-2">
+            <span class="closed-badge">{{<icon name="status-done" class="h-[15px] w-[15px]"/>}}Done {{ card.closed_on }}</span>
+            {% if card.done_count == 0 and card.open_count == 0 %}<span class="pill font-medium text-muted">No tasks</span>
+            {% elif card.done_count > 0 %}<span class="pill font-medium text-muted">{{ card.done_count }} {% if card.done_count == 1 %}task{% else %}tasks{% endif %} done</span>{% endif %}
+            {% if card.open_count > 0 %}<span class="status-pill" style="--dot: var(--progress)"><span class="dot"></span>{{ card.open_count }} open {% if card.open_count == 1 %}task{% else %}tasks{% endif %}</span>{% endif %}
+          </div>
+          {% if card.closed_by or card.can_reopen %}
+          <div class="closed-foot">
+            {% if card.closed_by %}<span class="meta truncate-1" title="Marked done by {{ card.closed_by }}"><span aria-hidden="true">By {{ card.closed_by }}</span><span class="sr-only">Marked done by {{ card.closed_by }}</span></span>{% else %}<span class="meta"></span>{% endif %}
+            {% if card.can_reopen %}<button type="button" class="reopen" aria-label="Reopen {{ card.name }}"
+                    hx-post="{{ org_url(path="/roadmap/projects/" ~ (card.id) ~ "/reopen") }}" hx-disabled-elt="this"
+                    data-reopen data-name="{{ card.name }}"><span class="reopen-idle">{{<icon name="rotate-ccw" class="h-[15px] w-[15px]"/>}}Reopen</span><span class="reopen-busy">{{<icon name="loader-circle" class="spin h-4 w-4"/>}}Reopening…</span></button>{% endif %}
+          </div>
+          {% endif %}
+        </article>
+        {% else %}
+        <div class="roadmap-empty">Nothing done yet. Finished projects land here.</div>
+        {% endfor %}
+        {% if l.more %}
+        {% set more_path = org_url(path="/roadmap?lane=done") if l.show_all else org_url(path="/roadmap?lane=done&all=1") %}
+        {% set more_list = org_url(path="/roadmap/list?lane=done") if l.show_all else org_url(path="/roadmap/list?lane=done&all=1") %}
+        <a class="roadmap-more" href="{{ more_path }}"
+           hx-get="{{ more_list }}" hx-target="#roadmap-lane" hx-swap="outerHTML" hx-push-url="{{ more_path }}">{% if l.show_all %}Show newest {{ l.shown }}{% else %}Show all {{ l.count }}{{<icon name="chevron-down" class="h-4 w-4"/>}}{% endif %}</a>
+        {% endif %}
+        {% else %}
         {% for card in l.cards %}
         <article class="roadmap-card" style="--accent-bar: {{ card.accent }}">
           <div class="flex items-center gap-2.5">
@@ -19,7 +52,7 @@
             {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} size="sm"/>}}{% endif %}
             <button type="button" class="icon-btn -my-2 -mr-2 h-9 w-9 text-muted" aria-label="Edit {{ card.name }}"
                     hx-get="{{ org_url(path="/roadmap/projects/" ~ (card.id) ~ "/edit") }}" hx-target="#project-dialog-body"
-                    hx-on::after-request="document.getElementById('project-dialog').showModal()">{{<icon name="pencil" class="h-4 w-4"/>}}</button>
+                    hx-on::after-request="if (event.detail.successful) document.getElementById('project-dialog').showModal()">{{<icon name="pencil" class="h-4 w-4"/>}}</button>
           </div>
           {% if card.summary %}<p class="m-0 text-sm leading-relaxed text-muted">{{ card.summary }}</p>{% endif %}
           <div class="flex items-center gap-2.5">
@@ -35,6 +68,7 @@
         {% else %}
         <div class="roadmap-empty">No projects here yet.</div>
         {% endfor %}
+        {% endif %}
       </div>
     </section>
     {% endfor %}
