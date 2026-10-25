@@ -9,7 +9,7 @@ pub use super::_entities::messages::{ActiveModel, Column, Entity, Model};
 use super::{
     conversation_members::ReadSpan,
     conversations::{self, kind},
-    documents, folders,
+    documents, folders, notifications,
 };
 
 pub type Messages = Entity;
@@ -48,12 +48,34 @@ pub const PHOTO_TYPES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
 pub const NOT_A_PHOTO: &str = "Only photos can be posted here. Use a JPG, PNG or WebP.";
 pub const PHOTOS_NOT_HERE: &str = "Photos can't be posted here.";
 
-/// The sender, owners and admins may delete a message's photo, as with a
-/// Documents file. The caller must already know the person is in the
-/// conversation.
+/// The sender, owners and admins may delete a message, or its photo, as
+/// with a Documents file. The caller must already know the person is in the
+/// conversation. A message with replies has one more rule:
+/// [`may_delete_message`].
 #[must_use]
-pub fn may_delete_photo(sender_id: i64, user_id: i64, can_manage: bool) -> bool {
+pub fn may_delete(sender_id: i64, user_id: i64, can_manage: bool) -> bool {
     can_manage || sender_id == user_id
+}
+
+/// Shown, and returned with a 403, when the sender tries to delete a
+/// message that has replies.
+pub const HAS_REPLIES: &str = "This has replies. Ask an owner or admin to delete it.";
+
+/// Whether this person may delete a message with `replies` replies: owners
+/// and admins any, the sender only one with none. The caller must already
+/// know the person is in the conversation.
+#[must_use]
+pub fn may_delete_message(sender_id: i64, user_id: i64, can_manage: bool, replies: u64) -> bool {
+    can_manage || (sender_id == user_id && replies == 0)
+}
+
+/// What [`Model::delete_message`] removed besides the message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deleted {
+    /// Replies that went with a thread parent.
+    pub replies: u64,
+    /// Who had bell notices about the message or its replies.
+    pub notified: Vec<i64>,
 }
 
 /// Where a message's photo is stored.
@@ -240,23 +262,32 @@ impl Model {
     /// parent must be in this conversation and organisation. The caller must
     /// already know the sender is a member.
     ///
+    /// The reply is saved under a lock on the parent ([`Self::lock_live`]), so
+    /// a delete of the parent either counts it or happens first, and then
+    /// this is refused.
+    ///
     /// # Errors
-    /// `EntityNotFound` for a parent that is a reply or belongs elsewhere,
-    /// validation errors, or database errors.
-    pub async fn create_reply<C: ConnectionTrait>(
-        db: &C,
+    /// `EntityNotFound` for a parent that is a reply, belongs elsewhere or
+    /// was deleted; validation errors, or database errors.
+    pub async fn create_reply(
+        db: &DatabaseConnection,
         conversation: &conversations::Model,
         parent: &Self,
         user_id: i64,
         params: &MessageParams,
     ) -> ModelResult<Self> {
-        if parent.conversation_id != conversation.id
-            || parent.organisation_id != conversation.organisation_id
-            || parent.parent_id.is_some()
-        {
+        let txn = db.begin().await?;
+        let live = Self::lock_live(&txn, conversation.organisation_id, parent.id).await?;
+        let Some(parent) = live.filter(|p| {
+            p.conversation_id == conversation.id
+                && p.organisation_id == conversation.organisation_id
+                && p.parent_id.is_none()
+        }) else {
             return Err(ModelError::EntityNotFound);
-        }
-        Self::insert(db, conversation, Some(parent.id), user_id, params).await
+        };
+        let reply = Self::insert(&txn, conversation, Some(parent.id), user_id, params).await?;
+        txn.commit().await?;
+        Ok(reply)
     }
 
     /// Saves a photo message, with an optional caption. The caller must
@@ -442,7 +473,7 @@ impl Model {
     /// The stored bytes go first, then the row: if storage fails nothing has
     /// changed and the delete can be tried again. A photo that is already
     /// gone is not an error. The caller checks membership and
-    /// [`may_delete_photo`].
+    /// [`may_delete`].
     ///
     /// # Errors
     /// `EntityNotFound` for a message that never had a photo, or a #general
@@ -495,6 +526,96 @@ impl Model {
                 ))
             }
         }
+    }
+
+    /// How many replies this message's thread has.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn reply_count<C: ConnectionTrait>(&self, db: &C) -> ModelResult<u64> {
+        Ok(Entity::find()
+            .in_tenant(self.organisation_id)
+            .filter(Column::ParentId.eq(self.id))
+            .count(db)
+            .await?)
+    }
+
+    /// Deletes this message for everyone, for good, with its photo,
+    /// reactions and bell notices; a thread parent takes its replies, and
+    /// theirs. `by_manager` is an owner or admin; anyone else may delete only
+    /// a message with no replies, checked again under the lock. Returns how
+    /// many replies went, and who had notices about them, for their badges.
+    ///
+    /// The photo goes first, as [`Self::delete_photo`] does it (bytes, then
+    /// the row), because storage can't join a transaction. The rest is one
+    /// transaction, and the database cascades replies, reactions and
+    /// notices. Replies never carry photos, so the cascade leaves no bytes
+    /// behind. The caller checks membership and [`may_delete`].
+    ///
+    /// # Errors
+    /// `Message(HAS_REPLIES)` when the sender's message has replies;
+    /// `EntityNotFound` when it is already gone; storage or database errors,
+    /// including a lock wait of more than 5 seconds.
+    pub async fn delete_message(self, ctx: &AppContext, by_manager: bool) -> ModelResult<Deleted> {
+        if !by_manager && self.reply_count(&ctx.db).await? > 0 {
+            return Err(ModelError::msg(HAS_REPLIES));
+        }
+        if self.photo_file().is_some() {
+            match self.clone().delete_photo(ctx).await {
+                Ok(_) => {}
+                // A #general file that is no longer a photo type. It can't
+                // happen today: a file's type is set only at upload, and chat
+                // uploads are sniffed to photo types. If it ever did, this
+                // chat must not delete someone's Documents file, so it stays
+                // there and the message goes without it.
+                Err(ModelError::EntityNotFound) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        let txn = ctx.db.begin().await?;
+        txn.execute_unprepared("SET LOCAL lock_timeout = '5s'")
+            .await?;
+        let message = Entity::find()
+            .in_tenant(self.organisation_id)
+            .filter(Column::Id.eq(self.id))
+            .filter(Column::ConversationId.eq(self.conversation_id))
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        // A reply that committed since the first count is seen here; one
+        // still saving holds FOR SHARE on this row, so the lock above waited.
+        let replies = message.reply_count(&txn).await?;
+        if !by_manager && replies > 0 {
+            return Err(ModelError::msg(HAS_REPLIES));
+        }
+        let reply_ids = Entity::find()
+            .in_tenant(message.organisation_id)
+            .filter(Column::ParentId.eq(message.id))
+            .select_only()
+            .column(Column::Id)
+            .into_tuple::<i64>()
+            .all(&txn)
+            .await?;
+        let mut notified: Vec<i64> = notifications::Entity::find()
+            .filter(notifications::Column::OrganisationId.eq(message.organisation_id))
+            .filter(
+                notifications::Column::MessageId
+                    .is_in(std::iter::once(message.id).chain(reply_ids)),
+            )
+            .select_only()
+            .column(notifications::Column::UserId)
+            .into_tuple::<i64>()
+            .all(&txn)
+            .await?;
+        notified.sort_unstable();
+        notified.dedup();
+        Entity::delete_by_id(message.id)
+            .filter(Column::OrganisationId.eq(message.organisation_id))
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
+        Ok(Deleted { replies, notified })
     }
 
     async fn insert<C: ConnectionTrait>(
@@ -648,8 +769,20 @@ mod tests {
 
     #[test]
     fn the_sender_owners_and_admins_may_delete_a_photo() {
-        assert!(may_delete_photo(3, 3, false), "the sender");
-        assert!(may_delete_photo(3, 1, true), "an owner or admin");
-        assert!(!may_delete_photo(3, 4, false), "another member");
+        assert!(may_delete(3, 3, false), "the sender");
+        assert!(may_delete(3, 1, true), "an owner or admin");
+        assert!(!may_delete(3, 4, false), "another member");
+    }
+
+    #[test]
+    fn only_owners_and_admins_delete_a_message_with_replies() {
+        assert!(may_delete_message(3, 3, false, 0), "the sender, no replies");
+        assert!(!may_delete_message(3, 3, false, 2), "the sender, replies");
+        assert!(may_delete_message(3, 1, true, 0), "an owner or admin");
+        assert!(
+            may_delete_message(3, 1, true, 3),
+            "an owner or admin, replies"
+        );
+        assert!(!may_delete_message(3, 4, false, 0), "another member");
     }
 }

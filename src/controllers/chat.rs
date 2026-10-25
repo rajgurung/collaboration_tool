@@ -298,7 +298,7 @@ impl MessageView {
     /// Offers Delete on the photo to its sender, and to owners and admins.
     pub fn allow_photo_delete(&mut self, viewer_id: i64, can_manage: bool) {
         self.can_delete_photo =
-            self.photo && messages::may_delete_photo(self.author_id, viewer_id, can_manage);
+            self.photo && messages::may_delete(self.author_id, viewer_id, can_manage);
     }
 
     /// Fills in the reactions as `viewer_id` sees them.
@@ -884,7 +884,7 @@ async fn delete_photo(
     }
     let refused =
         || forbidden("Only the person who sent a photo, owners and admins can delete it.");
-    if !messages::may_delete_photo(message.user_id, member.user.id, member.can_manage()) {
+    if !messages::may_delete(message.user_id, member.user.id, member.can_manage()) {
         return Err(refused());
     }
     // A #general photo is a Documents file: its own rule must agree too.
