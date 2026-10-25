@@ -598,6 +598,14 @@ async fn delete_file(
     let chat_photo = messages::Model::for_document(&ctx.db, member.org.id, file.id).await?;
     file.delete_file(&ctx).await?;
     if let Some(message) = chat_photo {
+        tracing::info!(
+            org_id = member.org.id,
+            conversation_id = message.conversation_id,
+            message_id = message.id,
+            actor_id = member.user.id,
+            by_manager = message.user_id != member.user.id,
+            "chat photo deleted from Documents"
+        );
         if let Err(err) = super::chat_ws::publish_photo_removed(&ctx, &message) {
             tracing::error!(error = %err, message_id = message.id, "could not broadcast a removed photo");
         }
