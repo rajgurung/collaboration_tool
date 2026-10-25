@@ -27,18 +27,18 @@ use super::{
 };
 
 /// Shows up in a response body if stored bytes leak.
-const SECRET: &[u8] = b"ACME-PRIVATE-RECEIPT";
+pub(super) const SECRET: &[u8] = b"ACME-PRIVATE-RECEIPT";
 
 /// A PNG that ends with [`SECRET`].
-fn secret_png() -> Vec<u8> {
+pub(super) fn secret_png() -> Vec<u8> {
     [PNG, SECRET].concat()
 }
 
-fn leaks(body: &[u8]) -> bool {
+pub(super) fn leaks(body: &[u8]) -> bool {
     body.windows(SECRET.len()).any(|w| w == SECRET)
 }
 
-async fn send_photo(
+pub(super) async fn send_photo(
     request: &TestServer,
     who: &TestMember,
     conversation_id: i64,
@@ -58,11 +58,11 @@ async fn send_photo(
         .await
 }
 
-fn photo_path(conversation_id: i64, message_id: i64) -> String {
+pub(super) fn photo_path(conversation_id: i64, message_id: i64) -> String {
     format!("/chat/{conversation_id}/photos/{message_id}")
 }
 
-async fn open_photo(
+pub(super) async fn open_photo(
     request: &TestServer,
     who: &TestMember,
     conversation_id: i64,
@@ -74,7 +74,7 @@ async fn open_photo(
         .await
 }
 
-async fn page(request: &TestServer, who: &TestMember, path: &str) -> String {
+pub(super) async fn page(request: &TestServer, who: &TestMember, path: &str) -> String {
     request
         .get(&who.at(path))
         .add_header(who.cookie.0.clone(), who.cookie.1.clone())
@@ -88,7 +88,7 @@ async fn only_message(ctx: &AppContext) -> messages::Model {
     all.into_iter().next().unwrap()
 }
 
-async fn latest_message(ctx: &AppContext) -> messages::Model {
+pub(super) async fn latest_message(ctx: &AppContext) -> messages::Model {
     messages::Entity::find()
         .all(&ctx.db)
         .await
@@ -99,7 +99,7 @@ async fn latest_message(ctx: &AppContext) -> messages::Model {
 }
 
 /// Every file stored under an organisation's chat area.
-async fn stored_chat_files(ctx: &AppContext, org_id: i64) -> Vec<String> {
+pub(super) async fn stored_chat_files(ctx: &AppContext, org_id: i64) -> Vec<String> {
     ctx.storage
         .list(Path::new(&format!("orgs/{org_id}/chat")), true)
         .await
@@ -116,7 +116,7 @@ async fn nothing_saved(ctx: &AppContext, org_id: i64) {
     assert!(stored_chat_files(ctx, org_id).await.is_empty());
 }
 
-async fn group_of(
+pub(super) async fn group_of(
     ctx: &AppContext,
     org_id: i64,
     creator_id: i64,

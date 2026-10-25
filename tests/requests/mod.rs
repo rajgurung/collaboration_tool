@@ -18,6 +18,7 @@ pub mod timezone;
 pub mod meetings;
 
 pub mod chat;
+pub mod chat_photo_delete;
 pub mod chat_photos;
 pub mod chat_reactions;
 pub mod chat_threads;

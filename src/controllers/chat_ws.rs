@@ -38,6 +38,9 @@ struct Session {
     hub: ChatHub,
     org_id: i64,
     user_id: i64,
+    /// An owner or admin when the socket opened, for the Delete on photos.
+    /// Display only: the delete route checks the role on every request.
+    can_manage: bool,
     /// The session version this socket was opened with.
     session_version: i32,
     /// The organisation's slug, for the links in the fragments it renders
@@ -103,6 +106,7 @@ async fn connect(
         hub,
         org_id: member.org.id,
         user_id: member.user.id,
+        can_manage: member.can_manage(),
         session_version: member.user.session_version,
         org_slug: member.org.slug.clone(),
         conversation_id: conversation.id,
@@ -202,6 +206,16 @@ async fn run(mut socket: WebSocket, session: Session) {
                             }
                         }
                         Err(err) => tracing::error!(error = %err, "could not render reactions"),
+                    }
+                }
+                Ok(ChatEvent::PhotoRemoved { message_id, .. }) => {
+                    match render_photo_removed(&session, message_id) {
+                        Ok(html) => {
+                            if socket.send(Message::Text(html.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(err) => tracing::error!(error = %err, "could not render a removed photo"),
                     }
                 }
                 Ok(event @ ChatEvent::Read { .. }) => {
@@ -383,6 +397,22 @@ pub fn publish_reactions(
     Ok(())
 }
 
+/// Announces that a message's photo was deleted, to every socket following
+/// its conversation. Carries only ids.
+///
+/// # Errors
+/// When the hub is missing.
+pub fn publish_photo_removed(ctx: &AppContext, message: &messages::Model) -> Result<()> {
+    ctx.shared_store
+        .get::<ChatHub>()
+        .ok_or_else(|| Error::string("chat hub missing"))?
+        .publish(ChatEvent::PhotoRemoved {
+            conversation_id: message.conversation_id,
+            message_id: message.id,
+        });
+    Ok(())
+}
+
 /// Marks a conversation read for `reader_id` and tells everyone who sees the
 /// receipts of the messages that read covered (see [`receipts_for`]) who has
 /// now read them.
@@ -434,9 +464,22 @@ pub async fn mark_read(
 fn render(session: &Session, author_id: i64, mut message: MessageView) -> Result<String> {
     message.own = author_id == session.user_id;
     message.read_receipts = shows_receipt(&session.conversation_kind, message.own);
+    message.allow_photo_delete(session.user_id, session.can_manage);
     session.view.render(
         "chat/_message_oob.html",
         session.fragment(data!({ "message": message })),
+    )
+}
+
+/// "Photo removed" in place of the photo, as an out-of-band swap of
+/// `#photo-{id}`. The same for every viewer.
+fn render_photo_removed(session: &Session, message_id: i64) -> Result<String> {
+    session.view.render(
+        "chat/_photo.html",
+        session.fragment(data!({
+            "message": { "id": message_id, "photo": false, "photo_removed": true },
+            "oob": true,
+        })),
     )
 }
 
@@ -520,6 +563,10 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
         | ChatEvent::Reply {
             conversation_id: id,
             ..
+        }
+        | ChatEvent::PhotoRemoved {
+            conversation_id: id,
+            ..
         } => *id,
         ChatEvent::Close(_) => return false,
     };
@@ -543,6 +590,10 @@ fn wants(event: &ChatEvent, conversation_id: i64, thread_id: Option<i64>) -> boo
             },
             Some(thread),
         ) => *message_id == thread || *parent_id == Some(thread),
+        // Only top-level messages have photos: the main feed, and the
+        // message's own thread page, where it is the parent.
+        (ChatEvent::PhotoRemoved { .. }, None) => true,
+        (ChatEvent::PhotoRemoved { message_id, .. }, Some(thread)) => *message_id == thread,
         (ChatEvent::Close(_), _) => false,
     }
 }
@@ -769,6 +820,13 @@ mod tests {
         }
     }
 
+    fn photo_removed_event(conversation_id: i64, message_id: i64) -> ChatEvent {
+        ChatEvent::PhotoRemoved {
+            conversation_id,
+            message_id,
+        }
+    }
+
     fn close() -> ChatEvent {
         ChatEvent::Close(CloseScope::Account { user_id: 1 })
     }
@@ -787,6 +845,7 @@ mod tests {
                 reactions_event(conversation_id, 11, Some(10)),
             ),
             ("reply", reply_event(conversation_id, 10)),
+            ("photo removed", photo_removed_event(conversation_id, 10)),
         ]
     }
 
@@ -812,6 +871,7 @@ mod tests {
             !wants(&reactions_event(7, 11, Some(10)), 7, None),
             "a reply's reactions"
         );
+        assert!(wants(&photo_removed_event(7, 10), 7, None));
         // Closes are matched on the person before this check.
         assert!(!wants(&close(), 7, None));
     }
@@ -837,6 +897,14 @@ mod tests {
             !wants(&reactions_event(7, 21, Some(20)), 7, thread),
             "another thread's reply"
         );
+        assert!(
+            wants(&photo_removed_event(7, 10), 7, thread),
+            "the parent's photo"
+        );
+        assert!(
+            !wants(&photo_removed_event(7, 20), 7, thread),
+            "another message's photo"
+        );
         assert!(!wants(&message_event(7), 7, thread), "main-feed message");
         assert!(!wants(&read_event(7), 7, thread), "receipts");
         assert!(!wants(&close(), 7, thread));
@@ -860,5 +928,22 @@ mod tests {
             message: view(&message(10, 7, None)),
         };
         assert!(receipts_for(&event, 7, 1).is_empty());
+    }
+
+    #[test]
+    fn delete_shows_for_the_sender_and_managers_only() {
+        let mut photo = message(10, 7, None);
+        photo.has_photo = true;
+        photo.document_id = Some(9);
+        // The sender is user 1.
+        for (viewer, can_manage, shown) in [(1, false, true), (2, true, true), (3, false, false)] {
+            let mut view = view(&photo);
+            view.allow_photo_delete(viewer, can_manage);
+            assert_eq!(view.can_delete_photo, shown, "viewer {viewer}");
+        }
+        // No photo to delete: never shown, even to a manager.
+        let mut text = view(&message(11, 7, None));
+        text.allow_photo_delete(2, true);
+        assert!(!text.can_delete_photo);
     }
 }

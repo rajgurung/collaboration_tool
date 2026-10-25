@@ -22,7 +22,7 @@ use crate::{
     models::{
         documents::{self, MAX_BYTES},
         folders::{self, FolderParams},
-        logins, memberships,
+        logins, memberships, messages,
     },
     views::{
         forms::{field_errors, invalid_form, toast},
@@ -594,7 +594,22 @@ async fn delete_file(
     }
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, file.folder_id).await?;
     let name = file.name.clone();
+    // A #general photo: open chats swap it for "Photo removed".
+    let chat_photo = messages::Model::for_document(&ctx.db, member.org.id, file.id).await?;
     file.delete_file(&ctx).await?;
+    if let Some(message) = chat_photo {
+        tracing::info!(
+            org_id = member.org.id,
+            conversation_id = message.conversation_id,
+            message_id = message.id,
+            actor_id = member.user.id,
+            by_manager = message.user_id != member.user.id,
+            "chat photo deleted from Documents"
+        );
+        if let Err(err) = super::chat_ws::publish_photo_removed(&ctx, &message) {
+            tracing::error!(error = %err, message_id = message.id, "could not broadcast a removed photo");
+        }
+    }
     files_partial(&ctx, &v, &member, &folder, &format!("Deleted {name}")).await
 }
 

@@ -195,6 +195,22 @@ async fn org_a_cannot_reach_org_b() {
         .await
         .unwrap();
         let b_user = globex.owner.id.to_string();
+        // A Globex #general photo: a Documents file whose bytes end in SECRET.
+        let globex_general_photo = messages::Model::create_photo(
+            &ctx,
+            &globex.general,
+            globex.owner.id,
+            SECRET,
+            "whiteboard.png",
+            bytes::Bytes::from([super::documents::PNG, SECRET.as_bytes()].concat()),
+        )
+        .await
+        .unwrap();
+        let globex_photo_file = documents::Entity::find_by_id(globex_general_photo.document_id.unwrap())
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
 
         // 1. Every page Alice can open shows nothing of Globex.
         for page in [
@@ -263,6 +279,9 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/chat/{}/messages", globex.group.id), serde_json::json!({ "body": "hijacked" })),
             (format!("/chat/{}/messages/{}/reactions", globex.general.id, globex.message.id), serde_json::json!({ "emoji": "👍", "on": "1" })),
             (format!("/chat/{}/threads/{}/replies", globex.general.id, globex.message.id), serde_json::json!({ "body": "hijacked" })),
+            (format!("/chat/{}/photos/{}/delete", globex.group.id, globex.group_photo.id), serde_json::json!({})),
+            (format!("/chat/{}/photos/{}/delete", globex.general.id, globex.message.id), serde_json::json!({})),
+            (format!("/chat/{}/photos/{}/delete", globex.general.id, globex_general_photo.id), serde_json::json!({})),
         ];
         for (path, form) in &posts {
             let res = request.post(&a.to(path)).as_member(&a).form(form).await;
@@ -290,6 +309,26 @@ async fn org_a_cannot_reach_org_b() {
             .await;
         assert_eq!(res.status_code(), 404, "own task, Globex note");
         assert!(!res.text().contains(SECRET), "own task, Globex note");
+
+        // Alice's own conversations with Globex's photo messages.
+        let alice_id = users::Model::find_by_email(&ctx.db, "alice@example.com").await.unwrap().id;
+        let acme_general = conversations::Model::find_general(&ctx.db, acme.id).await.unwrap();
+        let acme_group = conversations::Model::create_group(
+            &ctx.db,
+            acme.id,
+            alice_id,
+            &conversations::GroupParams { name: "finance".to_string(), member_ids: vec![] },
+        )
+        .await
+        .unwrap();
+        for conversation in [&acme_group, &acme_general] {
+            for photo in [&globex.group_photo, &globex_general_photo] {
+                let path = format!("/chat/{}/photos/{}/delete", conversation.id, photo.id);
+                let res = request.post(&a.at(&path)).as_member(&a).await;
+                assert_eq!(res.status_code(), 404, "own {}, Globex photo: {path}", conversation.kind);
+                assert!(!res.text().contains(SECRET), "{path}");
+            }
+        }
 
         let res = request
             .post(&a.at(&format!("/documents/folders/{}/files", globex.folder.id)))
@@ -338,9 +377,16 @@ async fn org_a_cannot_reach_org_b() {
         let pending = memberships::Entity::find_by_id(globex.pending.id).one(&ctx.db).await.unwrap().unwrap();
         assert_eq!((pending.status.as_str(), pending.role.as_str()), ("pending", "member"));
         assert_eq!(task_notes::Entity::find().count(&ctx.db).await.unwrap(), 1);
-        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 2, "the message and the group photo");
+        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 3, "the message and the two photos");
         let photo_key = globex.group_photo.photo_key.clone().unwrap();
         assert!(ctx.storage.download::<Vec<u8>>(std::path::Path::new(&photo_key)).await.is_ok());
+        let group_photo = messages::Entity::find_by_id(globex.group_photo.id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(group_photo, globex.group_photo, "the group photo is untouched");
+        let general_photo = messages::Entity::find_by_id(globex_general_photo.id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(general_photo.document_id, Some(globex_photo_file.id));
+        let photo_file = documents::Entity::find_by_id(globex_photo_file.id).one(&ctx.db).await.unwrap();
+        assert_eq!(photo_file.as_ref(), Some(&globex_photo_file), "the Documents row is untouched");
+        assert!(ctx.storage.download::<Vec<u8>>(std::path::Path::new(&globex_photo_file.storage_key)).await.is_ok());
         assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(note_reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(meetings::Entity::find().count(&ctx.db).await.unwrap(), 1);
@@ -353,12 +399,12 @@ async fn org_a_cannot_reach_org_b() {
             .into_iter()
             .filter(|c| c.kind != "channel")
             .count();
-        assert_eq!(dms, 1, "only Globex's group exists, no new group or DM");
+        assert_eq!(dms, 2, "Globex's group and Alice's own, no new group or DM");
         let folder = folders::Entity::find_by_id(globex.folder.id).one(&ctx.db).await.unwrap().unwrap();
         assert!(folder.name.starts_with(SECRET));
         let file = documents::Entity::find_by_id(globex.file.id).one(&ctx.db).await.unwrap().unwrap();
         assert!(file.name.starts_with(SECRET));
-        assert_eq!(documents::Entity::find().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(documents::Entity::find().count(&ctx.db).await.unwrap(), 2, "the PDF and the #general photo");
         assert!(ctx.storage.download::<Vec<u8>>(std::path::Path::new(&file.storage_key)).await.is_ok());
     })
     .await;
@@ -426,6 +472,10 @@ async fn documents_and_removal_need_your_own_active_membership() {
             format!("/documents/files/{}/delete", globex.file.id),
             format!("/members/{}/remove", globex.pending.id),
             format!("/chat/{}/photos", globex.group.id),
+            format!(
+                "/chat/{}/photos/{}/delete",
+                globex.group.id, globex.group_photo.id
+            ),
         ];
         let form = serde_json::json!({ "name": "hijacked", "note": "" });
         for path in &gets {
@@ -523,6 +573,19 @@ async fn documents_and_removal_need_your_own_active_membership() {
             2,
             "no photo was posted"
         );
+        let group_photo = messages::Entity::find_by_id(globex.group_photo.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(group_photo, globex.group_photo, "no photo was deleted");
+        assert!(ctx
+            .storage
+            .download::<Vec<u8>>(std::path::Path::new(
+                globex.group_photo.photo_key.as_deref().unwrap()
+            ))
+            .await
+            .is_ok());
     })
     .await;
 }

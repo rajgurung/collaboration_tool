@@ -48,6 +48,13 @@ pub enum ChatEvent {
         message: Box<MessageView>,
         line: Box<ThreadLine>,
     },
+    /// A message's photo was deleted. Sockets on the main feed, and on that
+    /// message's thread page (where it is the parent), swap the photo for
+    /// "Photo removed". Replies never carry photos.
+    PhotoRemoved {
+        conversation_id: i64,
+        message_id: i64,
+    },
     /// Some of a person's sockets close: every one on sign out everywhere, a
     /// password reset or a lock (`Account`); those in one organisation on
     /// removal (`Org`). See [`CloseScope`].

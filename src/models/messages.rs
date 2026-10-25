@@ -48,6 +48,14 @@ pub const PHOTO_TYPES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
 pub const NOT_A_PHOTO: &str = "Only photos can be posted here. Use a JPG, PNG or WebP.";
 pub const PHOTOS_NOT_HERE: &str = "Photos can't be posted here.";
 
+/// The sender, owners and admins may delete a message's photo, as with a
+/// Documents file. The caller must already know the person is in the
+/// conversation.
+#[must_use]
+pub fn may_delete_photo(sender_id: i64, user_id: i64, can_manage: bool) -> bool {
+    can_manage || sender_id == user_id
+}
+
 /// Where a message's photo is stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhotoFile<'a> {
@@ -383,11 +391,90 @@ impl Model {
         self.document_id.map(PhotoFile::Document)
     }
 
-    /// The message had a photo that is gone: a #general photo deleted from
-    /// Documents.
+    /// The message had a photo that is gone: deleted from the chat, or a
+    /// #general photo deleted from Documents.
     #[must_use]
     pub fn photo_removed(&self) -> bool {
         self.has_photo && self.photo_file().is_none()
+    }
+
+    /// The #general message whose photo is this Documents file, if any.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn for_document<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        file_id: i64,
+    ) -> ModelResult<Option<Self>> {
+        Ok(Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::DocumentId.eq(file_id))
+            .one(db)
+            .await?)
+    }
+
+    /// Deletes this message's photo for everyone. Returns the message as it
+    /// now is, and whether this call removed anything. The message, caption,
+    /// reactions and thread stay; `has_photo` stays true, so it shows "Photo
+    /// removed".
+    ///
+    /// The stored bytes go first, then the row: if storage fails nothing has
+    /// changed and the delete can be tried again. A photo that is already
+    /// gone is not an error. The caller checks membership and
+    /// [`may_delete_photo`].
+    ///
+    /// # Errors
+    /// `EntityNotFound` for a message that never had a photo, or a #general
+    /// message whose file is not a photo; storage or database errors
+    /// otherwise.
+    pub async fn delete_photo(self, ctx: &AppContext) -> ModelResult<(Self, bool)> {
+        if !self.has_photo {
+            return Err(ModelError::EntityNotFound);
+        }
+        match self.photo_file() {
+            None => Ok((self, false)),
+            Some(PhotoFile::Own { key, .. }) => {
+                // Deleting a key that is already gone succeeds, so a retry
+                // after a failed update finishes the job.
+                ctx.storage
+                    .delete(Path::new(key))
+                    .await
+                    .map_err(|err| ModelError::Any(Box::new(err)))?;
+                let mut message = self.into_active_model();
+                message.photo_key = ActiveValue::Set(None);
+                message.photo_type = ActiveValue::Set(None);
+                message.photo_size = ActiveValue::Set(None);
+                message.photo_name = ActiveValue::Set(None);
+                Ok((message.update(&ctx.db).await?, true))
+            }
+            Some(PhotoFile::Document(file_id)) => {
+                let changed =
+                    match documents::Model::find_in_org(&ctx.db, self.organisation_id, file_id)
+                        .await
+                    {
+                        // Only ever a photo, as `open_photo` serves.
+                        Ok(file) if !PHOTO_TYPES.contains(&file.content_type.as_str()) => {
+                            return Err(ModelError::EntityNotFound);
+                        }
+                        // Bytes, then the row; the foreign key clears `document_id`.
+                        Ok(file) => {
+                            file.delete_file(ctx).await?;
+                            true
+                        }
+                        // Someone else just deleted it.
+                        Err(ModelError::EntityNotFound) => false,
+                        Err(err) => return Err(err),
+                    };
+                Ok((
+                    Self {
+                        document_id: None,
+                        ..self
+                    },
+                    changed,
+                ))
+            }
+        }
     }
 
     async fn insert<C: ConnectionTrait>(
@@ -537,5 +624,12 @@ mod tests {
         };
         assert_eq!(removed.photo_file(), None);
         assert!(removed.photo_removed());
+    }
+
+    #[test]
+    fn the_sender_owners_and_admins_may_delete_a_photo() {
+        assert!(may_delete_photo(3, 3, false), "the sender");
+        assert!(may_delete_photo(3, 1, true), "an owner or admin");
+        assert!(!may_delete_photo(3, 4, false), "another member");
     }
 }
