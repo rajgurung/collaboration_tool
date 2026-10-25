@@ -65,6 +65,8 @@ struct Card {
     owner: Option<String>,
     owner_color: &'static str,
     blocked: usize,
+    /// Dropping it on Done opens the close confirm only for those allowed.
+    can_close: bool,
 }
 
 fn lane_or_default(lane: Option<&str>) -> &str {
@@ -124,6 +126,7 @@ async fn lane_data(
                         owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
                         owner,
                         blocked: own_tasks.filter(|t| t.status == "blocked").count(),
+                        can_close: can_close(member, p),
                     }
                 })
                 .collect();
@@ -410,6 +413,54 @@ async fn update(
     .await
 }
 
+#[derive(Debug, Deserialize)]
+struct LaneForm {
+    #[serde(rename = "lane")]
+    to: String,
+}
+
+/// Moves a project to another lane, from a drag on the roadmap. Anyone who
+/// can edit it can move it; Done is not a lane, so a drop there goes through
+/// the close confirm instead.
+#[debug_handler]
+async fn move_lane(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(form): Form<LaneForm>,
+) -> Result<Response> {
+    if !LANES.contains(&form.to.as_str()) {
+        return Err(Error::BadRequest("Choose now, next or later.".to_string()));
+    }
+    let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if project.is_closed() {
+        return closed_refused(&project);
+    }
+    // Closed is refused above, so this is only "already in that lane".
+    let unchanged = project.in_lane(&form.to);
+    let project = if unchanged {
+        project
+    } else {
+        project.move_to_lane(&ctx.db, &form.to).await?
+    };
+    if !headers.contains_key("hx-request") {
+        let to = member.url(&format!("/roadmap?lane={}", project.lane));
+        return Ok(redirect_response(&headers, &to));
+    }
+    let mut trigger = serde_json::json!({ "roadmap-changed": true });
+    if !unchanged {
+        trigger["toast"] = serde_json::json!({
+            "kind": "success",
+            "message": format!("{} moved to {}.", project.name, projects::lane_label(&project.lane)),
+        });
+    }
+    format::render()
+        .header("HX-Trigger", trigger.to_string())
+        .header("HX-Reswap", "none")
+        .empty()
+}
+
 /// Deletes a project with its tasks, their notes, assignees and reactions,
 /// and the notifications about those tasks. Owners and admins, through their
 /// own membership. Can't be undone, so it is logged.
@@ -627,6 +678,7 @@ pub fn routes() -> Routes {
         .add("/roadmap/projects/{id}/edit", get(edit))
         .add("/roadmap/projects/{id}", post(update))
         .add("/roadmap/projects/{id}/delete", post(destroy))
+        .add("/roadmap/projects/{id}/lane", post(move_lane))
         .add("/roadmap/projects/{id}/close", post(close))
         .add("/roadmap/projects/{id}/reopen", post(reopen))
 }

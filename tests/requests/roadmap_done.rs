@@ -1321,3 +1321,120 @@ async fn mcp_list_projects_shows_closed() {
     })
     .await;
 }
+
+/// Posts a drag onto `lane` as HTMX. Returns the status and the HX-Trigger.
+async fn drag(
+    request: &TestServer,
+    member: &TestMember,
+    project: &projects::Model,
+    lane: &str,
+) -> (u16, String) {
+    let res = request
+        .post(&member.at(&format!("/roadmap/projects/{}/lane", project.id)))
+        .as_member(member)
+        .add_header("HX-Request", "true")
+        .form(&[("lane", lane)])
+        .await;
+    let trigger = res
+        .headers()
+        .get("HX-Trigger")
+        .map(|v| v.to_str().unwrap().to_string())
+        .unwrap_or_default();
+    (res.status_code().as_u16(), trigger)
+}
+
+#[tokio::test]
+#[serial]
+async fn dragging_a_card_moves_it_to_that_lane() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (tom_member, _) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+
+        // Any member can move it, as with the edit sheet.
+        let (status, trigger) = drag(&request, &tom_member, &website, "next").await;
+        assert_eq!(status, 200);
+        assert!(trigger.contains("Website moved to Next."), "{trigger}");
+        assert!(trigger.contains("roadmap-changed"));
+        assert!(find(&ctx, &website).await.in_lane("next"));
+
+        // The same lane again changes nothing and says nothing.
+        let (status, trigger) = drag(&request, &ana, &website, "next").await;
+        assert_eq!(status, 200);
+        assert!(!trigger.contains("toast"), "{trigger}");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn done_and_unknown_lanes_are_refused() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        for lane in ["done", "someday", ""] {
+            let (status, _) = drag(&request, &ana, &website, lane).await;
+            assert_eq!(status, 400, "{lane}");
+        }
+        let website = find(&ctx, &website).await;
+        assert!(website.in_lane("now"), "unmoved");
+        assert!(!website.is_closed(), "a drag never closes a project");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_closed_project_cannot_be_dragged() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        close(&ctx, &ana, &website).await;
+        let (status, trigger) = drag(&request, &ana, &website, "later").await;
+        assert_eq!(status, 409);
+        assert!(trigger.contains("Website is done. Reopen the project first."));
+        assert_eq!(find(&ctx, &website).await.lane, "now", "keeps its lane");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn cards_carry_what_the_drag_needs() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (tom_member, _) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let card = format!(r#"data-project-id="{}" data-card-lane="now""#, website.id);
+
+        let page = get(&request, &ana, "/roadmap").await;
+        assert!(page.contains(&card), "{page}");
+        assert!(page.contains(r#"data-drop-lane="done""#));
+        assert!(
+            page.contains("data-can-close"),
+            "an owner may drop it on Done"
+        );
+
+        let page = get(&request, &tom_member, "/roadmap").await;
+        assert!(page.contains(&card));
+        assert!(
+            !page.contains("data-can-close"),
+            "a member who doesn't own it may not"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn org_a_cannot_drag_org_b_projects() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        sign_up_member(&request, "Globex", "gina", "gina@example.com").await;
+        let theirs = project_in(&ctx, "globex", "Secret plan").await;
+        let (status, _) = drag(&request, &ana, &theirs, "later").await;
+        assert_eq!(status, 404);
+        assert!(find(&ctx, &theirs).await.in_lane("now"));
+    })
+    .await;
+}

@@ -622,12 +622,13 @@ for (const name of ["htmx:responseError", "htmx:sendError"]) {
 // Task board: drag a card to another column to change its status. Cards stay
 // links, so keyboards and phones open the task and change the status there.
 let dragged: HTMLElement | null = null;
+// Roadmap cards drag the same way between lanes; see roadmapDrop.
 document.addEventListener("dragstart", (event) => {
-  const card = (event.target as Element | null)?.closest<HTMLElement>(".task-card");
+  const card = (event.target as Element | null)?.closest<HTMLElement>(".task-card, .roadmap-card[draggable]");
   if (!card || !event.dataTransfer) return;
   dragged = card;
   event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("text/plain", card.dataset.taskId ?? "");
+  event.dataTransfer.setData("text/plain", card.dataset.taskId ?? card.dataset.projectId ?? "");
   card.classList.add("is-dragging");
 });
 document.addEventListener("dragend", () => {
@@ -636,13 +637,19 @@ document.addEventListener("dragend", () => {
   document.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
 });
 document.addEventListener("dragover", (event) => {
-  const cell = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-status]");
+  const cell = (event.target as Element | null)?.closest<HTMLElement>(
+    dragged?.dataset.projectId ? "[data-drop-lane]" : "[data-drop-status]",
+  );
   if (!cell || !dragged) return;
   event.preventDefault();
   document.querySelectorAll(".is-drop-target").forEach((el) => el !== cell && el.classList.remove("is-drop-target"));
   cell.classList.add("is-drop-target");
 });
 document.addEventListener("drop", (event) => {
+  if (dragged?.dataset.projectId) {
+    roadmapDrop(event, dragged);
+    return;
+  }
   const cell = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-status]");
   const card = dragged;
   if (!cell || !card) return;
@@ -655,6 +662,36 @@ document.addEventListener("drop", (event) => {
   card.dataset.status = status;
   void htmx.ajax("POST", orgUrl(`/tasks/${card.dataset.taskId}/status`), { values: { status }, swap: "none" });
 });
+
+// A project dropped on another lane moves there straight away; the lane
+// refreshes from the server after the save. Done is not a lane: a drop there
+// opens the edit sheet's "Mark project done" confirm, for those allowed.
+function roadmapDrop(event: DragEvent, card: HTMLElement) {
+  const column = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-lane]");
+  if (!column) return;
+  event.preventDefault();
+  column.classList.remove("is-drop-target");
+  const lane = column.dataset.dropLane ?? "";
+  const id = card.dataset.projectId;
+  if (lane === card.dataset.cardLane) return;
+  if (lane === "done") {
+    if (!("canClose" in card.dataset)) {
+      showToast({ kind: "error", message: "Only owners, admins and the project's owner can mark it done." });
+      return;
+    }
+    void htmx.ajax("GET", orgUrl(`/roadmap/projects/${id}/edit`), { target: "#project-dialog-body" }).then(() => {
+      const dialog = document.getElementById("project-dialog") as HTMLDialogElement | null;
+      const confirm = dialog?.querySelector<HTMLElement>("[data-close-open]");
+      if (!dialog || !confirm) return;
+      dialog.showModal();
+      confirm.click();
+    });
+    return;
+  }
+  column.insertBefore(card, column.querySelector(".roadmap-empty"));
+  card.dataset.cardLane = lane;
+  void htmx.ajax("POST", orgUrl(`/roadmap/projects/${id}/lane`), { values: { lane }, swap: "none" });
+}
 
 // Collapsed swimlanes stay collapsed, across board refreshes and visits.
 const LANES_KEY = "collab:collapsed-lanes";
