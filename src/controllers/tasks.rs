@@ -673,6 +673,12 @@ fn form_values(params: &TaskParams) -> serde_json::Value {
     })
 }
 
+/// The project a refused form posted. It stays selected when it is closed,
+/// so the error shows under it and a second Save is refused again.
+fn posted_project(params: &TaskParams) -> Option<i64> {
+    params.project_id.trim().parse().ok()
+}
+
 /// The task form's data. `current_project` is the task's project, or the one
 /// a refused form posted: kept in the picker even when it is closed.
 async fn task_form_data(
@@ -789,8 +795,15 @@ async fn create(
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let data =
-                task_form_data(&ctx, &member, None, None, form_values(&params), &errors).await?;
+            let data = task_form_data(
+                &ctx,
+                &member,
+                None,
+                posted_project(&params),
+                form_values(&params),
+                &errors,
+            )
+            .await?;
             invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, member.fragment(data))
         }
     }
@@ -855,8 +868,15 @@ async fn update(
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let data = task_form_data(&ctx, &member, Some(id), None, form_values(&params), &errors)
-                .await?;
+            let data = task_form_data(
+                &ctx,
+                &member,
+                Some(id),
+                posted_project(&params),
+                form_values(&params),
+                &errors,
+            )
+            .await?;
             invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, member.fragment(data))
         }
     }
