@@ -1,9 +1,9 @@
-{# A message's action sheet: which message, the six reactions, Reply in thread on a top-level message outside its thread, and who reacted. #}
+{# A message's action sheet: which message, the six reactions, Reply in thread on a top-level message outside its thread, who reacted and, for those allowed, Delete photo. #}
 <div class="msg-actions">
   <h2 class="sr-only">Message actions</h2>
   <div class="quote">
     <div class="quote-head">{{<avatar name={message.author} color={message.color} size="xs" label={false}/>}}<span>{% if message.own %}You{% else %}{{ message.author }}{% endif %}</span><span class="meta">{{ message.at }}</span></div>
-    <p>{% if message.body %}{{ message.body }}{% elif message.photo or message.photo_removed %}Photo{% endif %}</p>
+    <p>{% if message.photo_removed %}Photo removed{% if message.body %} · {{ message.body }}{% endif %}{% elif message.body %}{{ message.body }}{% elif message.photo %}Photo{% endif %}</p>
   </div>
   <div class="pick" role="group" aria-label="React">{% for p in message.picks %}<button type="button"{% if p.mine %} class="mine"{% endif %} data-react data-emoji="{{ p.emoji }}" data-message="{{ message.id }}" data-url="{{ org_url(path="/chat/" ~ (message.conversation_id) ~ "/messages/" ~ (message.id) ~ "/reactions") }}" aria-pressed="{% if p.mine %}true{% else %}false{% endif %}" aria-label="{% if p.mine %}Remove your {{ p.emoji }}{% else %}React {{ p.emoji }}{% endif %}"><span class="emoji">{{ p.emoji }}</span></button>{% endfor %}</div>
   {% if message.can_reply %}
@@ -16,5 +16,8 @@
     <div class="list-row who-row"><span class="emoji" aria-hidden="true">{{ chip.emoji }}</span><span class="sr-only">{{ chip.emoji }}:</span><span class="names truncate-1">{{ chip.names }}</span><span class="receipt-stack">{% for p in chip.people %}{% if loop.index <= 3 %}{{<avatar name={p.username} color={p.color} size="xs" label={false}/>}}{% endif %}{% endfor %}{% if chip.people | length > 3 %}<span class="receipt-more">+{{ chip.people | length - 3 }}</span>{% endif %}</span></div>
     {% endfor %}
   </div>
+  {% endif %}
+  {% if message.can_delete_photo %}
+  <div class="list"><button type="button" class="list-row action-row text-danger w-full border-0 bg-transparent text-left" data-photo-delete="{{ message.id }}">{{<icon name="trash" class="h-6 w-6"/>}}<span class="flex-1">Delete photo</span></button></div>
   {% endif %}
 </div>

@@ -7,11 +7,13 @@
       <span class="viewer-names"><span class="n truncate-1" data-viewer-name></span><span class="t truncate-1" data-viewer-when></span></span>
     </div>
     <a class="viewer-dl" download data-viewer-download aria-label="Download">{{<icon name="download" class="h-[22px] w-[22px]"/>}}<span class="viewer-dl-label">Download</span></a>
+    <button type="button" class="viewer-dl viewer-del" data-viewer-delete aria-label="Delete photo" hidden>{{<icon name="trash" class="h-[22px] w-[22px]"/>}}<span class="viewer-dl-label">Delete</span></button>
   </div>
   <div class="viewer-stage" data-viewer-stage>
     <img data-viewer-img alt="" hidden>
     <div class="viewer-state" data-viewer-loading role="status">{{<icon name="loader-circle" class="spin h-8 w-8"/>}}<span class="sr-only">Loading the photo</span></div>
     <div class="viewer-state" data-viewer-error role="alert" hidden>{{<icon name="image" class="h-8 w-8"/>}}<strong>Couldn't load this photo</strong><span>Check your connection and try again.</span><button type="button" class="viewer-btn" data-viewer-retry>{{<icon name="rotate-cw" class="h-[18px] w-[18px]"/>}}Try again</button></div>
+    <div class="viewer-state" data-viewer-removed role="status" hidden>{{<icon name="image" class="h-8 w-8"/>}}<strong>Photo removed</strong><span>It's no longer in this chat.</span><button type="button" class="viewer-btn" data-viewer-close>Close</button></div>
   </div>
   <div class="viewer-cap" data-viewer-caption hidden></div>
 </dialog>

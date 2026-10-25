@@ -1,0 +1,19 @@
+{# The confirm for deleting a photo, from the message sheet or the viewer. The sentence depends only on the conversation, so it is written here; frontend/app.ts fills the quote from the photo link, with textContent only. #}
+<dialog id="photo-delete" class="sheet" aria-labelledby="photo-delete-title">
+  <div class="sheet-handle"></div>
+  <div class="sheet-body">
+    <div class="flex flex-col gap-4">
+      <h2 id="photo-delete-title" class="m-0 text-[19px] font-bold">Delete this photo?</h2>
+      <div class="quote">
+        <div class="quote-head"><span data-photo-delete-avatar></span><span data-photo-delete-name></span><span class="meta" data-photo-delete-at></span></div>
+        <p data-photo-delete-text></p>
+      </div>
+      <p class="m-0 text-[15px] text-muted">{% if conversation.kind == "dm" %}It's removed for you and {{ conversation.label }}.{% else %}It's removed for everyone in #{{ conversation.label }}.{% endif %}{% if conversation.kind == "channel" %} It's also deleted from Documents.{% endif %} This can't be undone.</p>
+      <div class="alert alert-error" role="alert" data-photo-delete-alert hidden>{{<icon name="circle-alert" class="h-[18px] w-[18px] shrink-0"/>}}<span data-photo-delete-error>Couldn't delete the photo. Check your connection and try again.</span></div>
+      <div class="flex flex-col gap-2">
+        <button type="button" class="btn btn-lg btn-danger-solid w-full" data-photo-delete-confirm><span data-photo-delete-spin hidden>{{<icon name="loader-circle" class="spin h-[18px] w-[18px]"/>}}</span><span data-photo-delete-label>Delete</span></button>
+        <button type="button" class="btn btn-lg btn-secondary w-full" data-photo-delete-cancel data-dialog-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+</dialog>

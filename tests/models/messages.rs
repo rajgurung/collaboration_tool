@@ -625,4 +625,171 @@ mod own_photos {
         assert!(stored_chat_files(ctx, org_id).await.is_empty());
         assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 0);
     }
+
+    async fn photo(
+        ctx: &AppContext,
+        conversation: &conversations::Model,
+        user_id: i64,
+        caption: &str,
+    ) -> messages::Model {
+        messages::Model::create_photo(
+            ctx,
+            conversation,
+            user_id,
+            caption,
+            "receipt.png",
+            bytes::Bytes::from_static(PNG),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn reload(ctx: &AppContext, message: &messages::Model) -> messages::Model {
+        messages::Entity::find_by_id(message.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    fn gone(stored: Result<Vec<u8>, loco_rs::storage::StorageError>) -> bool {
+        stored.is_err()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_a_group_photo_removes_the_bytes_then_the_columns() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, dm) = acme(ctx).await;
+        for conversation in [&group, &dm] {
+            let message = photo(ctx, conversation, alice.id, "Van fuel £62").await;
+            let key = message.photo_key.clone().unwrap();
+            let (after, changed) = message.clone().delete_photo(ctx).await.unwrap();
+            assert!(changed);
+            assert!(gone(ctx.storage.download(Path::new(&key)).await), "{key}");
+            // Saved, so the messages-own-photo CHECK accepted the row.
+            let saved = reload(ctx, &message).await;
+            for row in [&after, &saved] {
+                assert_eq!(row.photo_key, None);
+                assert_eq!(row.photo_type, None);
+                assert_eq!(row.photo_size, None);
+                assert_eq!(row.photo_name, None);
+                assert_eq!(row.document_id, None);
+                assert!(row.has_photo);
+                assert!(row.photo_removed());
+                assert_eq!(row.body, "Van fuel £62");
+            }
+        }
+        assert!(stored_chat_files(ctx, org_id).await.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_a_general_photo_deletes_its_documents_file() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, _, _) = acme(ctx).await;
+        let general = conversations::Model::find_general(&ctx.db, org_id)
+            .await
+            .unwrap();
+        let message = photo(ctx, &general, alice.id, "Whiteboard").await;
+        let file = documents::Model::find_in_org(&ctx.db, org_id, message.document_id.unwrap())
+            .await
+            .unwrap();
+        let (after, changed) = message.clone().delete_photo(ctx).await.unwrap();
+        assert!(changed);
+        assert_eq!(after.document_id, None);
+        assert!(after.photo_removed());
+        assert!(matches!(
+            documents::Model::find_in_org(&ctx.db, org_id, file.id).await,
+            Err(ModelError::EntityNotFound)
+        ));
+        assert!(gone(
+            ctx.storage.download(Path::new(&file.storage_key)).await
+        ));
+        let saved = reload(ctx, &message).await;
+        assert_eq!(saved.document_id, None, "the foreign key cleared it");
+        assert!(saved.has_photo);
+        assert_eq!(saved.body, "Whiteboard");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_twice_is_a_no_op() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, _) = acme(ctx).await;
+        let general = conversations::Model::find_general(&ctx.db, org_id)
+            .await
+            .unwrap();
+        for conversation in [&group, &general] {
+            let message = photo(ctx, conversation, alice.id, "").await;
+            let (first, changed) = message.delete_photo(ctx).await.unwrap();
+            assert!(changed);
+            let saved = reload(ctx, &first).await;
+            let (second, changed) = first.clone().delete_photo(ctx).await.unwrap();
+            assert!(!changed, "{}", conversation.kind);
+            assert_eq!(reload(ctx, &first).await, saved, "nothing written");
+            assert_eq!(second.photo_key, None);
+            assert_eq!(second.document_id, None);
+        }
+
+        // The memory driver, like OpenDAL's S3, deletes a missing key without
+        // an error: the retry after a failed update depends on it.
+        ctx.storage
+            .delete(Path::new(&format!("orgs/{org_id}/chat/never-stored")))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn two_deletes_at_once_both_succeed() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, _) = acme(ctx).await;
+        let general = conversations::Model::find_general(&ctx.db, org_id)
+            .await
+            .unwrap();
+        for conversation in [&group, &general] {
+            let message = photo(ctx, conversation, alice.id, "").await;
+            let (a, b) = tokio::join!(
+                message.clone().delete_photo(ctx),
+                message.clone().delete_photo(ctx),
+            );
+            a.unwrap();
+            b.unwrap();
+            let saved = reload(ctx, &message).await;
+            assert!(saved.photo_removed(), "{}", conversation.kind);
+        }
+        assert!(stored_chat_files(ctx, org_id).await.is_empty());
+        assert_eq!(documents::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_text_message_has_no_photo_to_delete() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, alice, group, _) = acme(ctx).await;
+        let kept = photo(ctx, &group, alice.id, "").await;
+        let text = messages::Model::create(
+            &ctx.db,
+            &group,
+            alice.id,
+            &messages::MessageParams {
+                body: "Morning all".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            text.clone().delete_photo(ctx).await,
+            Err(ModelError::EntityNotFound)
+        ));
+        assert_eq!(reload(ctx, &text).await, text);
+        assert_eq!(reload(ctx, &kept).await, kept);
+        assert_eq!(stored_chat_files(ctx, org_id).await.len(), 1);
+    }
 }

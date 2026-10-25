@@ -492,3 +492,68 @@ fn renders_a_note_with_reactions() {
     );
     assert!(!html.contains("<b>Shelves</b>"), "{html}");
 }
+
+/// The socket swaps `#photo-{id}` with exactly this data, so the removed
+/// line must carry the same id as the live link, and the swap flag only when
+/// the socket asks for it.
+#[test]
+fn renders_a_removed_photo_as_a_live_swap_of_the_link() {
+    let engine = view_engine();
+    let removed = engine
+        .render(
+            "chat/_photo.html",
+            serde_json::json!({ "org_base": "/o/acme",
+                "message": { "id": 7, "photo": false, "photo_removed": true },
+                "oob": true,
+            }),
+        )
+        .expect("the removed photo should render");
+    assert!(
+        removed.contains(r#"<span class="photo-removed" id="photo-7" hx-swap-oob="true">"#),
+        "{removed}"
+    );
+    assert!(removed.contains("Photo removed</span>"), "{removed}");
+    assert!(!removed.contains("<a"), "{removed}");
+
+    let message = |photo: bool, can_delete_photo: bool| {
+        serde_json::json!({
+            "org_base": "/o/acme",
+            "message": {
+                "id": 7, "conversation_id": 3, "author": "tom", "color": "#ffb454",
+                "parts": [{ "text": "Van fuel £62", "mention": false }], "body": "Van fuel £62",
+                "at": "09:31", "own": false, "start": true, "show_time": true,
+                "read_receipts": false, "receipt": null, "reactions": [], "picks": [],
+                "can_reply": true, "thread": null,
+                "photo": photo, "photo_removed": !photo, "photo_when": "Today 09:31",
+                "can_delete_photo": can_delete_photo,
+            },
+        })
+    };
+    let live = engine
+        .render("chat/_message.html", message(true, true))
+        .expect("a photo message should render");
+    assert!(
+        live.contains(r#"<a class="photo-link" id="photo-7" href="/o/acme/chat/3/photos/7""#),
+        "{live}"
+    );
+    assert!(
+        live.contains(r#"data-delete-url="/o/acme/chat/3/photos/7/delete""#),
+        "{live}"
+    );
+    assert!(live.contains(r#"data-message="7""#), "{live}");
+    let not_allowed = engine
+        .render("chat/_message.html", message(true, false))
+        .expect("a photo message should render");
+    assert!(not_allowed.contains(r#"id="photo-7""#), "{not_allowed}");
+    assert!(!not_allowed.contains("data-delete-url"), "{not_allowed}");
+
+    // Drawn in a feed, the removed line is not a swap.
+    let in_feed = engine
+        .render("chat/_message.html", message(false, false))
+        .expect("a removed photo message should render");
+    assert!(
+        in_feed.contains(r#"<span class="photo-removed" id="photo-7">"#),
+        "{in_feed}"
+    );
+    assert!(!in_feed.contains("hx-swap-oob"), "{in_feed}");
+}

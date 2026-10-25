@@ -28,8 +28,8 @@ document.addEventListener("click", (event) => {
   }
   const closer = target?.closest<HTMLElement>("[data-dialog-close]");
   if (closer) closer.closest("dialog")?.close();
-  // Clicking the backdrop of a dialog closes it.
-  if (target instanceof HTMLDialogElement) target.close();
+  // Clicking the backdrop of a dialog closes it, unless it is busy saving.
+  if (target instanceof HTMLDialogElement && !target.hasAttribute("data-busy")) target.close();
 });
 
 // Server responses send `HX-Trigger: {"toast": {...}}`; HTMX dispatches it as an event.
@@ -594,6 +594,15 @@ function refusalText(xhr?: XMLHttpRequest): string | null {
   if (xhr?.status !== 403) return null;
   try {
     return (JSON.parse(xhr.responseText) as { description?: string }).description ?? null;
+  } catch {
+    return null;
+  }
+}
+// The same, for a raw fetch.
+async function fetchRefusalText(res: Response): Promise<string | null> {
+  if (res.status !== 403) return null;
+  try {
+    return ((await res.json()) as { description?: string }).description ?? null;
   } catch {
     return null;
   }
@@ -1859,18 +1868,20 @@ function viewerParts(dialog: HTMLDialogElement) {
     name: q<HTMLElement>("[data-viewer-name]"),
     when: q<HTMLElement>("[data-viewer-when]"),
     download: q<HTMLAnchorElement>("[data-viewer-download]"),
+    del: q<HTMLButtonElement>("[data-viewer-delete]"),
     stage: q<HTMLElement>("[data-viewer-stage]"),
     img: q<HTMLImageElement>("[data-viewer-img]"),
     loading: q<HTMLElement>("[data-viewer-loading]"),
     error: q<HTMLElement>("[data-viewer-error]"),
+    removed: q<HTMLElement>("[data-viewer-removed]"),
     caption: q<HTMLElement>("[data-viewer-caption]"),
   };
 }
 
 // The same circle as the avatar component (components/ui.html).
-function viewerAvatar(name: string, color: string): HTMLElement {
+function viewerAvatar(name: string, color: string, size = "sm"): HTMLElement {
   const avatar = document.createElement("span");
-  avatar.className = "avatar avatar-sm";
+  avatar.className = `avatar avatar-${size}`;
   avatar.setAttribute("aria-hidden", "true");
   avatar.style.background = color;
   avatar.textContent = (Array.from(name)[0] ?? "").toUpperCase();
@@ -1883,6 +1894,8 @@ function loadViewerPhoto(dialog: HTMLDialogElement) {
   if (!p.img || !p.loading || !p.error || !src) return;
   p.error.hidden = true;
   p.loading.hidden = false;
+  // You see what you delete: no Delete until the photo shows.
+  if (p.del) p.del.hidden = true;
   p.img.hidden = true;
   p.img.removeAttribute("src");
   p.img.src = src;
@@ -1901,6 +1914,10 @@ function openViewer(dialog: HTMLDialogElement, link: HTMLAnchorElement) {
   const download = new URL(link.href);
   download.searchParams.set("download", "1");
   p.download.href = download.toString();
+  p.download.hidden = false;
+  if (p.removed) p.removed.hidden = true;
+  dialog.dataset.message = link.dataset.message ?? "";
+  dialog.dataset.deleteUrl = link.dataset.deleteUrl ?? "";
   dialog.setAttribute("aria-label", `Photo from ${author}`);
   p.img.alt = caption ? `Photo from ${author}: ${caption}` : `Photo from ${author}`;
   dialog.dataset.src = link.href;
@@ -1939,6 +1956,9 @@ document.querySelector<HTMLDialogElement>("#photo-viewer")?.addEventListener("cl
   viewerOpen = 0;
   // Closed some other way than Back: drop the entry the open added.
   if (token && history.state?.chatPhoto === token) history.back();
+  // A delete confirm opened from the viewer goes with it, unless it is deleting.
+  const confirm = document.querySelector<HTMLDialogElement>("#photo-delete");
+  if (confirm?.open && confirm.dataset.from === "viewer" && !confirm.hasAttribute("data-busy")) confirm.close();
 });
 
 document.querySelector<HTMLImageElement>("#photo-viewer [data-viewer-img]")?.addEventListener("load", (event) => {
@@ -1948,6 +1968,7 @@ document.querySelector<HTMLImageElement>("#photo-viewer [data-viewer-img]")?.add
   const p = viewerParts(dialog);
   if (p.loading) p.loading.hidden = true;
   img.hidden = false;
+  if (p.del) p.del.hidden = !dialog.dataset.deleteUrl;
 });
 
 document.querySelector<HTMLImageElement>("#photo-viewer [data-viewer-img]")?.addEventListener("error", (event) => {
@@ -1958,12 +1979,172 @@ document.querySelector<HTMLImageElement>("#photo-viewer [data-viewer-img]")?.add
   const p = viewerParts(dialog);
   if (p.loading) p.loading.hidden = true;
   if (p.error) p.error.hidden = false;
+  if (p.del) p.del.hidden = true;
 });
 
 // Back (or a back swipe) while the viewer is open closes it.
 window.addEventListener("popstate", () => {
   const dialog = document.querySelector<HTMLDialogElement>("#photo-viewer");
   if (dialog?.open && history.state?.chatPhoto !== viewerOpen) dialog.close();
+});
+
+// Deleting a chat photo, from the message sheet or the viewer. One confirm
+// (#photo-delete) serves both, filled from the photo link's data-* as text.
+// The socket swaps #photo-N for "Photo removed" on every open page.
+const DELETE_FAILED = "Couldn't delete the photo. Check your connection and try again.";
+// The message this tab is deleting, so syncViewer leaves its viewer to the answer.
+let deletingPhoto = "";
+
+// The feed's live photo link for a message, or null once it is removed.
+function photoLink(id: string): HTMLAnchorElement | null {
+  const el = id ? document.getElementById(`photo-${id}`) : null;
+  return el instanceof HTMLAnchorElement && el.hasAttribute("data-photo-view") ? el : null;
+}
+
+function photoDeleteParts(dialog: HTMLDialogElement) {
+  const q = <T extends Element>(selector: string) => dialog.querySelector<T>(selector);
+  return {
+    avatar: q<HTMLElement>("[data-photo-delete-avatar]"),
+    name: q<HTMLElement>("[data-photo-delete-name]"),
+    at: q<HTMLElement>("[data-photo-delete-at]"),
+    text: q<HTMLElement>("[data-photo-delete-text]"),
+    alert: q<HTMLElement>("[data-photo-delete-alert]"),
+    error: q<HTMLElement>("[data-photo-delete-error]"),
+    confirm: q<HTMLButtonElement>("[data-photo-delete-confirm]"),
+    cancel: q<HTMLButtonElement>("[data-photo-delete-cancel]"),
+    spin: q<HTMLElement>("[data-photo-delete-spin]"),
+    label: q<HTMLElement>("[data-photo-delete-label]"),
+  };
+}
+
+// While deleting, both buttons lock and nothing dismisses the confirm.
+function photoDeleteBusy(dialog: HTMLDialogElement, busy: boolean) {
+  const p = photoDeleteParts(dialog);
+  dialog.toggleAttribute("data-busy", busy);
+  if (p.confirm) {
+    p.confirm.disabled = busy;
+    p.confirm.toggleAttribute("aria-busy", busy);
+  }
+  if (p.cancel) p.cancel.disabled = busy;
+  if (p.spin) p.spin.hidden = !busy;
+  if (p.label) p.label.textContent = busy ? "Deleting..." : "Delete";
+}
+
+function openPhotoDelete(link: HTMLAnchorElement, from: "sheet" | "viewer") {
+  const dialog = document.querySelector<HTMLDialogElement>("#photo-delete");
+  const url = link.dataset.deleteUrl;
+  if (!dialog || !url || dialog.hasAttribute("data-busy")) return;
+  const p = photoDeleteParts(dialog);
+  const author = link.dataset.author ?? "";
+  const caption = link.dataset.caption ?? "";
+  p.avatar?.replaceChildren(viewerAvatar(author, link.dataset.color ?? "", "xs"));
+  if (p.name) p.name.textContent = link.closest(".msg-own") ? "You" : author;
+  if (p.at) p.at.textContent = link.dataset.at ?? "";
+  if (p.text) p.text.textContent = caption ? `Photo · ${caption}` : "Photo";
+  if (p.alert) p.alert.hidden = true;
+  photoDeleteBusy(dialog, false);
+  dialog.dataset.url = url;
+  dialog.dataset.message = link.dataset.message ?? "";
+  dialog.dataset.from = from;
+  // One sheet at a time. From the viewer, the confirm opens over it, and
+  // Cancel goes back to the photo.
+  if (from === "sheet") document.querySelector<HTMLDialogElement>("#chat-dialog")?.close();
+  dialog.showModal();
+}
+
+async function deletePhoto(dialog: HTMLDialogElement) {
+  const url = dialog.dataset.url;
+  const id = dialog.dataset.message ?? "";
+  if (!url || dialog.hasAttribute("data-busy")) return;
+  // The confirm may be gone by the time the answer comes (Back, a stale-tab
+  // move), so a failure then says so in a toast.
+  const failed = (message: string) => {
+    const p = photoDeleteParts(dialog);
+    if (dialog.open && p.alert && p.error) {
+      p.error.textContent = message;
+      p.alert.hidden = false;
+    } else showToast({ kind: "error", message });
+  };
+  photoDeleteBusy(dialog, true);
+  deletingPhoto = id;
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" });
+    photoDeleteBusy(dialog, false);
+    if (staleRefusal(res)) {
+      dialog.close();
+      return;
+    }
+    if (!res.ok) {
+      failed((await fetchRefusalText(res)) ?? DELETE_FAILED);
+      return;
+    }
+    dialog.close();
+    const viewer = document.querySelector<HTMLDialogElement>("#photo-viewer");
+    if (viewer?.open && viewer.dataset.message === id) viewer.close();
+    showToast({ kind: "success", message: "Photo deleted" });
+    // The socket swaps the bubble; if it hasn't, reload the feed.
+    const feedUrl = document.querySelector<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;
+    window.setTimeout(() => {
+      if (feedUrl && photoLink(id)) void htmx.ajax("GET", feedUrl, { target: "#chat-feed", swap: "innerHTML" });
+    }, 1500);
+  } catch {
+    photoDeleteBusy(dialog, false);
+    failed(DELETE_FAILED);
+  } finally {
+    deletingPhoto = "";
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const row = target?.closest<HTMLElement>("[data-photo-delete]");
+  if (row) {
+    const link = photoLink(row.dataset.photoDelete ?? "");
+    if (link?.dataset.deleteUrl) openPhotoDelete(link, "sheet");
+    else {
+      // Removed while the sheet was open.
+      document.querySelector<HTMLDialogElement>("#chat-dialog")?.close();
+      showToast({ message: "That photo was already removed." });
+    }
+    return;
+  }
+  if (target?.closest("[data-viewer-delete]")) {
+    const link = photoLink(document.querySelector<HTMLDialogElement>("#photo-viewer")?.dataset.message ?? "");
+    if (link) openPhotoDelete(link, "viewer");
+    return;
+  }
+  const confirm = target?.closest("[data-photo-delete-confirm]")?.closest("dialog");
+  if (confirm) void deletePhoto(confirm);
+});
+
+// Escape does nothing while deleting.
+document.querySelector<HTMLDialogElement>("#photo-delete")?.addEventListener("cancel", (event) => {
+  if ((event.currentTarget as HTMLElement).hasAttribute("data-busy")) event.preventDefault();
+});
+
+// Someone else deleted the photo this viewer shows: say so, and stop
+// showing it. Download and Delete go; the caption stays, as in the bubble.
+function syncViewer() {
+  const dialog = document.querySelector<HTMLDialogElement>("#photo-viewer");
+  const id = dialog?.dataset.message ?? "";
+  if (!dialog?.open || !id || id === deletingPhoto) return;
+  if (!document.getElementById(`message-${id}`) || photoLink(id)) return;
+  const p = viewerParts(dialog);
+  p.img?.removeAttribute("src");
+  for (const el of [p.img, p.loading, p.error, p.download, p.del]) if (el) el.hidden = true;
+  if (p.removed) p.removed.hidden = false;
+}
+document.body.addEventListener("htmx:wsAfterMessage", syncViewer);
+document.body.addEventListener("htmx:afterSwap", (event) => {
+  if ((event as CustomEvent<{ target: Element }>).detail.target.id === "chat-feed") syncViewer();
+});
+
+// A chat page restored from the back-forward cache missed what happened
+// while it was away, deleted photos included: draw the feed again.
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted || !document.getElementById("chat-feed")) return;
+  const url = document.querySelector<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;
+  if (url) void htmx.ajax("GET", url, { target: "#chat-feed", swap: "innerHTML" });
 });
 
 // <button data-copy-text="..."> copies its own text, such as a login's username.

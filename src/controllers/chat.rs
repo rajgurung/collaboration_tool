@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     controllers::documents::UPLOAD_BODY_LIMIT,
-    extractors::{current_member::CurrentMember, session::redirect_response},
+    extractors::{
+        current_member::{forbidden, CurrentMember},
+        session::redirect_response,
+    },
     models::{
         conversation_members::{self, ReadMark},
         conversations::{self, kind, GroupParams},
@@ -230,10 +233,14 @@ pub struct MessageView {
     /// There is a photo to show, from `/chat/{conversation_id}/photos/{id}`.
     /// No file id or storage key reaches the page or the socket.
     pub photo: bool,
-    /// The message had a photo that was since deleted from Documents.
+    /// The message had a photo that was since deleted, in chat or in
+    /// Documents.
     pub photo_removed: bool,
     /// When the photo was sent, for the viewer: "Today 09:40".
     pub photo_when: String,
+    /// The viewer may delete this photo: the sheet row, and the viewer's
+    /// Delete. Display only; the delete route checks again.
+    pub can_delete_photo: bool,
 }
 
 impl MessageView {
@@ -284,7 +291,14 @@ impl MessageView {
             } else {
                 String::new()
             },
+            can_delete_photo: false,
         }
+    }
+
+    /// Offers Delete on the photo to its sender, and to owners and admins.
+    pub fn allow_photo_delete(&mut self, viewer_id: i64, can_manage: bool) {
+        self.can_delete_photo =
+            self.photo && messages::may_delete_photo(self.author_id, viewer_id, can_manage);
     }
 
     /// Fills in the reactions as `viewer_id` sees them.
@@ -378,12 +392,14 @@ fn grouped(
     threads: &HashMap<i64, Vec<ReplierStat>>,
     names: &HashMap<i64, String>,
     viewer_id: i64,
+    can_manage: bool,
     tz: Tz,
 ) -> Vec<MessageView> {
     let mut views: Vec<MessageView> = list
         .iter()
         .map(|m| {
             let mut view = MessageView::new(m, names, viewer_id, tz);
+            view.allow_photo_delete(viewer_id, can_manage);
             if let Some(rows) = reactions.get(&m.id) {
                 view.set_reactions(rows, viewer_id);
             }
@@ -481,13 +497,18 @@ fn when(at: &DateTime<FixedOffset>, tz: Tz) -> String {
 }
 
 /// A conversation's last message in the chat list and on Home: "maya: Van
-/// fuel", "maya: Photo · Van fuel", "You: Photo", or with no name for the
-/// other person in a DM. The text is cut to 80 characters.
+/// fuel", "maya: Photo · Van fuel", "You: Photo removed", or with no name for
+/// the other person in a DM. The text is cut to 80 characters.
 fn last_line(who: Option<&str>, message: &messages::Model) -> String {
     let body: String = message.body.chars().take(80).collect();
+    let photo = if message.photo_removed() {
+        "Photo removed"
+    } else {
+        "Photo"
+    };
     let text = match (message.has_photo, body.is_empty()) {
-        (true, true) => "Photo".to_string(),
-        (true, false) => format!("Photo · {body}"),
+        (true, true) => photo.to_string(),
+        (true, false) => format!("{photo} · {body}"),
         (false, _) => body,
     };
     match who {
@@ -671,6 +692,7 @@ async fn main_feed(
         &messages::Model::thread_stats(&ctx.db, member.org.id, &ids).await?,
         names,
         member.user.id,
+        member.can_manage(),
         member.tz(),
     ))
 }
@@ -731,6 +753,7 @@ async fn send(
             let names = names(&ctx, member.org.id).await?;
             let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
             view.read_receipts = true;
+            view.allow_photo_delete(member.user.id, member.can_manage());
             format::render().view(
                 &v,
                 "chat/_message.html",
@@ -785,6 +808,7 @@ async fn send_photo(
     let names = names(&ctx, member.org.id).await?;
     let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
     view.read_receipts = true;
+    view.allow_photo_delete(member.user.id, member.can_manage());
     format::render().view(
         &v,
         "chat/_message.html",
@@ -838,6 +862,57 @@ async fn open_photo(
             .await
         }
     }
+}
+
+/// Deletes a photo from a message, for everyone, for good. Only the sender,
+/// and owners and admins who are in the conversation. The message stays and
+/// says "Photo removed". A photo that is already gone answers 200, so a retry
+/// after a lost answer does not look like a failure.
+#[debug_handler]
+async fn delete_photo(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    Path((id, message_id)): Path<(i64, i64)>,
+) -> Result<Response> {
+    member.require_own_membership()?;
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    let message = messages::Model::find_in_conversation(&ctx.db, &conversation, message_id).await?;
+    // A text message or a thread reply has no photo to delete.
+    if !message.has_photo {
+        return Err(Error::NotFound);
+    }
+    let refused =
+        || forbidden("Only the person who sent a photo, owners and admins can delete it.");
+    if !messages::may_delete_photo(message.user_id, member.user.id, member.can_manage()) {
+        return Err(refused());
+    }
+    // A #general photo is a Documents file: its own rule must agree too.
+    if let Some(PhotoFile::Document(file_id)) = message.photo_file() {
+        match documents::Model::find_in_org(&ctx.db, member.org.id, file_id).await {
+            Ok(file) if !file.can_delete(member.user.id, member.can_manage()) => {
+                return Err(refused());
+            }
+            Ok(_) | Err(ModelError::EntityNotFound) => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    let (message, changed) = message.delete_photo(&ctx).await?;
+    if changed {
+        tracing::info!(
+            org_id = member.org.id,
+            conversation_id = message.conversation_id,
+            message_id = message.id,
+            actor_id = member.user.id,
+            by_manager = message.user_id != member.user.id,
+            "chat photo deleted"
+        );
+        // Saved; tell open pages, but a failed broadcast must not undo the answer.
+        if let Err(err) = super::chat_ws::publish_photo_removed(&ctx, &message) {
+            tracing::error!(error = %err, message_id = message.id, "could not broadcast a removed photo");
+        }
+    }
+    format::render().empty()
 }
 
 /// A refusal as an error toast, with the text in the body for `fetch` callers.
@@ -974,6 +1049,7 @@ async fn actions(
     let rows = reaction_rows(&ctx, member.org.id, &[message.id], &names).await?;
     let mut view = MessageView::new(&message, &names, me, member.tz());
     view.set_reactions(rows.get(&message.id).map_or(&[], Vec::as_slice), me);
+    view.allow_photo_delete(me, member.can_manage());
     view.can_reply = view.can_reply && query.thread.is_none();
     if view.can_reply {
         let stats = messages::Model::thread_stats(&ctx.db, member.org.id, &[message.id]).await?;
@@ -1007,6 +1083,8 @@ async fn thread_feed_data(
     let view = |m: &messages::Model| {
         let mut view = MessageView::new(m, names, me, tz);
         view.can_reply = false;
+        // Only the parent can have a photo.
+        view.allow_photo_delete(me, member.can_manage());
         if let Some(rows) = reactions.get(&m.id) {
             view.set_reactions(rows, me);
         }
@@ -1258,6 +1336,7 @@ pub fn routes() -> Routes {
         .add("/chat/{id}/messages", post(send))
         .add("/chat/{id}/photos", photos)
         .add("/chat/{id}/photos/{message_id}", get(open_photo))
+        .add("/chat/{id}/photos/{message_id}/delete", post(delete_photo))
         .add("/chat/{id}/feed", get(feed))
         .add("/chat/{id}/messages/{message_id}/reactions", post(react))
         .add("/chat/{id}/messages/{message_id}/actions", get(actions))
@@ -1494,6 +1573,7 @@ mod tests {
         assert_eq!(names(&r.shown), vec!["bob", "carol"]);
     }
 
+    /// A text message, or with `has_photo` a live #general photo.
     fn message(body: &str, has_photo: bool) -> messages::Model {
         messages::Model {
             created_at: at(0),
@@ -1504,12 +1584,20 @@ mod tests {
             conversation_id: 1,
             user_id: 1,
             parent_id: None,
-            document_id: None,
+            document_id: has_photo.then_some(9),
             has_photo,
             photo_key: None,
             photo_type: None,
             photo_size: None,
             photo_name: None,
+        }
+    }
+
+    /// A photo message whose photo was deleted.
+    fn removed(body: &str) -> messages::Model {
+        messages::Model {
+            document_id: None,
+            ..message(body, true)
         }
     }
 
@@ -1528,10 +1616,17 @@ mod tests {
         assert_eq!(last_line(None, &photo), "Photo");
         assert_eq!(last_line(Some("maya"), &text), "maya: Morning all");
         assert_eq!(last_line(None, &text), "Morning all");
-        // A #general photo deleted from Documents still had a photo.
+
+        // A deleted photo says so, in chat or in Documents.
         assert_eq!(
-            last_line(Some("maya"), &message("Whiteboard", true)),
-            "maya: Photo · Whiteboard"
+            last_line(Some("tom"), &removed("Van fuel £62")),
+            "tom: Photo removed · Van fuel £62"
+        );
+        assert_eq!(last_line(Some("You"), &removed("")), "You: Photo removed");
+        assert_eq!(last_line(None, &removed("")), "Photo removed");
+        assert_eq!(
+            last_line(Some("maya"), &removed("Whiteboard")),
+            "maya: Photo removed · Whiteboard"
         );
 
         // The text is cut to 80 characters, as before.
@@ -1540,6 +1635,10 @@ mod tests {
         assert_eq!(
             last_line(Some("maya"), &message(&long, true)),
             format!("maya: Photo · {}", "é".repeat(80))
+        );
+        assert_eq!(
+            last_line(Some("maya"), &removed(&long)),
+            format!("maya: Photo removed · {}", "é".repeat(80))
         );
     }
 
