@@ -243,3 +243,154 @@ mod threads {
         assert!(stats[&parent.id][0].last_at >= stats[&parent.id][1].last_at);
     }
 }
+
+/// The `messages-own-photo` constraint: a message's own photo has all four
+/// columns or none, is always a photo type, and never sits beside a
+/// Documents file.
+mod own_photo_constraint {
+    use collab::{
+        app::App,
+        models::{
+            conversations, documents, folders, messages,
+            organisations::{self, SignupParams},
+        },
+    };
+    use loco_rs::{prelude::TenantActiveModelExt, testing::prelude::*};
+    use sea_orm::{ActiveModelTrait, ActiveValue};
+    use serial_test::serial;
+
+    struct Row {
+        key: Option<&'static str>,
+        content_type: Option<&'static str>,
+        size: Option<i64>,
+        name: Option<&'static str>,
+        has_photo: bool,
+        document_id: Option<i64>,
+    }
+
+    const GOOD: Row = Row {
+        key: Some("orgs/1/chat/1/abc"),
+        content_type: Some("image/png"),
+        size: Some(10),
+        name: Some("Receipt.png"),
+        has_photo: true,
+        document_id: None,
+    };
+
+    #[tokio::test]
+    #[serial]
+    async fn own_photos_are_all_or_nothing_and_only_photos() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (alice, org) = organisations::Model::sign_up(
+            &ctx.db,
+            &SignupParams {
+                organisation_name: "Acme".to_string(),
+                name: "alice".to_string(),
+                email: "alice@example.com".to_string(),
+                password: "correct-horse".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let general = conversations::Model::find_general(&ctx.db, org.id)
+            .await
+            .unwrap();
+        let folder = folders::Model::chat_photos(&ctx.db, org.id).await.unwrap();
+        let file = documents::Model::upload(
+            ctx,
+            &folder,
+            alice.id,
+            "a.png",
+            bytes::Bytes::from_static(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"),
+        )
+        .await
+        .unwrap();
+        let insert = |row: Row| {
+            let db = ctx.db.clone();
+            async move {
+                messages::ActiveModel {
+                    body: ActiveValue::Set(String::new()),
+                    conversation_id: ActiveValue::Set(general.id),
+                    user_id: ActiveValue::Set(alice.id),
+                    has_photo: ActiveValue::Set(row.has_photo),
+                    document_id: ActiveValue::Set(row.document_id),
+                    photo_key: ActiveValue::Set(row.key.map(str::to_string)),
+                    photo_type: ActiveValue::Set(row.content_type.map(str::to_string)),
+                    photo_size: ActiveValue::Set(row.size),
+                    photo_name: ActiveValue::Set(row.name.map(str::to_string)),
+                    ..Default::default()
+                }
+                .set_tenant(org.id)
+                .unwrap()
+                .insert(&db)
+                .await
+            }
+        };
+
+        assert!(insert(GOOD).await.is_ok(), "a full own photo");
+        let documents_photo = Row {
+            key: None,
+            content_type: None,
+            size: None,
+            name: None,
+            has_photo: true,
+            document_id: Some(file.id),
+        };
+        assert!(insert(documents_photo).await.is_ok(), "a Documents photo");
+
+        let refused = [
+            (
+                "a Documents file too",
+                Row {
+                    document_id: Some(file.id),
+                    ..GOOD
+                },
+            ),
+            (
+                "SVG",
+                Row {
+                    content_type: Some("image/svg+xml"),
+                    ..GOOD
+                },
+            ),
+            (
+                "HTML",
+                Row {
+                    content_type: Some("text/html"),
+                    ..GOOD
+                },
+            ),
+            (
+                "no type",
+                Row {
+                    content_type: None,
+                    ..GOOD
+                },
+            ),
+            ("no size", Row { size: None, ..GOOD }),
+            ("no name", Row { name: None, ..GOOD }),
+            ("no key", Row { key: None, ..GOOD }),
+            (
+                "only a key",
+                Row {
+                    content_type: None,
+                    size: None,
+                    name: None,
+                    ..GOOD
+                },
+            ),
+            ("empty", Row { size: Some(0), ..GOOD }),
+            (
+                "not a photo message",
+                Row {
+                    has_photo: false,
+                    ..GOOD
+                },
+            ),
+        ];
+        for (what, row) in refused {
+            assert!(insert(row).await.is_err(), "{what} is refused");
+        }
+    }
+}

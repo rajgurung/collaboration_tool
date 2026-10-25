@@ -712,6 +712,10 @@ mod tests {
             parent_id,
             document_id: None,
             has_photo: false,
+            photo_key: None,
+            photo_type: None,
+            photo_size: None,
+            photo_name: None,
         }
     }
 
