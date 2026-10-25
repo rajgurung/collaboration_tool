@@ -8,15 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     controllers::documents::UPLOAD_BODY_LIMIT,
-    extractors::{
-        current_member::{forbidden, CurrentMember},
-        session::redirect_response,
-    },
+    extractors::{current_member::CurrentMember, session::redirect_response},
     models::{
         conversation_members::{self, ReadMark},
         conversations::{self, kind, GroupParams},
-        field_error, memberships,
-        messages::{self, MessageParams, ReplierStat},
+        documents, field_error, memberships,
+        messages::{self, MessageParams, PhotoFile, ReplierStat},
         notifications::{mention_parts, Part, EVERYONE},
         reactions,
     },
@@ -230,10 +227,13 @@ pub struct MessageView {
     pub thread: Option<ThreadLine>,
     /// Offers "Reply in thread": top-level messages in the main feed only.
     pub can_reply: bool,
-    /// The photo's document, shown from `/documents/files/{id}`.
-    pub photo: Option<i64>,
+    /// There is a photo to show, from `/chat/{conversation_id}/photos/{id}`.
+    /// No file id or storage key reaches the page or the socket.
+    pub photo: bool,
     /// The message had a photo that was since deleted from Documents.
     pub photo_removed: bool,
+    /// When the photo was sent, for the viewer: "Today 09:40".
+    pub photo_when: String,
 }
 
 impl MessageView {
@@ -277,8 +277,13 @@ impl MessageView {
             parent_id: message.parent_id,
             thread: None,
             can_reply: message.parent_id.is_none(),
-            photo: message.document_id,
-            photo_removed: message.has_photo && message.document_id.is_none(),
+            photo: message.photo_file().is_some(),
+            photo_removed: message.photo_removed(),
+            photo_when: if message.has_photo {
+                photo_when(&message.created_at, tz)
+            } else {
+                String::new()
+            },
         }
     }
 
@@ -441,6 +446,25 @@ fn reply_when(at: &DateTime<FixedOffset>, tz: Tz) -> String {
     } else {
         when(at, tz)
     }
+}
+
+/// When a photo was sent, for the viewer: "Today 09:40", "Yesterday 09:40",
+/// "Mon 09:40" this week, otherwise "3 Oct 09:40", in the organisation's zone.
+fn photo_when(at: &DateTime<FixedOffset>, tz: Tz) -> String {
+    let age = Utc::now().signed_duration_since(at.with_timezone(&Utc));
+    let local = time::local(*at, tz);
+    let day = local.date_naive();
+    let today = time::today(tz);
+    let date = if day == today {
+        "Today".to_string()
+    } else if day.succ_opt() == Some(today) {
+        "Yesterday".to_string()
+    } else if age.num_days() < 6 {
+        local.format("%a").to_string()
+    } else {
+        local.format("%-d %b").to_string()
+    };
+    format!("{date} {}", local.format("%H:%M"))
 }
 
 /// "14:05" today, "Mon" this week, otherwise "3 Oct", in the organisation's zone.
@@ -715,9 +739,10 @@ async fn send(
     }
 }
 
-/// Posts a photo, with an optional caption, to a channel. Groups and DMs are
-/// private, and Documents is open to every member, so photos stay out of
-/// them. The new message reaches the page over the socket, like any other.
+/// Posts a photo, with an optional caption, to any conversation the member
+/// is in. Where it is stored depends on the conversation (see
+/// `messages::Model::create_photo`). The new message reaches the page over
+/// the socket, like any other.
 #[debug_handler]
 async fn send_photo(
     member: CurrentMember,
@@ -729,9 +754,6 @@ async fn send_photo(
     member.require_own_membership()?;
     let conversation =
         conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
-    if conversation.kind != kind::CHANNEL {
-        return Err(forbidden("Photos can only be posted in channels."));
-    }
     let (name, bytes, caption) =
         match super::documents::read_upload(&mut multipart, Some("body")).await {
             Ok(read) => read,
@@ -758,6 +780,54 @@ async fn send_photo(
         "chat/_message.html",
         member.fragment(data!({ "message": view })),
     )
+}
+
+#[derive(Debug, Deserialize)]
+struct PhotoQuery {
+    download: Option<String>,
+}
+
+/// Streams a chat photo to someone in its conversation, now. Membership is
+/// checked on every request, so leaving a group (or the organisation) takes
+/// effect on the next load. Anyone else gets 404, whatever their role. A
+/// #general photo is its Documents file; a group or DM photo is the
+/// message's own.
+#[debug_handler]
+async fn open_photo(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    Path((id, message_id)): Path<(i64, i64)>,
+    Query(query): Query<PhotoQuery>,
+) -> Result<Response> {
+    member.require_own_membership()?;
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    let message = messages::Model::find_in_conversation(&ctx.db, &conversation, message_id).await?;
+    let download = query.download.is_some();
+    match message.photo_file().ok_or(Error::NotFound)? {
+        PhotoFile::Own {
+            key,
+            content_type,
+            size,
+            name,
+        } => super::documents::send_stored(&ctx, key, content_type, size, name, download).await,
+        PhotoFile::Document(file_id) => {
+            let file = documents::Model::find_in_org(&ctx.db, member.org.id, file_id).await?;
+            // Only ever a photo here, whatever the file became.
+            if !messages::PHOTO_TYPES.contains(&file.content_type.as_str()) {
+                return Err(Error::NotFound);
+            }
+            super::documents::send_stored(
+                &ctx,
+                &file.storage_key,
+                &file.content_type,
+                file.size_bytes,
+                &file.name,
+                download,
+            )
+            .await
+        }
+    }
 }
 
 /// A refusal as an error toast, with the text in the body for `fetch` callers.
@@ -1177,6 +1247,7 @@ pub fn routes() -> Routes {
         .add("/chat/{id}", get(show))
         .add("/chat/{id}/messages", post(send))
         .add("/chat/{id}/photos", photos)
+        .add("/chat/{id}/photos/{message_id}", get(open_photo))
         .add("/chat/{id}/feed", get(feed))
         .add("/chat/{id}/messages/{message_id}/reactions", post(react))
         .add("/chat/{id}/messages/{message_id}/actions", get(actions))
@@ -1411,5 +1482,29 @@ mod tests {
         assert!(!r.dm);
         assert_eq!(r.text, "Read by bob, carol");
         assert_eq!(names(&r.shown), vec!["bob", "carol"]);
+    }
+
+    #[test]
+    fn photo_times_name_the_day_in_the_organisations_zone() {
+        // +05:45 and no daylight saving, so a day back is always yesterday.
+        let tz = chrono_tz::Asia::Kathmandu;
+        let now = Utc::now();
+        let ago =
+            |days: i64| -> DateTime<FixedOffset> { (now - chrono::Duration::days(days)).into() };
+        let clock = |at: DateTime<FixedOffset>| time::local(at, tz).format("%H:%M").to_string();
+        assert_eq!(photo_when(&ago(0), tz), format!("Today {}", clock(ago(0))));
+        assert_eq!(
+            photo_when(&ago(1), tz),
+            format!("Yesterday {}", clock(ago(1)))
+        );
+        let this_week = time::local(ago(3), tz).format("%a %H:%M").to_string();
+        assert_eq!(photo_when(&ago(3), tz), this_week);
+        let older = time::local(ago(20), tz).format("%-d %b %H:%M").to_string();
+        assert_eq!(photo_when(&ago(20), tz), older);
+
+        // The zone decides the clock: 23:30 UTC is 05:15 the next morning in Kathmandu.
+        let late = DateTime::parse_from_rfc3339("2026-01-05T23:30:00+00:00").unwrap();
+        assert_eq!(photo_when(&late, tz), "6 Jan 05:15");
+        assert_eq!(photo_when(&late, chrono_tz::UTC), "5 Jan 23:30");
     }
 }

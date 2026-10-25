@@ -2,6 +2,12 @@
 //! belongs to (put in the request by `extractors::bearer`), inside their one
 //! organisation, through the same model methods and notifications as the web
 //! pages. Nothing here takes an organisation id.
+//!
+//! No tool reads chat messages or their photos today. Groups and DMs are
+//! private to their members, whatever the role, so any future tool that
+//! reads a conversation, a message or a chat photo must load the
+//! conversation through `conversations::Model::find_for_member` first, as
+//! the chat routes do, and must never return a message's `photo_key`.
 use std::collections::HashMap;
 
 use axum::http::request::Parts;

@@ -25,11 +25,9 @@
         <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}"{% if conversation.everyone_hint %} data-everyone-hint="{{ conversation.everyone_hint }}"{% endif %} autocomplete="off" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
         <button type="button" class="field-emoji" data-emoji-for="composer-body" aria-label="Emoji" aria-expanded="false" aria-controls="emoji-picker">{{<icon name="smile" class="ic-smile h-[22px] w-[22px]"/>}}{{<icon name="keyboard" class="ic-keyboard h-[22px] w-[22px]"/>}}</button>
       </div>
-      {% if conversation.kind == "channel" %}
       {# No name, so the socket never sends it; app.ts posts the photo itself. accept="image/*" lets a phone offer its camera. #}
       <input type="file" accept="image/*" hidden data-photo-input data-photo-url="{{ org_url(path="/chat/" ~ (conversation.id) ~ "/photos") }}">
       <button type="button" class="icon-btn text-muted" data-photo-pick aria-label="Send a photo">{{<icon name="image" class="ic-photo h-6 w-6"/>}}{{<icon name="loader-circle" class="ic-sending spin h-6 w-6"/>}}</button>
-      {% endif %}
       <button type="submit" class="btn btn-primary h-11 w-11 p-0" aria-label="Send">{{<icon name="send" class="h-5 w-5"/>}}</button>
     </form>
   </section>
