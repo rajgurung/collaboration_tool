@@ -1809,7 +1809,9 @@ async function sendStagedPhoto(form: HTMLFormElement, photo: Staged) {
 // history entry for the same address, so the phone's Back closes it. Every
 // way of closing ends in the dialog's close event. Everything shown comes
 // from the link's data-* attributes, set as text, never as HTML.
-let viewerCount = 0;
+// Seeded from the clock: history.state survives a reload, so a counter that
+// restarts at 0 could reuse a token an old history entry already holds.
+let viewerCount = Date.now();
 // Which open the viewer is showing (its history entry), or 0 when closed.
 let viewerOpen = 0;
 
