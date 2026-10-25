@@ -218,6 +218,13 @@ impl ActiveModelBehavior for ActiveModel {
                 this.done_at = ActiveValue::Set(Some(chrono::Utc::now().into()));
             }
         }
+        // A status set to anything but done means someone changed the task
+        // since a close, so a reopen leaves it alone.
+        if let ActiveValue::Set(status) = &this.status {
+            if status != "done" {
+                this.status_before_close = ActiveValue::Set(None);
+            }
+        }
         Ok(this)
     }
 }
@@ -283,7 +290,8 @@ impl Model {
 
     /// Adds a task and its assignees together. `claude_grant` is the Claude
     /// connection making it, `None` from the web app (see
-    /// [`super::projects::Model::create`]).
+    /// [`super::projects::Model::create`]). A closed project takes no new
+    /// tasks.
     ///
     /// # Errors
     /// Validation errors, or database errors.
@@ -295,6 +303,9 @@ impl Model {
     ) -> ModelResult<Self> {
         let checked = params.check(db, org_id).await?;
         let txn = db.begin().await?;
+        if let Some(id) = checked.project_id {
+            projects::lock_open_for_tasks(&txn, org_id, id).await?;
+        }
         let last = Entity::find()
             .in_tenant(org_id)
             .order_by_desc(Column::SortOrder)
@@ -324,7 +335,8 @@ impl Model {
         Ok(task)
     }
 
-    /// Saves an edited task and its assignees together.
+    /// Saves an edited task and its assignees together. It can't move into a
+    /// closed project, but a task already in one can still be edited.
     ///
     /// # Errors
     /// Validation errors, or database errors.
@@ -336,7 +348,16 @@ impl Model {
         let org_id = self.organisation_id;
         let checked = params.check(db, org_id).await?;
         let txn = db.begin().await?;
+        let moved = checked.project_id != self.project_id;
+        if let (true, Some(id)) = (moved, checked.project_id) {
+            projects::lock_open_for_tasks(&txn, org_id, id).await?;
+        }
         let mut task = self.into_active_model();
+        // A task moved elsewhere must not carry a saved status into another
+        // project's reopen.
+        if moved {
+            task.status_before_close = ActiveValue::Set(None);
+        }
         task.title = ActiveValue::Set(params.title.trim().to_string());
         task.project_id = ActiveValue::Set(checked.project_id);
         task.priority = ActiveValue::Set(params.priority.clone());
