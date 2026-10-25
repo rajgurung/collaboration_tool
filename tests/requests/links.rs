@@ -516,7 +516,7 @@ const BARE_RUST: [(&str, &str); 23] = [
     ("src/controllers/notifications.rs", "let link = format!(\"/"),
     (
         "src/controllers/notifications.rs",
-        "let link = \"/roadmap?lane=done\"",
+        "link: \"/roadmap?lane=done\"",
     ),
     (
         "src/controllers/notifications.rs",

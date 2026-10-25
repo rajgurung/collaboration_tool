@@ -514,11 +514,19 @@ async fn reopen(
     closable(&ctx, &member, id).await?;
     let reopened = projects::Model::reopen(&ctx.db, member.org.id, id).await?;
     let project = &reopened.project;
+    if !reopened.already {
+        // The reopen is already committed, as with a close.
+        if let Err(err) =
+            super::notifications::project_reopened(&ctx, &member, project, &reopened.tasks).await
+        {
+            tracing::error!(error = %err, project_id = id, "could not send the reopened notices");
+        }
+    }
     tracing::info!(
         user_id = member.user.id,
         org_id = member.org.id,
         project_id = id,
-        tasks = reopened.restored,
+        tasks = reopened.tasks.len(),
         already = reopened.already,
         acting = member.acting,
         "reopened a project"
@@ -528,7 +536,7 @@ async fn reopen(
         project.name,
         projects::lane_label(&project.lane)
     );
-    let message = match (reopened.already, reopened.restored) {
+    let message = match (reopened.already, reopened.tasks.len()) {
         (true, _) => format!("{} is already open.", project.name),
         (false, 0) => back,
         (false, 1) => format!("{back} 1 task reopened."),

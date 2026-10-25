@@ -247,7 +247,7 @@ async fn reopen_puts_each_task_back() {
         .await
         .unwrap();
     assert!(!reopened.already);
-    assert_eq!(reopened.restored, 3);
+    assert_eq!(reopened.tasks.len(), 3);
     assert!(reopened.project.closed_at.is_none());
     assert!(reopened.project.closed_by_id.is_none());
     assert!(reopened.project.in_lane("now"));
@@ -294,7 +294,7 @@ async fn a_task_changed_since_is_left_alone() {
     let reopened = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id)
         .await
         .unwrap();
-    assert_eq!(reopened.restored, 1, "only the untouched task");
+    assert_eq!(reopened.tasks.len(), 1, "only the untouched task");
     assert_eq!(reload(ctx, &w.todo).await.status, "progress");
     assert_eq!(reload(ctx, &w.blocked).await.status, "done");
     assert_eq!(reload(ctx, &w.progress).await.status, "progress");

@@ -897,6 +897,7 @@
   .notice-note, .notice-reply { color: var(--done); }
   .notice-project { color: var(--blocked); }
   .notice-closed { color: var(--done); }
+  .notice-reopened { color: var(--progress); }
   .notice-dot { flex-shrink: 0; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .mention { padding: 0 2px; border-radius: 4px; font-weight: 600; color: var(--progress); background: color-mix(in srgb, var(--progress) 12%, transparent); }
   :has(> textarea[data-mentions]) { position: relative; }

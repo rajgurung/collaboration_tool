@@ -155,11 +155,12 @@ pub struct Closed {
     pub already: bool,
 }
 
-/// What a reopen did: how many tasks went back to their earlier status.
+/// What a reopen did. `tasks` are the rows that went back to their earlier
+/// status, so the toast and the notices count what really changed.
 #[derive(Debug)]
 pub struct Reopened {
     pub project: Model,
-    pub restored: u64,
+    pub tasks: Vec<tasks::Model>,
     pub already: bool,
 }
 
@@ -460,7 +461,7 @@ impl Model {
         if !project.is_closed() {
             return Ok(Reopened {
                 project,
-                restored: 0,
+                tasks: Vec::new(),
                 already: true,
             });
         }
@@ -483,9 +484,8 @@ impl Model {
             .filter(tasks::Column::ProjectId.eq(project.id))
             .filter(tasks::Column::Status.eq("done"))
             .filter(tasks::Column::StatusBeforeClose.is_not_null())
-            .exec(&txn)
-            .await?
-            .rows_affected;
+            .exec_with_returning(&txn)
+            .await?;
         // Any saved status left (there should be none) would be stale by the
         // next close.
         tasks::Entity::update_many()
@@ -505,7 +505,7 @@ impl Model {
         txn.commit().await?;
         Ok(Reopened {
             project,
-            restored,
+            tasks: restored,
             already: false,
         })
     }

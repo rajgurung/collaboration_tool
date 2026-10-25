@@ -1052,7 +1052,7 @@ async fn removed_members_get_nothing() {
 
 #[tokio::test]
 #[serial]
-async fn reopen_and_a_second_close_send_nothing() {
+async fn a_second_close_or_reopen_sends_nothing() {
     request::<App, _, _>(|request, ctx| async move {
         let (ana, _, _, _, website) = website_with_people(&request, &ctx).await;
         act(&request, &ana, &website, "close").await;
@@ -1061,9 +1061,73 @@ async fn reopen_and_a_second_close_send_nothing() {
             .await
             .unwrap();
         act(&request, &ana, &website, "close").await;
+        assert!(notices(&ctx).await.is_empty(), "already closed");
+        act(&request, &ana, &website, "reopen").await;
+        notifications::Entity::delete_many()
+            .exec(&ctx.db)
+            .await
+            .unwrap();
         let (status, _) = act(&request, &ana, &website, "reopen").await;
         assert_eq!(status, 200);
-        assert!(notices(&ctx).await.is_empty());
+        assert!(notices(&ctx).await.is_empty(), "already open");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_reopen_sends_one_notice_per_person() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, maya, tom, leo, website) = website_with_people(&request, &ctx).await;
+        act(&request, &ana, &website, "close").await;
+        notifications::Entity::delete_many()
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+        let (status, _) = act(&request, &ana, &website, "reopen").await;
+        assert_eq!(status, 200);
+        let all = notices(&ctx).await;
+        let bodies = |user: i64| -> Vec<String> {
+            all.iter()
+                .filter(|n| n.user_id == user)
+                .map(|n| n.body.clone())
+                .collect()
+        };
+        assert_eq!(bodies(maya), ["reopened Website\n2 of your tasks reopened"]);
+        assert_eq!(bodies(tom), ["reopened Website\n1 of your tasks reopened"]);
+        assert!(bodies(leo).is_empty(), "Logo was done before the close");
+        assert!(all.iter().all(|n| n.kind == "reopened"));
+        assert!(
+            all.iter().all(|n| n.link == "/roadmap?lane=now"),
+            "back in its lane"
+        );
+        let ana_user = ana_id(&ctx).await;
+        assert!(
+            all.iter().all(|n| n.user_id != ana_user),
+            "the reopener is not told"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_bell_shows_the_reopened_icon() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (ana, _, _, _, website) = website_with_people(&request, &ctx).await;
+        act(&request, &ana, &website, "close").await;
+        act(&request, &ana, &website, "reopen").await;
+        let cookie = super::prepare_data::login(
+            &request,
+            "maya@example.com",
+            super::prepare_data::USER_PASSWORD,
+        )
+        .await;
+        let maya = TestMember::of(&ctx, cookie, ana.org_id).await;
+        let bell = get(&request, &maya, "/notifications").await;
+        assert!(bell.contains("notice-reopened"), "{bell}");
+        assert!(bell.contains("reopened Website"));
+        assert!(bell.contains("2 of your tasks reopened"));
     })
     .await;
 }
