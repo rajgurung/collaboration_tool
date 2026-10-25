@@ -10,6 +10,7 @@ pub mod join;
 pub mod dashboard;
 
 pub mod roadmap;
+pub mod roadmap_done;
 
 pub mod tasks;
 pub mod timezone;

@@ -354,6 +354,9 @@
   .lane-head[aria-expanded="false"] + .lane-cells { display: none; }
   .lane-mark { width: 14px; height: 14px; border-radius: 4px; background: var(--dot); }
   .lane-name { font-weight: 700; }
+  /* A closed project's swimlane, shown while one of its tasks is open again. */
+  .lane-done { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 4px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); background: color-mix(in srgb, var(--done) 10%, var(--surface)); font-size: 12px; font-weight: 700; }
+  .lane-done svg { color: var(--done); }
   .lane-progress { margin-left: auto; width: 120px; height: 6px; border-radius: 999px; background: var(--chip); overflow: hidden; }
   .lane-progress > span { display: block; height: 100%; border-radius: 999px; }
   .lane-cells { padding: 0 14px 14px; }

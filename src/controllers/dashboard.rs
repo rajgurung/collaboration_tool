@@ -141,7 +141,7 @@ async fn index(
     // The "now" lane: progress from finished tasks, stuck work, and who is on it.
     let roadmap_now: Vec<serde_json::Value> = all_projects
         .iter()
-        .filter(|p| p.lane == "now")
+        .filter(|p| p.in_lane("now"))
         .map(|p| {
             let theirs: Vec<&tasks::Model> = all_tasks
                 .iter()

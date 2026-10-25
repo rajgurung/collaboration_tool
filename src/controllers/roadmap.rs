@@ -67,7 +67,7 @@ async fn lane_data(ctx: &AppContext, org_id: i64, lane: &str) -> Result<serde_js
         .map(|key| {
             let cards: Vec<Card> = projects
                 .iter()
-                .filter(|p| p.lane == *key)
+                .filter(|p| p.in_lane(key))
                 .map(|p| {
                     let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
                     let own_tasks = all_tasks.iter().filter(|t| t.project_id == Some(p.id));

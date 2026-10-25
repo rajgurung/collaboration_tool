@@ -126,6 +126,8 @@ struct Lane {
     cells: Vec<Vec<Row>>,
     /// The Done cell shows only the latest few; this says there are more.
     more_done: bool,
+    /// A closed project's swimlane: a "Done" badge and no add buttons.
+    closed: bool,
 }
 
 fn due_label(date: Option<chrono::NaiveDate>) -> String {
@@ -427,6 +429,7 @@ fn board_data(
             person_id,
             cells,
             more_done: done > DONE_SHOWN,
+            closed: false,
         }
     };
     let lanes: Vec<Lane> = match group {
@@ -478,14 +481,25 @@ fn board_data(
             rows.iter().collect(),
         )],
         _ => {
-            let mut lanes: Vec<Lane> = ws
-                .projects
-                .iter()
+            // Open projects first. A closed one shows, last, only while one of
+            // its tasks in view is open again; otherwise its finished work
+            // would fill the board.
+            let (open, closed): (Vec<&projects::Model>, Vec<&projects::Model>) =
+                ws.projects.iter().partition(|p| !p.is_closed());
+            let mut lanes: Vec<Lane> = open
+                .into_iter()
+                .chain(closed)
                 .filter_map(|p| {
                     let theirs: Vec<&Row> =
                         rows.iter().filter(|r| r.project_id == Some(p.id)).collect();
-                    (!theirs.is_empty()).then(|| {
-                        lane(
+                    let shown = if p.is_closed() {
+                        theirs.iter().any(|r| r.status != "done")
+                    } else {
+                        !theirs.is_empty()
+                    };
+                    shown.then(|| Lane {
+                        closed: p.is_closed(),
+                        ..lane(
                             format!("project-{}", p.id),
                             p.name.clone(),
                             p.accent.clone(),
@@ -659,33 +673,44 @@ fn form_values(params: &TaskParams) -> serde_json::Value {
     })
 }
 
+/// The task form's data. `current_project` is the task's project, or the one
+/// a refused form posted: kept in the picker even when it is closed.
 async fn task_form_data(
     ctx: &AppContext,
     member: &CurrentMember,
     task_id: Option<i64>,
+    current_project: Option<i64>,
     values: serde_json::Value,
     errors: &FieldErrors,
 ) -> Result<serde_json::Value> {
     let team = Person::from_team(memberships::Model::team(&ctx.db, member.org.id).await?);
-    // Grouped by roadmap lane so the picker reads Now, Next, Later.
+    // Grouped by roadmap lane so the picker reads Now, Next, Later. Closed
+    // projects take no tasks, so they are left out.
     let all_projects = projects::Model::list_for_org(&ctx.db, member.org.id).await?;
-    let project_groups: Vec<serde_json::Value> = projects::LANES
+    let mut project_groups: Vec<serde_json::Value> = projects::LANES
         .iter()
         .filter_map(|lane| {
             let projects: Vec<serde_json::Value> = all_projects
                 .iter()
-                .filter(|p| p.lane == *lane)
+                .filter(|p| p.in_lane(lane))
                 .map(|p| serde_json::json!({ "id": p.id, "name": p.name }))
                 .collect();
-            let label = match *lane {
-                "now" => "Now",
-                "next" => "Next",
-                _ => "Later",
-            };
-            (!projects.is_empty())
-                .then(|| serde_json::json!({ "label": label, "projects": projects }))
+            (!projects.is_empty()).then(
+                || serde_json::json!({ "label": projects::lane_label(lane), "projects": projects }),
+            )
         })
         .collect();
+    // Without this a task in a closed project would fall back to "No
+    // project", and saving would quietly make it a chore.
+    if let Some(p) = all_projects
+        .iter()
+        .find(|p| Some(p.id) == current_project && p.is_closed())
+    {
+        project_groups.push(serde_json::json!({
+            "label": "Done",
+            "projects": [{ "id": p.id, "name": p.name }],
+        }));
+    }
     let statuses: Vec<serde_json::Value> = STATUSES
         .iter()
         .map(
@@ -722,9 +747,12 @@ async fn new(
             String::new()
         },
     };
+    // No current project: an old add button naming a closed project finds
+    // no option for it, so the picker starts on "No project".
     let data = task_form_data(
         &ctx,
         &member,
+        None,
         None,
         form_values(&params),
         &FieldErrors::new(),
@@ -761,7 +789,8 @@ async fn create(
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let data = task_form_data(&ctx, &member, None, form_values(&params), &errors).await?;
+            let data =
+                task_form_data(&ctx, &member, None, None, form_values(&params), &errors).await?;
             invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, member.fragment(data))
         }
     }
@@ -787,6 +816,7 @@ async fn edit(
         &ctx,
         &member,
         Some(id),
+        task.project_id,
         form_values(&params),
         &FieldErrors::new(),
     )
@@ -825,8 +855,8 @@ async fn update(
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let data =
-                task_form_data(&ctx, &member, Some(id), form_values(&params), &errors).await?;
+            let data = task_form_data(&ctx, &member, Some(id), None, form_values(&params), &errors)
+                .await?;
             invalid_form(&v, "tasks/_form.html", TASK_FORM_ID, member.fragment(data))
         }
     }
