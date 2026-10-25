@@ -1107,3 +1107,105 @@ async fn notices_stay_in_the_org() {
     })
     .await;
 }
+
+/// Adds `n` tasks with `status` to a project (or a chore with `None`).
+async fn tasks_in(ctx: &AppContext, org_id: i64, project_id: Option<i64>, status: &str, n: usize) {
+    for i in 0..n {
+        task_in(
+            ctx,
+            org_id,
+            project_id,
+            &format!("{status} {i}"),
+            status,
+            &[],
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn home_shows_the_donut_for_now_projects() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let org = ana.org_id;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let spring = project_in(&ctx, ORG, "Spring tea range").await;
+        let wholesale = project_in(&ctx, ORG, "Wholesale catalogue").await;
+        tasks_in(&ctx, org, Some(website.id), "done", 11).await;
+        tasks_in(&ctx, org, Some(spring.id), "done", 10).await;
+        tasks_in(&ctx, org, Some(wholesale.id), "done", 10).await;
+        tasks_in(&ctx, org, Some(website.id), "progress", 9).await;
+        tasks_in(&ctx, org, Some(spring.id), "blocked", 3).await;
+        tasks_in(&ctx, org, Some(wholesale.id), "todo", 7).await;
+        // None of these count: a chore, a closed project, a project in Next.
+        tasks_in(&ctx, org, None, "todo", 4).await;
+        let shop = project_in(&ctx, ORG, "Shop till upgrade").await;
+        tasks_in(&ctx, org, Some(shop.id), "progress", 5).await;
+        close(&ctx, &ana, &shop).await;
+        let next = projects::Model::create(
+            &ctx.db,
+            org,
+            &projects::ProjectParams {
+                name: "Ship to Europe".to_string(),
+                lane: "next".to_string(),
+                status: "Idea".to_string(),
+                accent: "#c9d76a".to_string(),
+                owner_id: String::new(),
+                summary: String::new(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        tasks_in(&ctx, org, Some(next.id), "blocked", 2).await;
+
+        let home = get(&request, &ana, "/dashboard").await;
+        assert!(home.contains(
+            r#"aria-label="Now: 62% done. 31 done, 9 in progress, 3 blocked, 7 to do.""#
+        ));
+        assert!(home.contains(">62%</text>"));
+        assert!(home.contains("31 of 50 tasks done"));
+        assert!(home.contains("In 3 projects in Now"));
+        assert_eq!(home.matches("donut-arc").count(), 4);
+        assert!(home.contains(r#"stroke-dasharray="192.78 314.16""#));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn no_donut_when_now_has_no_tasks() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let home = get(&request, &ana, "/dashboard").await;
+        assert!(
+            home.contains(r#"Nothing in the "now" lane."#)
+                || home.contains("Nothing in the &quot;now&quot; lane.")
+        );
+        assert!(!home.contains("donut-card"));
+
+        project_in(&ctx, ORG, "Tea tasting evenings").await;
+        let home = get(&request, &ana, "/dashboard").await;
+        assert!(home.contains("Tea tasting evenings"));
+        assert!(home.contains("No tasks yet"));
+        assert!(!home.contains("donut-card"));
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn all_done_shows_100() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        tasks_in(&ctx, ana.org_id, Some(website.id), "done", 19).await;
+        let home = get(&request, &ana, "/dashboard").await;
+        assert!(home.contains(">100%</text>"));
+        assert_eq!(home.matches("donut-arc").count(), 1);
+        assert!(home.contains("In 1 project in Now"));
+        assert_eq!(home.matches(r#"class="zero""#).count(), 3);
+    })
+    .await;
+}
