@@ -232,7 +232,10 @@ async fn photos_work_in_dms_and_groups_for_members_only() {
             assert!(page.contains("data-photo-pick"), "{}", conversation.kind);
             assert!(page.contains(r#"accept="image/*""#));
             assert!(page.contains(r#"aria-label="Add a photo""#));
-            assert!(page.contains("data-photo-attach hidden"), "no photo waiting yet");
+            assert!(
+                page.contains("data-photo-attach hidden"),
+                "no photo waiting yet"
+            );
 
             let res = send_photo(&request, &alice, conversation.id, None, "a.png", PNG).await;
             assert_eq!(res.status_code(), 200, "{}", conversation.kind);
@@ -758,6 +761,47 @@ async fn a_general_message_pointed_at_a_pdf_is_not_served() {
         let res = open_photo(&request, &bob, general.id, message.id).await;
         assert_eq!(res.status_code(), 404);
         assert!(!res.text().contains("%PDF"));
+    })
+    .await;
+}
+
+/// A photo can start a thread, so the thread page has the viewer, but
+/// replies are text only.
+#[tokio::test]
+#[serial]
+async fn thread_replies_have_no_photo_button() {
+    request::<App, _, _>(|request, ctx| async move {
+        let (alice, _bob) = acme_with_bob(&request, &ctx).await;
+        let org_id = acme_id(&ctx).await;
+        let alice_id = user_id(&ctx, "alice@example.com").await;
+        let group = group_of(&ctx, org_id, alice_id, "finance", vec![]).await;
+        send_photo(&request, &alice, group.id, Some("Receipt"), "a.png", PNG).await;
+        let message = only_message(&ctx).await;
+        let thread = page(
+            &request,
+            &alice,
+            &format!("/chat/{}/threads/{}", group.id, message.id),
+        )
+        .await;
+        assert!(!thread.contains("data-photo-pick"), "{thread}");
+        assert!(!thread.contains("data-photo-input"));
+        assert!(thread.contains(r#"id="photo-viewer""#));
+        assert!(thread.contains(r##"data-place="#finance""##));
+        assert!(thread.contains(&photo_path(group.id, message.id)));
+
+        let show = page(&request, &alice, &format!("/chat/{}", group.id)).await;
+        assert!(show.contains(r#"id="photo-viewer""#));
+        let dm_id = conversations::Model::start_dm(
+            &ctx.db,
+            org_id,
+            alice_id,
+            user_id(&ctx, "bob@example.com").await,
+        )
+        .await
+        .unwrap()
+        .id;
+        let dm = page(&request, &alice, &format!("/chat/{dm_id}")).await;
+        assert!(dm.contains(r#"data-place="Direct message""#));
     })
     .await;
 }

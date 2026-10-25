@@ -1805,6 +1805,128 @@ async function sendStagedPhoto(form: HTMLFormElement, photo: Staged) {
   }
 }
 
+// Chat photos open in a full-screen viewer in the same tab. Opening adds a
+// history entry for the same address, so the phone's Back closes it. Every
+// way of closing ends in the dialog's close event. Everything shown comes
+// from the link's data-* attributes, set as text, never as HTML.
+let viewerCount = 0;
+// Which open the viewer is showing (its history entry), or 0 when closed.
+let viewerOpen = 0;
+
+function viewerParts(dialog: HTMLDialogElement) {
+  const q = <T extends Element>(selector: string) => dialog.querySelector<T>(selector);
+  return {
+    avatar: q<HTMLElement>("[data-viewer-avatar]"),
+    name: q<HTMLElement>("[data-viewer-name]"),
+    when: q<HTMLElement>("[data-viewer-when]"),
+    download: q<HTMLAnchorElement>("[data-viewer-download]"),
+    stage: q<HTMLElement>("[data-viewer-stage]"),
+    img: q<HTMLImageElement>("[data-viewer-img]"),
+    loading: q<HTMLElement>("[data-viewer-loading]"),
+    error: q<HTMLElement>("[data-viewer-error]"),
+    caption: q<HTMLElement>("[data-viewer-caption]"),
+  };
+}
+
+// The same circle as the avatar component (components/ui.html).
+function viewerAvatar(name: string, color: string): HTMLElement {
+  const avatar = document.createElement("span");
+  avatar.className = "avatar avatar-sm";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.style.background = color;
+  avatar.textContent = (Array.from(name)[0] ?? "").toUpperCase();
+  return avatar;
+}
+
+function loadViewerPhoto(dialog: HTMLDialogElement) {
+  const p = viewerParts(dialog);
+  const src = dialog.dataset.src;
+  if (!p.img || !p.loading || !p.error || !src) return;
+  p.error.hidden = true;
+  p.loading.hidden = false;
+  p.img.hidden = true;
+  p.img.removeAttribute("src");
+  p.img.src = src;
+}
+
+function openViewer(dialog: HTMLDialogElement, link: HTMLAnchorElement) {
+  const p = viewerParts(dialog);
+  if (!p.avatar || !p.name || !p.when || !p.download || !p.img || !p.caption) return;
+  const author = link.dataset.author ?? "";
+  const caption = link.dataset.caption ?? "";
+  p.avatar.replaceChildren(viewerAvatar(author, link.dataset.color ?? ""));
+  p.name.textContent = author;
+  p.when.textContent = [link.dataset.when, dialog.dataset.place].filter(Boolean).join(" · ");
+  p.caption.textContent = caption;
+  p.caption.hidden = !caption;
+  const download = new URL(link.href);
+  download.searchParams.set("download", "1");
+  p.download.href = download.toString();
+  dialog.setAttribute("aria-label", `Photo from ${author}`);
+  p.img.alt = caption ? `Photo from ${author}: ${caption}` : `Photo from ${author}`;
+  dialog.dataset.src = link.href;
+  loadViewerPhoto(dialog);
+  dialog.showModal();
+  viewerOpen = ++viewerCount;
+  history.pushState({ chatPhoto: viewerOpen }, "");
+}
+
+document.addEventListener("click", (event) => {
+  const target = event.target as Element | null;
+  const link = target?.closest<HTMLAnchorElement>("a[data-photo-view]");
+  const dialog = document.querySelector<HTMLDialogElement>("#photo-viewer");
+  if (!dialog) return;
+  if (link) {
+    // A new tab or window is the browser's to open.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    openViewer(dialog, link);
+    return;
+  }
+  if (!dialog.open) return;
+  const p = viewerParts(dialog);
+  // The dark area around the photo closes it, as the dialog itself does.
+  if (target?.closest("[data-viewer-close]") || target === p.stage || target === p.loading) dialog.close();
+  else if (target?.closest("[data-viewer-retry]")) loadViewerPhoto(dialog);
+});
+
+document.querySelector<HTMLDialogElement>("#photo-viewer")?.addEventListener("close", (event) => {
+  const dialog = event.currentTarget as HTMLDialogElement;
+  const p = viewerParts(dialog);
+  // Stops a slow load.
+  p.img?.removeAttribute("src");
+  if (p.img) p.img.hidden = true;
+  const token = viewerOpen;
+  viewerOpen = 0;
+  // Closed some other way than Back: drop the entry the open added.
+  if (token && history.state?.chatPhoto === token) history.back();
+});
+
+document.querySelector<HTMLImageElement>("#photo-viewer [data-viewer-img]")?.addEventListener("load", (event) => {
+  const img = event.currentTarget as HTMLImageElement;
+  const dialog = img.closest("dialog");
+  if (!dialog?.open) return;
+  const p = viewerParts(dialog);
+  if (p.loading) p.loading.hidden = true;
+  img.hidden = false;
+});
+
+document.querySelector<HTMLImageElement>("#photo-viewer [data-viewer-img]")?.addEventListener("error", (event) => {
+  const img = event.currentTarget as HTMLImageElement;
+  const dialog = img.closest("dialog");
+  // Clearing the src on close fires this too.
+  if (!dialog?.open || !img.getAttribute("src")) return;
+  const p = viewerParts(dialog);
+  if (p.loading) p.loading.hidden = true;
+  if (p.error) p.error.hidden = false;
+});
+
+// Back (or a back swipe) while the viewer is open closes it.
+window.addEventListener("popstate", () => {
+  const dialog = document.querySelector<HTMLDialogElement>("#photo-viewer");
+  if (dialog?.open && history.state?.chatPhoto !== viewerOpen) dialog.close();
+});
+
 // <button data-copy-text="..."> copies its own text, such as a login's username.
 document.addEventListener("click", (event) => {
   const button = (event.target as Element | null)?.closest<HTMLElement>("[data-copy-text]");

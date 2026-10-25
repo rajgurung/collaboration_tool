@@ -1,0 +1,17 @@
+{# The full-screen photo viewer. Empty slots: frontend/app.ts fills them from the photo link, with textContent only. Outside #chat-feed, so a feed reload never touches it. Always dark, in both themes. #}
+<dialog id="photo-viewer" class="viewer" aria-label="Photo" data-place="{% if conversation.kind == "dm" %}Direct message{% else %}#{{ conversation.label }}{% endif %}">
+  <div class="viewer-bar">
+    <button type="button" class="icon-btn viewer-close" data-viewer-close aria-label="Close">{{<icon name="x" class="h-6 w-6"/>}}</button>
+    <div class="viewer-who">
+      <span class="viewer-avatar" data-viewer-avatar></span>
+      <span class="viewer-names"><span class="n truncate-1" data-viewer-name></span><span class="t truncate-1" data-viewer-when></span></span>
+    </div>
+    <a class="viewer-dl" download data-viewer-download aria-label="Download">{{<icon name="download" class="h-[22px] w-[22px]"/>}}<span class="viewer-dl-label">Download</span></a>
+  </div>
+  <div class="viewer-stage" data-viewer-stage>
+    <img data-viewer-img alt="" hidden>
+    <div class="viewer-state" data-viewer-loading role="status">{{<icon name="loader-circle" class="spin h-8 w-8"/>}}<span class="sr-only">Loading the photo</span></div>
+    <div class="viewer-state" data-viewer-error role="alert" hidden>{{<icon name="image" class="h-8 w-8"/>}}<strong>Couldn't load this photo</strong><span>Check your connection and try again.</span><button type="button" class="viewer-btn" data-viewer-retry>{{<icon name="rotate-cw" class="h-[18px] w-[18px]"/>}}Try again</button></div>
+  </div>
+  <div class="viewer-cap" data-viewer-caption hidden></div>
+</dialog>
