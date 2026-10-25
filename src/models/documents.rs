@@ -109,6 +109,65 @@ fn full_name(stem: &str, ext: &str) -> String {
     format!("{}.{ext}", if stem.is_empty() { "File" } else { stem })
 }
 
+/// A stored file's name: the uploaded name's stem, cleaned, plus the
+/// extension of its sniffed type, so the name never claims another type.
+#[must_use]
+pub fn stored_name(file_name: &str, content_type: &str) -> String {
+    let ext = by_mime(content_type).map_or("", |(_, ext, _)| ext);
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+    full_name(stem, ext)
+}
+
+/// A new random storage key in one area of an organisation, such as `docs`:
+/// `orgs/{org}/{area}/{uuid}`.
+#[must_use]
+pub fn new_key(org_id: i64, area: &str) -> String {
+    format!("orgs/{org_id}/{area}/{}", uuid::Uuid::new_v4())
+}
+
+/// Whether the browser may show this type in place rather than download it.
+fn opens_inline_type(content_type: &str) -> bool {
+    INLINE.contains(&content_type)
+}
+
+/// The `Content-Security-Policy` a file is sent with: nothing may load or
+/// run, and nothing may frame it. Images are also sandboxed. PDFs are not,
+/// so built-in PDF viewers keep working (Safari's is unverified under
+/// `sandbox`); `default-src 'none'` still stops scripts and requests.
+#[must_use]
+pub fn content_security_policy_for(content_type: &str) -> &'static str {
+    if content_type == "application/pdf" {
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+    } else {
+        "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'"
+    }
+}
+
+/// A `Content-Disposition` value (RFC 6266): a plain ASCII name for old
+/// browsers and the real name, percent-encoded, for the rest.
+#[must_use]
+pub fn disposition_for(name: &str, content_type: &str, download: bool) -> String {
+    let kind = if download || !opens_inline_type(content_type) {
+        "attachment"
+    } else {
+        "inline"
+    };
+    let ascii: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii() && !c.is_ascii_control() && c != '"' && c != '\\' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let encoded = utf8_percent_encode(name, NON_ALPHANUMERIC);
+    format!(r#"{kind}; filename="{ascii}"; filename*=UTF-8''{encoded}"#)
+}
+
 /// "1.8 MB", "214 KB", "900 bytes".
 #[must_use]
 pub fn human_size(bytes: i64) -> String {
@@ -210,21 +269,13 @@ impl Model {
             return Err(ModelError::msg(&too_big()));
         }
         let content_type = sniff(&bytes, file_name).ok_or_else(|| ModelError::msg(WRONG_TYPE))?;
-        let ext = by_mime(content_type).map_or("", |(_, ext, _)| ext);
-        let stem = file_name
-            .rsplit_once('.')
-            .map_or(file_name, |(stem, _)| stem);
-        let key = format!(
-            "orgs/{}/docs/{}",
-            folder.organisation_id,
-            uuid::Uuid::new_v4()
-        );
+        let key = new_key(folder.organisation_id, "docs");
         ctx.storage
             .upload(Path::new(&key), &bytes)
             .await
             .map_err(storage_error)?;
         let saved = ActiveModel {
-            name: ActiveValue::Set(full_name(stem, ext)),
+            name: ActiveValue::Set(stored_name(file_name, content_type)),
             content_type: ActiveValue::Set(content_type.to_string()),
             size_bytes: ActiveValue::Set(i64::try_from(bytes.len()).unwrap_or(i64::MAX)),
             storage_key: ActiveValue::Set(key.clone()),
@@ -314,44 +365,19 @@ impl Model {
     /// Whether the browser may show it in place rather than download it.
     #[must_use]
     pub fn opens_inline(&self) -> bool {
-        INLINE.contains(&self.content_type.as_str())
+        opens_inline_type(&self.content_type)
     }
 
-    /// The `Content-Security-Policy` a file is sent with: nothing may load or
-    /// run, and nothing may frame it. Images are also sandboxed. PDFs are not,
-    /// so built-in PDF viewers keep working (Safari's is unverified under
-    /// `sandbox`); `default-src 'none'` still stops scripts and requests.
+    /// See [`content_security_policy_for`].
     #[must_use]
     pub fn content_security_policy(&self) -> &'static str {
-        if self.content_type == "application/pdf" {
-            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"
-        } else {
-            "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'"
-        }
+        content_security_policy_for(&self.content_type)
     }
 
-    /// A `Content-Disposition` value (RFC 6266): a plain ASCII name for old
-    /// browsers and the real name, percent-encoded, for the rest.
+    /// See [`disposition_for`].
     #[must_use]
     pub fn disposition(&self, download: bool) -> String {
-        let kind = if download || !self.opens_inline() {
-            "attachment"
-        } else {
-            "inline"
-        };
-        let ascii: String = self
-            .name
-            .chars()
-            .map(|c| {
-                if c.is_ascii() && !c.is_ascii_control() && c != '"' && c != '\\' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let encoded = utf8_percent_encode(&self.name, NON_ALPHANUMERIC);
-        format!(r#"{kind}; filename="{ascii}"; filename*=UTF-8''{encoded}"#)
+        disposition_for(&self.name, &self.content_type, download)
     }
 }
 
@@ -431,5 +457,52 @@ mod tests {
         assert!(file.disposition(true).starts_with("attachment;"));
         assert_eq!(human_size(1_887_436), "1.8 MB");
         assert_eq!(human_size(219_136), "214 KB");
+    }
+
+    #[test]
+    fn the_free_helpers_match_the_methods() {
+        let mut file = Model {
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+            id: 1,
+            name: "Receipt.png".to_string(),
+            content_type: "image/png".to_string(),
+            size_bytes: 1,
+            storage_key: "k".to_string(),
+            organisation_id: 1,
+            folder_id: 1,
+            uploaded_by_id: None,
+        };
+        for content_type in ["image/png", "application/pdf", "application/msword"] {
+            file.content_type = content_type.to_string();
+            for download in [false, true] {
+                assert_eq!(
+                    file.disposition(download),
+                    disposition_for(&file.name, content_type, download)
+                );
+            }
+            assert_eq!(
+                file.content_security_policy(),
+                content_security_policy_for(content_type)
+            );
+        }
+        assert!(content_security_policy_for("image/png").contains("sandbox"));
+        assert!(content_security_policy_for("image/png").contains("frame-ancestors 'none'"));
+        assert!(disposition_for("a.docx", "application/msword", false).starts_with("attachment;"));
+    }
+
+    #[test]
+    fn stored_names_take_the_sniffed_extension() {
+        assert_eq!(
+            stored_name("photo\u{202E}gpj.exe", "image/png"),
+            "photogpj.png"
+        );
+        assert_eq!(stored_name("evil.html", "image/png"), "evil.png");
+        assert_eq!(stored_name("IMG_2041", "image/jpeg"), "IMG_2041.jpg");
+        assert_eq!(stored_name(".png", "image/webp"), "File.webp");
+        assert_eq!(stored_name("a\r\n\"b\".png", "image/png"), "a\"b\".png");
+        let key = new_key(7, "chat/3");
+        assert!(key.starts_with("orgs/7/chat/3/"), "{key}");
+        assert_ne!(key, new_key(7, "chat/3"));
     }
 }

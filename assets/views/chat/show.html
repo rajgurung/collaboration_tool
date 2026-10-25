@@ -20,21 +20,32 @@
       {% include "chat/_feed.html" %}
     </div>
     <form class="composer" method="post" action="{{ org_url(path="/chat/" ~ (conversation.id) ~ "/messages") }}" ws-send>
+      {# The photo waiting to be sent, above the text box, which becomes its caption (frontend/app.ts). #}
+      <div class="attach" data-photo-attach hidden>
+        <div class="attach-tile">
+          <img alt="Photo to send" data-attach-img>
+          <span class="attach-cover" data-attach-cover hidden>{{<icon name="loader-circle" class="ic-spin spin h-7 w-7"/>}}{{<icon name="circle-alert" class="ic-alert h-[26px] w-[26px]"/>}}</span>
+          <button type="button" class="attach-x" data-attach-remove aria-label="Remove photo"><span>{{<icon name="x" class="h-3.5 w-3.5"/>}}</span></button>
+        </div>
+        <div class="attach-meta">
+          <span class="attach-name truncate-1" data-attach-name></span>
+          <span class="attach-sub" role="status" data-attach-status></span>
+        </div>
+      </div>
       <label class="sr-only" for="composer-body">Message</label>
       <div class="emoji-field">
         <textarea id="composer-body" name="body" rows="1" maxlength="1000" required data-enter-submits data-autogrow data-mentions="{{ conversation.mention_names }}"{% if conversation.everyone_hint %} data-everyone-hint="{{ conversation.everyone_hint }}"{% endif %} autocomplete="off" placeholder="Message {% if conversation.kind != "dm" %}#{% endif %}{{ conversation.label }}"></textarea>
         <button type="button" class="field-emoji" data-emoji-for="composer-body" aria-label="Emoji" aria-expanded="false" aria-controls="emoji-picker">{{<icon name="smile" class="ic-smile h-[22px] w-[22px]"/>}}{{<icon name="keyboard" class="ic-keyboard h-[22px] w-[22px]"/>}}</button>
       </div>
-      {% if conversation.kind == "channel" %}
       {# No name, so the socket never sends it; app.ts posts the photo itself. accept="image/*" lets a phone offer its camera. #}
       <input type="file" accept="image/*" hidden data-photo-input data-photo-url="{{ org_url(path="/chat/" ~ (conversation.id) ~ "/photos") }}">
-      <button type="button" class="icon-btn text-muted" data-photo-pick aria-label="Send a photo">{{<icon name="image" class="ic-photo h-6 w-6"/>}}{{<icon name="loader-circle" class="ic-sending spin h-6 w-6"/>}}</button>
-      {% endif %}
-      <button type="submit" class="btn btn-primary h-11 w-11 p-0" aria-label="Send">{{<icon name="send" class="h-5 w-5"/>}}</button>
+      <button type="button" class="icon-btn text-muted" data-photo-pick aria-label="Add a photo">{{<icon name="image" class="h-6 w-6"/>}}</button>
+      <button type="submit" class="btn btn-primary h-11 w-11 p-0" data-send aria-label="Send">{{<icon name="send" class="ic-send h-5 w-5"/>}}{{<icon name="loader-circle" class="ic-sending spin h-5 w-5"/>}}</button>
     </form>
   </section>
 </div>
 <dialog id="chat-dialog" class="sheet" aria-label="Chat"><div class="sheet-handle"></div><div id="chat-dialog-body" class="sheet-body"></div></dialog>
+{% include "chat/_photo_viewer.html" %}
 {% endblock main %}
 {# A conversation fills the phone screen; the tab bar comes back on the list. #}
 {% block tabbar %}{% endblock tabbar %}

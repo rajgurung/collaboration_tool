@@ -18,6 +18,13 @@ pub struct Model {
     pub parent_id: Option<i64>,
     pub document_id: Option<i64>,
     pub has_photo: bool,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub photo_key: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub photo_type: Option<String>,
+    pub photo_size: Option<i64>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub photo_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

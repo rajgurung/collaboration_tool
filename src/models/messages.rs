@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use bytes::Bytes;
 use loco_rs::prelude::*;
@@ -42,10 +42,25 @@ struct CaptionParams {
 }
 
 /// Photo types a chat shows in place. HEIC is left out: most browsers can't
-/// draw it, and phones send JPEG when a page asks for `image/*`.
-const PHOTO_TYPES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
+/// draw it, and phones send JPEG when a page asks for `image/*`. The
+/// `messages-own-photo` constraint holds the same list.
+pub const PHOTO_TYPES: [&str; 3] = ["image/jpeg", "image/png", "image/webp"];
 pub const NOT_A_PHOTO: &str = "Only photos can be posted here. Use a JPG, PNG or WebP.";
-pub const CHANNELS_ONLY: &str = "Photos can only be posted in channels.";
+pub const PHOTOS_NOT_HERE: &str = "Photos can't be posted here.";
+
+/// Where a message's photo is stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhotoFile<'a> {
+    /// A group or DM photo, stored on the message itself.
+    Own {
+        key: &'a str,
+        content_type: &'a str,
+        size: i64,
+        name: &'a str,
+    },
+    /// A #general photo: a file in the "Chat photos" folder.
+    Document(i64),
+}
 
 #[async_trait::async_trait]
 impl ActiveModelBehavior for ActiveModel {
@@ -216,14 +231,19 @@ impl Model {
         Self::insert(db, conversation, Some(parent.id), user_id, params).await
     }
 
-    /// Saves a photo message in a channel: the file goes into the "Chat
-    /// photos" folder in Documents, then the message points at it. The caption
-    /// may be empty. The caller must already know the sender is a member.
+    /// Saves a photo message, with an optional caption. The caller must
+    /// already know the sender is a member.
+    ///
+    /// Where the file goes depends on the conversation. A #general photo goes
+    /// into the "Chat photos" folder in Documents, which every member can
+    /// open, as everyone is in #general. A group or DM photo is private to
+    /// that conversation, so it is stored on the message itself under
+    /// `orgs/{org}/chat/{conversation}/` and never appears in Documents.
     ///
     /// # Errors
-    /// `Message` outside a channel, or for a file that is empty, too big or
-    /// not a photo; validation errors for a long caption; storage or database
-    /// errors otherwise.
+    /// `Message` for a file that is empty, too big or not a photo;
+    /// validation errors for a long caption; storage or database errors
+    /// otherwise.
     pub async fn create_photo(
         ctx: &AppContext,
         conversation: &conversations::Model,
@@ -232,9 +252,6 @@ impl Model {
         file_name: &str,
         bytes: Bytes,
     ) -> ModelResult<Self> {
-        if conversation.kind != kind::CHANNEL {
-            return Err(ModelError::msg(CHANNELS_ONLY));
-        }
         let body = caption.trim().to_string();
         ValidatorTrait::validate(&CaptionParams { body: body.clone() })?;
         if bytes.is_empty() {
@@ -243,9 +260,40 @@ impl Model {
         if bytes.len() > documents::MAX_BYTES {
             return Err(ModelError::msg(&documents::too_big()));
         }
-        if !documents::sniff(&bytes, file_name).is_some_and(|t| PHOTO_TYPES.contains(&t)) {
-            return Err(ModelError::msg(NOT_A_PHOTO));
+        let content_type = documents::sniff(&bytes, file_name)
+            .filter(|t| PHOTO_TYPES.contains(t))
+            .ok_or_else(|| ModelError::msg(NOT_A_PHOTO))?;
+        match conversation.kind.as_str() {
+            kind::CHANNEL => {
+                Self::create_documents_photo(ctx, conversation, user_id, body, file_name, bytes)
+                    .await
+            }
+            kind::GROUP | kind::DM => {
+                Self::create_own_photo(
+                    ctx,
+                    conversation,
+                    user_id,
+                    body,
+                    file_name,
+                    content_type,
+                    bytes,
+                )
+                .await
+            }
+            _ => Err(ModelError::msg(PHOTOS_NOT_HERE)),
         }
+    }
+
+    /// A #general photo: the file goes into "Chat photos", then the message
+    /// points at it.
+    async fn create_documents_photo(
+        ctx: &AppContext,
+        conversation: &conversations::Model,
+        user_id: i64,
+        body: String,
+        file_name: &str,
+        bytes: Bytes,
+    ) -> ModelResult<Self> {
         let folder = folders::Model::chat_photos(&ctx.db, conversation.organisation_id).await?;
         let file = documents::Model::upload(ctx, &folder, user_id, file_name, bytes).await?;
         let saved = ActiveModel {
@@ -270,11 +318,76 @@ impl Model {
         }
     }
 
-    /// A photo with no caption: lists say "sent a photo" for it, so nothing
-    /// shows blank.
+    /// A group or DM photo: one write to storage, then the message, which
+    /// holds the key, the sniffed type, the size and a cleaned name. If the
+    /// message can't be saved, the stored bytes are deleted again.
+    async fn create_own_photo(
+        ctx: &AppContext,
+        conversation: &conversations::Model,
+        user_id: i64,
+        body: String,
+        file_name: &str,
+        content_type: &str,
+        bytes: Bytes,
+    ) -> ModelResult<Self> {
+        let key = documents::new_key(
+            conversation.organisation_id,
+            &format!("chat/{}", conversation.id),
+        );
+        let message = ActiveModel {
+            body: ActiveValue::Set(body),
+            conversation_id: ActiveValue::Set(conversation.id),
+            user_id: ActiveValue::Set(user_id),
+            has_photo: ActiveValue::Set(true),
+            photo_key: ActiveValue::Set(Some(key.clone())),
+            photo_type: ActiveValue::Set(Some(content_type.to_string())),
+            photo_size: ActiveValue::Set(Some(i64::try_from(bytes.len()).unwrap_or(i64::MAX))),
+            photo_name: ActiveValue::Set(Some(documents::stored_name(file_name, content_type))),
+            ..Default::default()
+        }
+        .set_tenant(conversation.organisation_id)?;
+        ctx.storage
+            .upload(Path::new(&key), &bytes)
+            .await
+            .map_err(|err| ModelError::Any(Box::new(err)))?;
+        match message.insert(&ctx.db).await {
+            Ok(message) => Ok(message),
+            Err(err) => {
+                if let Err(cleanup) = ctx.storage.delete(Path::new(&key)).await {
+                    tracing::error!(error = %cleanup, key, "could not delete an unposted chat photo");
+                }
+                Err(err.into())
+            }
+        }
+    }
+
+    /// Where this message's photo is stored, if it still has one.
     #[must_use]
-    pub fn photo_only(&self) -> bool {
-        self.has_photo && self.body.is_empty()
+    pub fn photo_file(&self) -> Option<PhotoFile<'_>> {
+        if !self.has_photo {
+            return None;
+        }
+        if let (Some(key), Some(content_type), Some(size), Some(name)) = (
+            self.photo_key.as_deref(),
+            self.photo_type.as_deref(),
+            self.photo_size,
+            self.photo_name.as_deref(),
+        ) {
+            return Some(PhotoFile::Own {
+                key,
+                content_type,
+                size,
+                name,
+            });
+        }
+        self.document_id.map(PhotoFile::Document)
+    }
+
+    /// The message had a photo that is gone: a #general photo deleted from
+    /// Documents.
+    #[must_use]
+    pub fn photo_removed(&self) -> bool {
+        self.has_photo && self.photo_file().is_none()
     }
 
     async fn insert<C: ConnectionTrait>(
@@ -359,5 +472,70 @@ impl loco_rs::prelude::TenantEntity for Entity {
 
     fn tenant_column() -> super::_entities::messages::Column {
         super::_entities::messages::Column::OrganisationId
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message() -> Model {
+        Model {
+            created_at: chrono::Utc::now().into(),
+            updated_at: chrono::Utc::now().into(),
+            id: 1,
+            body: "Van fuel".to_string(),
+            organisation_id: 1,
+            conversation_id: 1,
+            user_id: 1,
+            parent_id: None,
+            document_id: None,
+            has_photo: false,
+            photo_key: None,
+            photo_type: None,
+            photo_size: None,
+            photo_name: None,
+        }
+    }
+
+    #[test]
+    fn photos_are_found_where_they_are_stored() {
+        let text = message();
+        assert_eq!(text.photo_file(), None);
+        assert!(!text.photo_removed());
+
+        let own = Model {
+            has_photo: true,
+            photo_key: Some("orgs/1/chat/1/k".to_string()),
+            photo_type: Some("image/png".to_string()),
+            photo_size: Some(12),
+            photo_name: Some("Receipt.png".to_string()),
+            ..message()
+        };
+        assert_eq!(
+            own.photo_file(),
+            Some(PhotoFile::Own {
+                key: "orgs/1/chat/1/k",
+                content_type: "image/png",
+                size: 12,
+                name: "Receipt.png",
+            })
+        );
+        assert!(!own.photo_removed());
+
+        let in_documents = Model {
+            has_photo: true,
+            document_id: Some(9),
+            ..message()
+        };
+        assert_eq!(in_documents.photo_file(), Some(PhotoFile::Document(9)));
+        assert!(!in_documents.photo_removed());
+
+        let removed = Model {
+            has_photo: true,
+            ..message()
+        };
+        assert_eq!(removed.photo_file(), None);
+        assert!(removed.photo_removed());
     }
 }

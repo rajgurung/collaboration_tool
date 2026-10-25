@@ -29,6 +29,8 @@ struct Globex {
     group: conversations::Model,
     folder: folders::Model,
     file: documents::Model,
+    /// A photo in the group, stored on the message; its bytes end in SECRET.
+    group_photo: messages::Model,
 }
 
 async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
@@ -146,6 +148,16 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
     )
     .await
     .unwrap();
+    let group_photo = messages::Model::create_photo(
+        ctx,
+        &group,
+        owner.id,
+        SECRET,
+        "receipt.png",
+        bytes::Bytes::from([super::documents::PNG, SECRET.as_bytes()].concat()),
+    )
+    .await
+    .unwrap();
     Globex {
         folder,
         file,
@@ -157,6 +169,7 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
         general,
         message,
         group,
+        group_photo,
     }
 }
 
@@ -218,6 +231,9 @@ async fn org_a_cannot_reach_org_b() {
             format!("/documents/folders/{}", globex.folder.id),
             format!("/documents/files/{}", globex.file.id),
             format!("/documents/files/{}?download=1", globex.file.id),
+            format!("/chat/{}/photos/{}", globex.group.id, globex.group_photo.id),
+            format!("/chat/{}/photos/{}?download=1", globex.group.id, globex.group_photo.id),
+            format!("/chat/{}/photos/{}", globex.general.id, globex.message.id),
         ];
         for path in &gets {
             let res = request.get(&a.to(path)).add_header(a.0.clone(), a.1.clone()).await;
@@ -281,6 +297,14 @@ async fn org_a_cannot_reach_org_b() {
             .multipart(MultipartForm::new().add_part("file", Part::bytes(super::documents::PDF.to_vec()).file_name("x.pdf")))
             .await;
         assert_eq!(res.status_code(), 404, "upload into a Globex folder");
+        for conversation in [&globex.group, &globex.general] {
+            let res = request
+                .post(&a.at(&format!("/chat/{}/photos", conversation.id)))
+                .as_member(&a)
+                .multipart(MultipartForm::new().add_part("file", Part::bytes(super::documents::PNG.to_vec()).file_name("x.png")))
+                .await;
+            assert_eq!(res.status_code(), 404, "photo into Globex's {}", conversation.kind);
+        }
 
         // 3. Globex records cannot be referenced from Acme forms.
         let refs = [
@@ -314,7 +338,9 @@ async fn org_a_cannot_reach_org_b() {
         let pending = memberships::Entity::find_by_id(globex.pending.id).one(&ctx.db).await.unwrap().unwrap();
         assert_eq!((pending.status.as_str(), pending.role.as_str()), ("pending", "member"));
         assert_eq!(task_notes::Entity::find().count(&ctx.db).await.unwrap(), 1);
-        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 1);
+        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 2, "the message and the group photo");
+        let photo_key = globex.group_photo.photo_key.clone().unwrap();
+        assert!(ctx.storage.download::<Vec<u8>>(std::path::Path::new(&photo_key)).await.is_ok());
         assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(note_reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
         assert_eq!(meetings::Entity::find().count(&ctx.db).await.unwrap(), 1);
@@ -389,6 +415,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
             "/documents".to_string(),
             format!("/documents/folders/{}", globex.folder.id),
             format!("/documents/files/{}", globex.file.id),
+            format!("/chat/{}/photos/{}", globex.group.id, globex.group_photo.id),
         ];
         let posts = [
             "/documents/folders".to_string(),
@@ -398,6 +425,7 @@ async fn documents_and_removal_need_your_own_active_membership() {
             format!("/documents/files/{}/rename", globex.file.id),
             format!("/documents/files/{}/delete", globex.file.id),
             format!("/members/{}/remove", globex.pending.id),
+            format!("/chat/{}/photos", globex.group.id),
         ];
         let form = serde_json::json!({ "name": "hijacked", "note": "" });
         for path in &gets {
@@ -429,6 +457,11 @@ async fn documents_and_removal_need_your_own_active_membership() {
                 req.multipart(MultipartForm::new().add_part(
                     "file",
                     Part::bytes(super::documents::PDF.to_vec()).file_name("x.pdf"),
+                ))
+            } else if path.ends_with("/photos") {
+                req.multipart(MultipartForm::new().add_part(
+                    "file",
+                    Part::bytes(super::documents::PNG.to_vec()).file_name("x.png"),
                 ))
             } else {
                 req.form(&form)
@@ -485,6 +518,11 @@ async fn documents_and_removal_need_your_own_active_membership() {
             .unwrap()
             .unwrap();
         assert_eq!(pending.status, "pending");
+        assert_eq!(
+            messages::Entity::find().count(&ctx.db).await.unwrap(),
+            2,
+            "no photo was posted"
+        );
     })
     .await;
 }
