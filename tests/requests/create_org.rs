@@ -800,7 +800,7 @@ async fn the_new_org_is_separate_from_the_old_one() {
             .unwrap();
         let mut names: Vec<&str> = folders.iter().map(|s| s.folder.name.as_str()).collect();
         names.sort_unstable();
-        assert_eq!(names, ["Company", "Logins"]);
+        assert_eq!(names, ["Company", "Logins", "Shared"]);
         assert!(folders.iter().all(|s| s.files == 0 && s.logins == 0));
         let docs = get(&request, &lumen, "/documents").await.text();
         assert!(!docs.contains("Acme contracts"));
