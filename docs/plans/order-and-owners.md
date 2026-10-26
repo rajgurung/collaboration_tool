@@ -58,6 +58,38 @@ match; this list is the short version.
   `hashtextextended` is fine (Postgres 11+; local is 15), so no two-int
   fallback. Only a move between two cards with no gap renumbers.
 
+## Diff review changes (as built)
+
+- **Timeouts stop at the lock.** A close, reopen or delete takes the tasks
+  order lock with `order::lock_then_unlimit`: the 5 s wait still applies,
+  then `lock_timeout` and `statement_timeout` go back to the server's
+  default, so a big project's delete isn't cut off at 10 s. Moves keep both
+  limits.
+- **Busy close, reopen or delete.** A wait that runs out is 409 with the
+  "Someone else is moving cards. Try again." toast, not a 500. Claude gets
+  the same sentence as a tool error.
+- **Close and reopen recheck owners** inside their transaction, after the
+  project is locked, so an owner taken off meanwhile gets 403.
+- **Acting super admin, create:** owner fields are ignored and the picker
+  is locked, as on an edit.
+- **A failed edit by someone who can't change owners** shows the saved
+  owners, not the ticks the server ignored.
+- **At most 50 owners** (`MAX_OWNERS`), refused before any query, on the
+  web and in Claude's `create_project`.
+- **Owners are checked in the saving transaction**, reading the
+  memberships `FOR SHARE`, on create and edit. A removal can't leave a
+  stale `project_owners` row.
+- **`COPY_OWNERS` copies active members only.** A removed member doesn't
+  come back as an owner.
+- **`order::write_renumber`** is crate-only and takes `Cards::Status` or
+  `Cards::Lane` instead of SQL text.
+- **The `owner_id` source check** also scans `assets/views` for
+  `owner_id` and `.owner`.
+- **A reopened task keeps its old `sort_order`.** Deliberate: it goes back
+  near where it was before the close, not to the bottom.
+- **Claude's `list_projects` and `create_project` reply** drop `owner`;
+  they return `owners` (a list of usernames).
+
 Raj's calls, unchanged: roadmap order = project swimlane order; a drop on
 another swimlane's cell is refused; a drop into Blocked still notifies; no
 Reorder in the desktop list view; `list_projects` drops `owner` for
@@ -228,7 +260,8 @@ SELECT p.organisation_id, p.id, p.owner_id, NOW(), NOW()
   FROM projects p
  WHERE p.owner_id IS NOT NULL
    AND EXISTS (SELECT 1 FROM memberships m
-                WHERE m.organisation_id = p.organisation_id AND m.user_id = p.owner_id)
+                WHERE m.organisation_id = p.organisation_id AND m.user_id = p.owner_id
+                  AND m.status = 'active')
 ON CONFLICT (project_id, user_id) DO NOTHING;
 ```
 

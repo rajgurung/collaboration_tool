@@ -5,15 +5,17 @@ use sea_orm_migration::prelude::*;
 pub struct Migration;
 
 /// Copies each project's single owner into `project_owners`. Only when the
-/// owner is a member of the project's organisation, which the app always
-/// required; the composite keys below would refuse anything else.
+/// owner is an active member of the project's organisation: the composite
+/// keys below refuse anyone with no membership, and a removed member must
+/// not come back as an owner.
 pub const COPY_OWNERS: &str = r"
 INSERT INTO project_owners (organisation_id, project_id, user_id, created_at, updated_at)
 SELECT p.organisation_id, p.id, p.owner_id, NOW(), NOW()
   FROM projects p
  WHERE p.owner_id IS NOT NULL
    AND EXISTS (SELECT 1 FROM memberships m
-                WHERE m.organisation_id = p.organisation_id AND m.user_id = p.owner_id)
+                WHERE m.organisation_id = p.organisation_id AND m.user_id = p.owner_id
+                  AND m.status = 'active')
 ON CONFLICT (project_id, user_id) DO NOTHING;
 ";
 

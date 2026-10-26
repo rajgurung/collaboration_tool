@@ -516,8 +516,8 @@ async fn cards_show_three_owners_then_a_count() {
 
 /// `projects.owner_id` is written as a mirror of the first owner and never
 /// read: owners come from `project_owners`. Only these two lines in the
-/// projects model may name it, so a missed reader fails here, not as a lost
-/// notice or right.
+/// projects model may name it, and no template may read a single owner,
+/// so a missed reader fails here, not as a lost notice or right.
 #[test]
 fn no_owner_id_read_outside_the_mirror() {
     let allowed = [
@@ -554,6 +554,25 @@ fn no_owner_id_read_outside_the_mirror() {
                     .iter()
                     .any(|(file, text)| name == *file && line.trim() == *text);
                 if read.is_match(line) && !known {
+                    offenders.push(format!("{name}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+    }
+    // Templates read `owners` (or `owner_ids`), never the single owner.
+    let template_read = regex::Regex::new(r"\bowner_id\b|\.owner\b").unwrap();
+    let mut dirs = vec![std::path::PathBuf::from("assets/views")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let name = path.to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                if template_read.is_match(line) {
                     offenders.push(format!("{name}:{}: {}", n + 1, line.trim()));
                 }
             }

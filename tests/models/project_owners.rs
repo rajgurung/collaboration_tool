@@ -196,6 +196,16 @@ async fn the_migration_copies_owners_and_writes_the_first_back() {
     // must skip it rather than fail.
     let stray = project(ctx, org, "Stray", Some(bob)).await;
     let later = project(ctx, org, "Ship to Europe", None).await;
+    // Tom was removed: his project gets no owner.
+    let (_, tom) = sign_up(ctx, "Tom Tins", "tom").await;
+    add_member(ctx, org, tom, "tom").await;
+    let toms = project(ctx, org, "Tins", Some(tom)).await;
+    ctx.db
+        .execute_unprepared(&format!(
+            "UPDATE memberships SET status = 'removed' WHERE user_id = {tom} AND organisation_id = {org}"
+        ))
+        .await
+        .unwrap();
 
     ctx.db.execute_unprepared(COPY_OWNERS).await.unwrap();
     // A second run (or a row already there) changes nothing.
@@ -206,6 +216,7 @@ async fn the_migration_copies_owners_and_writes_the_first_back() {
     assert_eq!(all.get(&website), Some(&vec![ana]));
     assert_eq!(all.get(&stray), None);
     assert_eq!(all.get(&later), None);
+    assert_eq!(all.get(&toms), None, "a removed member");
 
     insert_owner(ctx, org, website, leo).await.unwrap();
     ctx.db.execute_unprepared(FIRST_OWNER_BACK).await.unwrap();
