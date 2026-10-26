@@ -463,7 +463,7 @@ async fn rows_record_the_connection() {
             .add_header("HX-Request", "true")
             .form(&json!({
                 "name": "Web project", "lane": "next", "status": "Planned",
-                "accent": "#72e5b4", "owner_id": "", "summary": "",
+                "accent": "#72e5b4", "summary": "",
             }))
             .await;
         assert_eq!(res.status_code(), 200, "{}", res.text());
@@ -1105,7 +1105,6 @@ async fn made_with_claude_shows_and_the_grant_never_does() {
                 status: "Active".to_string(),
                 accent: "#ffb454".to_string(),
                 owner_ids: vec![],
-                owner_id: String::new(),
                 summary: String::new(),
             },
             None,

@@ -232,30 +232,12 @@ pub struct ProjectParams {
     #[serde(default)]
     #[validate(length(max = MAX_OWNERS, message = "Choose up to 50 owners."))]
     pub owner_ids: Vec<i64>,
-    /// The single owner an edit sheet opened before several owners were
-    /// possible posts, as text. Read only when `owner_ids` is empty, so
-    /// saving that sheet keeps its owner. Goes with the `owner_id` column.
-    #[serde(default)]
-    pub owner_id: String,
     #[serde(default)]
     #[validate(length(max = 500, message = "Keep the summary under 500 characters."))]
     pub summary: String,
 }
 
 impl ProjectParams {
-    /// The owner ids as posted: `owner_ids`, or the legacy single
-    /// `owner_id` when that is all there is. `None` when the legacy field
-    /// isn't a number.
-    #[must_use]
-    pub fn posted_owners(&self) -> Option<Vec<i64>> {
-        let legacy = self.owner_id.trim();
-        if self.owner_ids.is_empty() && !legacy.is_empty() {
-            legacy.parse().ok().map(|id| vec![id])
-        } else {
-            Some(self.owner_ids.clone())
-        }
-    }
-
     /// The chosen owners, without repeats, in the order given. Each must be
     /// an approved member of the organisation; one that isn't refuses the
     /// whole list. Call it in the transaction that saves them: it reads the
@@ -267,7 +249,7 @@ impl ProjectParams {
     pub async fn owners<C: ConnectionTrait>(&self, db: &C, org_id: i64) -> ModelResult<Vec<i64>> {
         let refused = || field_error("owner_ids", "Choose people from the team.");
         let mut ids: Vec<i64> = Vec::new();
-        for id in self.posted_owners().ok_or_else(refused)? {
+        for &id in &self.owner_ids {
             if !ids.contains(&id) {
                 ids.push(id);
             }
@@ -398,8 +380,6 @@ impl Model {
         let mut project = ActiveModel {
             sort_order: ActiveValue::Set(next_sort(&txn, org_id).await?),
             claude_grant_id: ActiveValue::Set(claude_grant),
-            // The mirror of the first owner; see `set_owners`.
-            owner_id: ActiveValue::Set(owners.first().copied()),
             ..Default::default()
         }
         .set_tenant(org_id)?;
@@ -495,7 +475,7 @@ impl Model {
         let project = project.update(&txn).await?;
         let owners = if rights.allows(&owners_before) {
             let posted = params.owners(&txn, org_id).await?;
-            set_owners(&txn, org_id, project.id, &posted).await?;
+            project_owners::Model::replace(&txn, org_id, project.id, &posted).await?;
             project_owners::Model::for_project(&txn, org_id, project.id).await?
         } else {
             owners_before.clone()
@@ -842,25 +822,6 @@ async fn delete_locked<C: ConnectionTrait>(
     Ok(removed)
 }
 
-/// Sets a project's owners, and the `owner_id` column to the first of them (or
-/// NULL). That mirror is never read; it keeps an older build, after a
-/// code-only revert, showing the right single owner.
-async fn set_owners<C: ConnectionTrait>(
-    db: &C,
-    org_id: i64,
-    project_id: i64,
-    ids: &[i64],
-) -> ModelResult<()> {
-    project_owners::Model::replace(db, org_id, project_id, ids).await?;
-    Entity::update_many()
-        .col_expr(Column::OwnerId, Expr::value(ids.first().copied()))
-        .filter(Column::Id.eq(project_id))
-        .filter(Column::OrganisationId.eq(org_id))
-        .exec(db)
-        .await?;
-    Ok(())
-}
-
 fn apply(project: &mut ActiveModel, params: &ProjectParams) {
     project.name = ActiveValue::Set(params.name.trim().to_string());
     project.lane = ActiveValue::Set(params.lane.clone());
@@ -903,7 +864,6 @@ mod tests {
             summary: String::new(),
             sort_order: 1,
             organisation_id: 1,
-            owner_id: None,
             claude_grant_id: None,
             closed_at: closed.then_some(now),
             closed_by_id: None,

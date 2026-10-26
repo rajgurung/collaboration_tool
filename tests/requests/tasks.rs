@@ -24,7 +24,6 @@ pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> proj
             status: "Active".to_string(),
             accent: "#ffb454".to_string(),
             owner_ids: vec![],
-            owner_id: String::new(),
             summary: String::new(),
         },
         None,

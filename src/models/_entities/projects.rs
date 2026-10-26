@@ -18,7 +18,6 @@ pub struct Model {
     pub summary: String,
     pub sort_order: i64,
     pub organisation_id: i64,
-    pub owner_id: Option<i64>,
     /// The Claude connection that made it; `None` for the web app. Never
     /// serialized, so no uuid reaches a page.
     #[serde(skip)]
@@ -39,14 +38,6 @@ pub enum Relation {
     Organisations,
     #[sea_orm(has_many = "super::tasks::Entity")]
     Tasks,
-    #[sea_orm(
-        belongs_to = "super::users::Entity",
-        from = "Column::OwnerId",
-        to = "super::users::Column::Id",
-        on_update = "NoAction",
-        on_delete = "SetNull"
-    )]
-    Users,
 }
 
 impl Related<super::organisations::Entity> for Entity {
@@ -58,11 +49,5 @@ impl Related<super::organisations::Entity> for Entity {
 impl Related<super::tasks::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Tasks.def()
-    }
-}
-
-impl Related<super::users::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Users.def()
     }
 }

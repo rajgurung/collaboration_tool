@@ -9,7 +9,7 @@ use collab::{
 };
 use loco_rs::{app::AppContext, prelude::TenantActiveModelExt, testing::prelude::*};
 use migration::m20261026_120000_project_owners::{COPY_OWNERS, FIRST_OWNER_BACK};
-use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Statement};
 use serial_test::serial;
 
 macro_rules! configure_insta {
@@ -66,9 +66,8 @@ async fn add_member(ctx: &AppContext, org_id: i64, user_id: i64, username: &str)
     .unwrap();
 }
 
-/// A project written straight to the table, with `owner_id` as given, as
-/// one made before this migration.
-async fn project(ctx: &AppContext, org_id: i64, name: &str, owner_id: Option<i64>) -> i64 {
+/// A project written straight to the table, with no owners.
+async fn project(ctx: &AppContext, org_id: i64, name: &str) -> i64 {
     projects::ActiveModel {
         name: ActiveValue::Set(name.to_string()),
         lane: ActiveValue::Set("now".to_string()),
@@ -77,7 +76,6 @@ async fn project(ctx: &AppContext, org_id: i64, name: &str, owner_id: Option<i64
         summary: ActiveValue::Set(String::new()),
         sort_order: ActiveValue::Set(1),
         organisation_id: ActiveValue::Set(org_id),
-        owner_id: ActiveValue::Set(owner_id),
         ..Default::default()
     }
     .insert(&ctx.db)
@@ -103,13 +101,22 @@ async fn insert_owner(
     .await
 }
 
+async fn sql(ctx: &AppContext, query: &str) {
+    ctx.db.execute_unprepared(query).await.unwrap();
+}
+
+/// Reads `projects.owner_id`, which the app no longer maps.
 async fn owner_id(ctx: &AppContext, project_id: i64) -> Option<i64> {
-    projects::Entity::find_by_id(project_id)
-        .one(&ctx.db)
+    ctx.db
+        .query_one_raw(Statement::from_string(
+            ctx.db.get_database_backend(),
+            format!("SELECT owner_id FROM projects WHERE id = {project_id}"),
+        ))
         .await
         .unwrap()
         .unwrap()
-        .owner_id
+        .try_get::<Option<i64>>("", "owner_id")
+        .unwrap()
 }
 
 #[tokio::test]
@@ -122,7 +129,7 @@ async fn replace_keeps_the_first_owner_first() {
     let (_, tom) = sign_up(ctx, "Tom Tins", "tom").await;
     add_member(ctx, org, leo, "leo").await;
     add_member(ctx, org, tom, "tom").await;
-    let website = project(ctx, org, "Website", None).await;
+    let website = project(ctx, org, "Website").await;
 
     project_owners::Model::replace(&ctx.db, org, website, &[leo, ana])
         .await
@@ -163,8 +170,8 @@ async fn the_database_refuses_rows_across_organisations() {
     let ctx = &boot.app_context;
     let (juniper, ana) = sign_up(ctx, "Juniper Tea Co", "ana").await;
     let (other, bob) = sign_up(ctx, "Bramble Bakery", "bob").await;
-    let website = project(ctx, juniper, "Website", None).await;
-    let bakery_site = project(ctx, other, "Bakery site", None).await;
+    let website = project(ctx, juniper, "Website").await;
+    let bakery_site = project(ctx, other, "Bakery site").await;
 
     assert!(
         insert_owner(ctx, juniper, bakery_site, ana).await.is_err(),
@@ -181,7 +188,7 @@ async fn the_database_refuses_rows_across_organisations() {
     );
 }
 
-/// The migration's own SQL, both ways.
+/// The project owners migration's own SQL, both ways.
 #[tokio::test]
 #[serial]
 async fn the_migration_copies_owners_and_writes_the_first_back() {
@@ -191,21 +198,22 @@ async fn the_migration_copies_owners_and_writes_the_first_back() {
     let (_, bob) = sign_up(ctx, "Bramble Bakery", "bob").await;
     let (_, leo) = sign_up(ctx, "Leo Lettering", "leo").await;
     add_member(ctx, org, leo, "leo").await;
-    let website = project(ctx, org, "Website", Some(ana)).await;
+    let website = project(ctx, org, "Website").await;
     // Bob has no membership here; the app never allowed this, but the copy
     // must skip it rather than fail.
-    let stray = project(ctx, org, "Stray", Some(bob)).await;
-    let later = project(ctx, org, "Ship to Europe", None).await;
+    let stray = project(ctx, org, "Stray").await;
+    let later = project(ctx, org, "Ship to Europe").await;
     // Tom was removed: his project gets no owner.
     let (_, tom) = sign_up(ctx, "Tom Tins", "tom").await;
     add_member(ctx, org, tom, "tom").await;
-    let toms = project(ctx, org, "Tins", Some(tom)).await;
-    ctx.db
-        .execute_unprepared(&format!(
-            "UPDATE memberships SET status = 'removed' WHERE user_id = {tom} AND organisation_id = {org}"
-        ))
-        .await
-        .unwrap();
+    let toms = project(ctx, org, "Tins").await;
+    sql(ctx, &format!(
+        "UPDATE projects SET owner_id = {ana} WHERE id = {website};
+         UPDATE projects SET owner_id = {bob} WHERE id = {stray};
+         UPDATE projects SET owner_id = {tom} WHERE id = {toms};
+         UPDATE memberships SET status = 'removed' WHERE user_id = {tom} AND organisation_id = {org};"
+    ))
+    .await;
 
     ctx.db.execute_unprepared(COPY_OWNERS).await.unwrap();
     // A second run (or a row already there) changes nothing.
