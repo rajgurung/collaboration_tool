@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 pub use super::_entities::projects::{ActiveModel, Column, Entity, Model};
 use super::{
-    field_error, memberships, project_owners,
+    field_error, memberships,
+    order::{self, Place, Slot},
+    project_owners,
     tasks::{self, Refusal, Removed},
 };
 
@@ -153,6 +155,31 @@ pub struct Closed {
     pub project: Model,
     pub tasks: Vec<tasks::Model>,
     pub already: bool,
+}
+
+/// Why a project move changed nothing.
+#[derive(Debug)]
+pub enum MoveRefusal {
+    /// The card it was placed against isn't in that lane (any more, or
+    /// ever, as for another organisation's project).
+    Stale,
+    /// It was marked done meanwhile; reopen it first.
+    Closed(Box<Model>),
+}
+
+/// The number that puts a project at the bottom of any lane. Not under the
+/// order lock, as for tasks ([`tasks::next_sort`]).
+///
+/// # Errors
+/// On database errors.
+pub async fn next_sort<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<i64> {
+    let last = Entity::find()
+        .in_tenant(org_id)
+        .order_by_desc(Column::SortOrder)
+        .one(db)
+        .await?
+        .map_or(0, |p| p.sort_order);
+    Ok(last.saturating_add(order::STEP))
 }
 
 /// What a reopen did. `tasks` are the rows that went back to their earlier
@@ -354,14 +381,8 @@ impl Model {
     ) -> ModelResult<Self> {
         ValidatorTrait::validate(params)?;
         let owners = params.owners(db, org_id).await?;
-        let last = Entity::find()
-            .in_tenant(org_id)
-            .order_by_desc(Column::SortOrder)
-            .one(db)
-            .await?
-            .map_or(0, |p| p.sort_order);
         let mut project = ActiveModel {
-            sort_order: ActiveValue::Set(last + 1),
+            sort_order: ActiveValue::Set(next_sort(db, org_id).await?),
             claude_grant_id: ActiveValue::Set(claude_grant),
             // The mirror of the first owner; see `set_owners`.
             owner_id: ActiveValue::Set(owners.first().copied()),
@@ -447,8 +468,17 @@ impl Model {
             .await?
             .ok_or(ModelError::EntityNotFound)?;
         let owners_before = project_owners::Model::for_project(&txn, org_id, current.id).await?;
+        // A new lane puts it at the bottom of that lane.
+        let bottom = if current.lane == params.lane {
+            None
+        } else {
+            Some(next_sort(&txn, org_id).await?)
+        };
         let mut project = current.into_active_model();
         apply(&mut project, params);
+        if let Some(n) = bottom {
+            project.sort_order = ActiveValue::Set(n);
+        }
         let project = project.update(&txn).await?;
         let owners = if rights.allows(&owners_before) {
             let posted = params.owners(&txn, org_id).await?;
@@ -465,8 +495,9 @@ impl Model {
         })
     }
 
-    /// Moves the project to another lane, from a drag on the roadmap. The
-    /// caller refuses a closed project first.
+    /// Moves the project to the bottom of another lane, from a drag in a
+    /// tab drawn before drops could land on a spot. The caller refuses a
+    /// closed project first.
     ///
     /// # Errors
     /// A message when `lane` is not now, next or later, or database errors.
@@ -474,9 +505,93 @@ impl Model {
         if !LANES.contains(&lane) {
             return Err(ModelError::msg("Choose now, next or later."));
         }
+        let bottom = next_sort(db, self.organisation_id).await?;
         let mut project = self.into_active_model();
         project.lane = ActiveValue::Set(lane.to_string());
+        project.sort_order = ActiveValue::Set(bottom);
         Ok(project.update(db).await?)
+    }
+
+    /// Puts an open project at `place` in `lane`, from a drag or the Reorder
+    /// arrows. The lane is every open project in it. Moves in one
+    /// organisation run one at a time ([`order::lock`]). Neither a move nor a
+    /// renumber is an edit, so `updated_at` stays.
+    ///
+    /// # Errors
+    /// A message for an unknown lane, or an anchor that is the card itself;
+    /// `EntityNotFound` when it isn't in this organisation; database errors,
+    /// including a lock timeout ([`order::is_busy`]).
+    pub async fn move_to(
+        db: &DatabaseConnection,
+        org_id: i64,
+        id: i64,
+        lane: &str,
+        place: Place,
+    ) -> ModelResult<Result<Self, MoveRefusal>> {
+        if !LANES.contains(&lane) {
+            return Err(ModelError::msg("Choose now, next or later."));
+        }
+        if matches!(place, Place::Before(a) | Place::After(a) if a == id) {
+            return Err(ModelError::msg("Choose another card to move it next to."));
+        }
+        let txn = db.begin().await?;
+        order::lock(&txn, "projects", org_id).await?;
+        let project = Entity::find_by_id(id)
+            .in_tenant(org_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        // An early return drops `txn`, which rolls it back.
+        if project.is_closed() {
+            return Ok(Err(MoveRefusal::Closed(Box::new(project))));
+        }
+        let column: Vec<(i64, i64)> = Entity::find()
+            .select_only()
+            .column(Column::Id)
+            .column(Column::SortOrder)
+            .in_tenant(org_id)
+            .filter(Column::Lane.eq(lane))
+            .filter(Column::ClosedAt.is_null())
+            .filter(Column::Id.ne(id))
+            .order_by_asc(Column::SortOrder)
+            .order_by_asc(Column::Id)
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let Some(slot) = order::slot(&column, id, place) else {
+            return Ok(Err(MoveRefusal::Stale));
+        };
+        let number = match slot {
+            Slot::At(n) => n,
+            Slot::Renumber(rows) => {
+                let (mine, others): (Vec<_>, Vec<_>) =
+                    rows.into_iter().partition(|(r, _)| *r == id);
+                order::write_renumber(
+                    &txn,
+                    "projects",
+                    org_id,
+                    &others,
+                    "t.lane = $4 AND t.closed_at IS NULL",
+                    vec![lane.into()],
+                )
+                .await?;
+                mine.first().map_or(order::STEP, |(_, n)| *n)
+            }
+        };
+        Entity::update_many()
+            .col_expr(Column::Lane, Expr::value(lane))
+            .col_expr(Column::SortOrder, Expr::value(number))
+            .filter(Column::Id.eq(id))
+            .filter(Column::OrganisationId.eq(org_id))
+            .exec(&txn)
+            .await?;
+        txn.commit().await?;
+        Ok(Ok(Model {
+            lane: lane.to_string(),
+            sort_order: number,
+            ..project
+        }))
     }
 
     /// Marked done. A closed project keeps its lane but shows in none.
@@ -653,11 +768,16 @@ pub async fn lock_open_for_tasks<C: ConnectionTrait>(
 /// project row (its `FOR SHARE` read in [`lock_open_for_tasks`], and its
 /// foreign key check), so the task list can't change underneath. Returns the
 /// tasks as `(id, claude_grant_id)`.
+///
+/// It takes the tasks' order lock first, and the tasks in id order, so a
+/// card move (which renumbers a whole status column) and a close queue up
+/// instead of meeting on the same rows in a different order.
 async fn lock_with_tasks<C: ConnectionTrait>(
     db: &C,
     org_id: i64,
     id: i64,
 ) -> ModelResult<(Model, Vec<(i64, Option<Uuid>)>)> {
+    order::lock(db, "tasks", org_id).await?;
     let project = Entity::find_by_id(id)
         .in_tenant(org_id)
         .lock_exclusive()
@@ -670,6 +790,7 @@ async fn lock_with_tasks<C: ConnectionTrait>(
         .column(tasks::Column::ClaudeGrantId)
         .filter(tasks::Column::ProjectId.eq(project.id))
         .filter(tasks::Column::OrganisationId.eq(org_id))
+        .order_by_asc(tasks::Column::Id)
         .lock_exclusive()
         .into_tuple()
         .all(db)

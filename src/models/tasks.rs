@@ -5,7 +5,9 @@ use serde::Deserialize;
 
 pub use super::_entities::tasks::{ActiveModel, Column, Entity, Model};
 use super::{
-    field_error, memberships, note_reactions, notifications, projects, task_assignees, task_notes,
+    field_error, memberships, note_reactions, notifications,
+    order::{self, Place, Slot},
+    projects, task_assignees, task_notes,
 };
 
 pub type Tasks = Entity;
@@ -23,6 +25,35 @@ pub struct Removed {
     pub tasks: usize,
     /// People whose notifications went with it, so their bells can refresh.
     pub notified: Vec<i64>,
+}
+
+/// A move that changed nothing: the card it was placed against isn't in
+/// that column (any more, or ever, as for another organisation's card).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stale;
+
+/// What a move did.
+#[derive(Debug)]
+pub struct Moved {
+    pub task: Model,
+    /// It went to another column, not only to another place in its own.
+    pub changed_status: bool,
+}
+
+/// The number that puts a card at the bottom of any column: past the
+/// organisation's highest. Not under the order lock: two at once can tie,
+/// and the id keeps that stable until a move renumbers it.
+///
+/// # Errors
+/// On database errors.
+pub async fn next_sort<C: ConnectionTrait>(db: &C, org_id: i64) -> ModelResult<i64> {
+    let last = Entity::find()
+        .in_tenant(org_id)
+        .order_by_desc(Column::SortOrder)
+        .one(db)
+        .await?
+        .map_or(0, |t| t.sort_order);
+    Ok(last.saturating_add(order::STEP))
 }
 
 /// Why Claude may not delete something.
@@ -306,12 +337,7 @@ impl Model {
         if let Some(id) = checked.project_id {
             projects::lock_open_for_tasks(&txn, org_id, id).await?;
         }
-        let last = Entity::find()
-            .in_tenant(org_id)
-            .order_by_desc(Column::SortOrder)
-            .one(&txn)
-            .await?
-            .map_or(0, |t| t.sort_order);
+        let sort_order = next_sort(&txn, org_id).await?;
         let status = if params.status.is_empty() {
             "todo"
         } else {
@@ -322,7 +348,7 @@ impl Model {
             status: ActiveValue::Set(status.to_string()),
             priority: ActiveValue::Set(params.priority.clone()),
             due_on: ActiveValue::Set(checked.due_on),
-            sort_order: ActiveValue::Set(last + 1),
+            sort_order: ActiveValue::Set(sort_order),
             project_id: ActiveValue::Set(checked.project_id),
             claude_grant_id: ActiveValue::Set(claude_grant),
             ..Default::default()
@@ -352,7 +378,17 @@ impl Model {
         if let (true, Some(id)) = (moved, checked.project_id) {
             projects::lock_open_for_tasks(&txn, org_id, id).await?;
         }
+        // A new status puts it at the bottom of its new column.
+        let new_column = !params.status.is_empty() && params.status != self.status;
+        let bottom = if new_column {
+            Some(next_sort(&txn, org_id).await?)
+        } else {
+            None
+        };
         let mut task = self.into_active_model();
+        if let Some(n) = bottom {
+            task.sort_order = ActiveValue::Set(n);
+        }
         // A task moved elsewhere must not carry a saved status into another
         // project's reopen.
         if moved {
@@ -422,7 +458,7 @@ impl Model {
         Ok(Ok(removed))
     }
 
-    /// Moves the task to another board column.
+    /// Moves the task to another board column, at the bottom of it.
     ///
     /// # Errors
     /// For an unknown status, or database errors.
@@ -430,9 +466,112 @@ impl Model {
         if !is_status(status) {
             return Err(ModelError::msg("Unknown status."));
         }
+        let bottom = if self.status == status {
+            None
+        } else {
+            Some(next_sort(db, self.organisation_id).await?)
+        };
         let mut task = self.into_active_model();
         task.status = ActiveValue::Set(status.to_string());
+        if let Some(n) = bottom {
+            task.sort_order = ActiveValue::Set(n);
+        }
         Ok(task.update(db).await?)
+    }
+
+    /// Puts a task at `place` in the `status` column, from a drag or the
+    /// Reorder arrows. The column is every task in the organisation with that
+    /// status, whatever the person's view filters out, so hidden cards keep
+    /// their places. Moves in one organisation run one at a time
+    /// ([`order::lock`]). A move inside a column isn't an edit, so it leaves
+    /// `updated_at` alone; one into another column saves the status through
+    /// `before_save`, as any status change does.
+    ///
+    /// # Errors
+    /// A message for Done (it keeps its own order), an unknown status, or an
+    /// anchor that is the card itself; `EntityNotFound` when the task isn't
+    /// in this organisation; database errors, including a lock timeout
+    /// ([`order::is_busy`]).
+    pub async fn move_to(
+        db: &DatabaseConnection,
+        org_id: i64,
+        id: i64,
+        status: &str,
+        place: Place,
+    ) -> ModelResult<Result<Moved, Stale>> {
+        if status == "done" {
+            return Err(ModelError::msg("Done keeps its own order."));
+        }
+        if !is_status(status) {
+            return Err(ModelError::msg("Unknown status."));
+        }
+        if matches!(place, Place::Before(a) | Place::After(a) if a == id) {
+            return Err(ModelError::msg("Choose another card to move it next to."));
+        }
+        let txn = db.begin().await?;
+        order::lock(&txn, "tasks", org_id).await?;
+        let task = Entity::find_by_id(id)
+            .in_tenant(org_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        let column: Vec<(i64, i64)> = Entity::find()
+            .select_only()
+            .column(Column::Id)
+            .column(Column::SortOrder)
+            .in_tenant(org_id)
+            .filter(Column::Status.eq(status))
+            .filter(Column::Id.ne(id))
+            .order_by_asc(Column::SortOrder)
+            .order_by_asc(Column::Id)
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        // An early return drops `txn`, which rolls it back.
+        let Some(slot) = order::slot(&column, id, place) else {
+            return Ok(Err(Stale));
+        };
+        let number = match slot {
+            Slot::At(n) => n,
+            Slot::Renumber(rows) => {
+                let (mine, others): (Vec<_>, Vec<_>) =
+                    rows.into_iter().partition(|(r, _)| *r == id);
+                order::write_renumber(
+                    &txn,
+                    "tasks",
+                    org_id,
+                    &others,
+                    "t.status = $4",
+                    vec![status.into()],
+                )
+                .await?;
+                mine.first().map_or(order::STEP, |(_, n)| *n)
+            }
+        };
+        let changed_status = task.status != status;
+        let task = if changed_status {
+            let mut active = task.into_active_model();
+            active.status = ActiveValue::Set(status.to_string());
+            active.sort_order = ActiveValue::Set(number);
+            active.update(&txn).await?
+        } else {
+            Entity::update_many()
+                .col_expr(Column::SortOrder, Expr::value(number))
+                .filter(Column::Id.eq(id))
+                .filter(Column::OrganisationId.eq(org_id))
+                .exec(&txn)
+                .await?;
+            Model {
+                sort_order: number,
+                ..task
+            }
+        };
+        txn.commit().await?;
+        Ok(Ok(Moved {
+            task,
+            changed_status,
+        }))
     }
 }
 

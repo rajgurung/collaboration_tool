@@ -47,6 +47,7 @@ pub mod note_reactions;
 pub mod notifications;
 pub mod oauth_clients;
 pub mod oauth_codes;
+pub mod order;
 pub mod org_keys;
 pub mod project_owners;
 pub mod saved_views;
