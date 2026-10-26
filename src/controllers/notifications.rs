@@ -94,8 +94,9 @@ pub struct TaskBefore {
     pub status: String,
 }
 
-/// After a task is created or changed: tells people newly assigned, and the
-/// project's owners about a new task or one that just became blocked.
+/// After a task is created or changed: tells people newly assigned, people
+/// taken off, and the project's owners about a new task or one that just
+/// became blocked.
 ///
 /// # Errors
 /// On database errors.
@@ -130,6 +131,42 @@ pub async fn task_saved(
         },
     )
     .await?;
+    // People taken off, while on the team. A close by a project owner skips
+    // tasks with others on them, so taking someone off first is never silent.
+    let removed: Vec<i64> = before.as_ref().map_or_else(Vec::new, |b| {
+        b.assignees
+            .iter()
+            .filter(|id| !now.contains(id))
+            .copied()
+            .collect()
+    });
+    if !removed.is_empty() {
+        let on_team: Vec<i64> =
+            memberships::Model::team_among(&ctx.db, org_id, removed.iter().copied())
+                .await?
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect();
+        let removed: Vec<i64> = removed
+            .into_iter()
+            .filter(|id| on_team.contains(id))
+            .collect();
+        told.extend(
+            send(
+                ctx,
+                org_id,
+                actor,
+                &removed,
+                &Notice {
+                    kind: kind::ASSIGNED,
+                    body: format!("took you off “{}”", task.title),
+                    link: link.clone(),
+                    message_id: None,
+                },
+            )
+            .await?,
+        );
+    }
 
     // Chores have no project, so no owners to tell.
     let Some(project_id) = task.project_id else {
@@ -320,7 +357,9 @@ pub async fn project_saved(
 
 /// After a project is marked done: one notice per person, not one per task.
 /// Each assignee of a task the close changed hears how many of theirs it
-/// closed; the project's owners, if not told already, hear the total. Only
+/// closed. Each assignee of a task it left open (`left_open`, from a close by
+/// a project owner who isn't a manager) hears how many of theirs it left
+/// open. The project's owners, if not told already, hear the totals. Only
 /// people on the team. Never `task_saved`, which would send one per task.
 ///
 /// # Errors
@@ -330,6 +369,7 @@ pub async fn project_closed(
     member: &CurrentMember,
     project: &projects::Model,
     closed: &[tasks::Model],
+    left_open: &[tasks::Model],
 ) -> Result<()> {
     let change = Change {
         kind: kind::CLOSED,
@@ -337,7 +377,7 @@ pub async fn project_closed(
         headline: format!("marked {} done", project.name),
         link: "/roadmap?lane=done".to_string(),
     };
-    tell_per_person(ctx, member, project, closed, change).await
+    tell_per_person(ctx, member, project, closed, left_open, change).await
 }
 
 /// After a done project is reopened: the same shape as [`project_closed`],
@@ -357,7 +397,7 @@ pub async fn project_reopened(
         headline: format!("reopened {}", project.name),
         link: format!("/roadmap?lane={}", project.lane),
     };
-    tell_per_person(ctx, member, project, reopened, change).await
+    tell_per_person(ctx, member, project, reopened, &[], change).await
 }
 
 /// What a close or reopen did, for [`tell_per_person`].
@@ -369,26 +409,15 @@ struct Change {
     link: String,
 }
 
-/// One notice per assignee of the changed tasks, saying how many of theirs
-/// changed, then one to each of the project's owners with the total if not
-/// told yet.
-async fn tell_per_person(
-    ctx: &AppContext,
-    member: &CurrentMember,
-    project: &projects::Model,
-    changed: &[tasks::Model],
-    change: Change,
-) -> Result<()> {
-    let org_id = member.org.id;
-    let team: Vec<i64> = memberships::Model::team(&ctx.db, org_id)
-        .await?
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect();
-    let assignees = task_assignees::Model::by_task(&ctx.db, org_id).await?;
-    // Per person, in the order first met.
+/// How many of these tasks each person on the team is assigned, in the
+/// order first met.
+fn per_person(
+    list: &[tasks::Model],
+    assignees: &HashMap<i64, Vec<i64>>,
+    team: &[i64],
+) -> Vec<(i64, usize)> {
     let mut counts: Vec<(i64, usize)> = Vec::new();
-    for user in changed
+    for user in list
         .iter()
         .filter_map(|t| assignees.get(&t.id))
         .flatten()
@@ -399,6 +428,28 @@ async fn tell_per_person(
             None => counts.push((*user, 1)),
         }
     }
+    counts
+}
+
+/// One notice per assignee of the changed tasks, saying how many of theirs
+/// changed, then one per assignee of the tasks `left_open` not told yet,
+/// then one to each of the project's owners with the totals if not told
+/// yet.
+async fn tell_per_person(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    project: &projects::Model,
+    changed: &[tasks::Model],
+    left_open: &[tasks::Model],
+    change: Change,
+) -> Result<()> {
+    let org_id = member.org.id;
+    let team: Vec<i64> = memberships::Model::team(&ctx.db, org_id)
+        .await?
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    let assignees = task_assignees::Model::by_task(&ctx.db, org_id).await?;
     let Change {
         kind,
         verb,
@@ -406,10 +457,22 @@ async fn tell_per_person(
         link,
     } = change;
     let mut told = Vec::new();
-    for (user, n) in counts {
+    for (user, n) in per_person(changed, &assignees, &team) {
         let notice = Notice {
             kind,
             body: format!("{headline}\n{n} of your tasks {verb}"),
+            link: link.clone(),
+            message_id: None,
+        };
+        told.extend(send(ctx, org_id, member.user.id, &[user], &notice).await?);
+    }
+    for (user, n) in per_person(left_open, &assignees, &team) {
+        if told.contains(&user) {
+            continue;
+        }
+        let notice = Notice {
+            kind,
+            body: format!("{headline}\n{n} of your tasks left open"),
             link: link.clone(),
             message_id: None,
         };
@@ -421,10 +484,14 @@ async fn tell_per_person(
         .filter(|id| team.contains(id) && !told.contains(id))
         .collect();
     if !owners.is_empty() {
-        let body = match changed.len() {
-            0 => headline,
-            1 => format!("{headline}\n1 task {verb}"),
-            n => format!("{headline}\n{n} tasks {verb}"),
+        let body = match (changed.len(), left_open.len()) {
+            (0, 0) => headline,
+            (1, 0) => format!("{headline}\n1 task {verb}"),
+            (n, 0) => format!("{headline}\n{n} tasks {verb}"),
+            (0, 1) => format!("{headline}\n1 task left open"),
+            (0, k) => format!("{headline}\n{k} tasks left open"),
+            (1, k) => format!("{headline}\n1 task {verb}, {k} left open"),
+            (n, k) => format!("{headline}\n{n} tasks {verb}, {k} left open"),
         };
         let notice = Notice {
             kind,

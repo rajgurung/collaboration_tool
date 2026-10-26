@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{collections::HashMap, sync::LazyLock};
 
 use loco_rs::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ pub use super::_entities::projects::{ActiveModel, Column, Entity, Model};
 use super::{
     field_error, memberships,
     order::{self, Place, Slot},
-    project_owners,
+    project_owners, task_assignees,
     tasks::{self, Refusal, Removed},
 };
 
@@ -38,26 +38,72 @@ impl Progress {
     }
 }
 
+/// Whose open tasks a close marks done. The roadmap handler builds it once
+/// per request from the closer's own membership, never from a form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseScope {
+    /// An organisation owner or admin: every open task.
+    Everything,
+    /// A project owner who is not an owner or admin of the organisation
+    /// (this user): only open tasks with no assignee but them. A task with
+    /// anyone else on it, a removed member included, stays open.
+    OwnWork(i64),
+}
+
+impl CloseScope {
+    /// Whether a close marks an open task with these assignees done.
+    #[must_use]
+    pub fn closes(self, assignees: &[i64]) -> bool {
+        match self {
+            Self::Everything => true,
+            Self::OwnWork(closer) => assignees.iter().all(|id| *id == closer),
+        }
+    }
+}
+
 /// What closing a project would do, worked out from its tasks for the
-/// confirm step: how many of each status it has now.
+/// confirm step: how many of each status it would mark done, how many are
+/// done already, and how many it leaves open (`kept`).
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 pub struct CloseSummary {
     pub todo: usize,
     pub progress: usize,
     pub blocked: usize,
     pub done: usize,
+    pub kept: usize,
 }
 
 impl CloseSummary {
+    /// Every task by status, as a manager's close sees them. For the Done
+    /// card's counts.
     #[must_use]
     pub fn of(project_id: i64, all_tasks: &[tasks::Model]) -> Self {
+        Self::for_close(
+            project_id,
+            all_tasks,
+            &HashMap::new(),
+            CloseScope::Everything,
+        )
+    }
+
+    /// What a close in `scope` would do. `assignees` maps task ids to their
+    /// assignees. [`Model::close`] applies the same rule.
+    #[must_use]
+    pub fn for_close(
+        project_id: i64,
+        all_tasks: &[tasks::Model],
+        assignees: &HashMap<i64, Vec<i64>>,
+        scope: CloseScope,
+    ) -> Self {
         let mut summary = Self::default();
         for t in all_tasks
             .iter()
             .filter(|t| t.project_id == Some(project_id))
         {
+            let on_it = assignees.get(&t.id).map_or(&[][..], Vec::as_slice);
             match t.status.as_str() {
                 "done" => summary.done += 1,
+                _ if !scope.closes(on_it) => summary.kept += 1,
                 "progress" => summary.progress += 1,
                 "blocked" => summary.blocked += 1,
                 _ => summary.todo += 1,
@@ -74,34 +120,61 @@ impl CloseSummary {
 
     #[must_use]
     pub const fn total(&self) -> usize {
-        self.open() + self.done
+        self.open() + self.done + self.kept
     }
 
-    /// The confirm step's sentence: "4 open tasks will be marked done. 1 is blocked."
+    /// The confirm step's sentence: "4 open tasks will be marked done. 1 is
+    /// blocked." `who` names the people on the tasks it leaves open, as
+    /// "Ana and Maya"; unused when there are none.
     #[must_use]
-    pub fn sentence(&self) -> String {
+    pub fn sentence(&self, who: &str) -> String {
         let open = self.open();
+        if self.kept > 0 {
+            let kept = self.kept_clause(who);
+            return if open == 0 {
+                format!("No tasks are marked done. {kept}")
+            } else {
+                format!("{} {kept}", self.marked_done(open))
+            };
+        }
         match (open, self.total()) {
             (0, 0) => "It has no tasks.".to_string(),
             (0, 1) => "Its 1 task is already done.".to_string(),
             (0, total) => format!("All {total} tasks are already done."),
-            _ => {
-                let lead = format!("{open} open {} will be marked done.", tasks_word(open));
-                match (open, self.blocked) {
-                    (_, 0) => lead,
-                    (1, _) => format!("{lead} It is blocked."),
-                    (_, 1) => format!("{lead} 1 is blocked."),
-                    (_, n) => format!("{lead} {n} are blocked."),
-                }
-            }
+            _ => self.marked_done(open),
         }
+    }
+
+    /// "4 open tasks will be marked done. 1 is blocked."
+    fn marked_done(&self, open: usize) -> String {
+        let lead = format!("{open} open {} will be marked done.", tasks_word(open));
+        match (open, self.blocked) {
+            (_, 0) => lead,
+            (1, _) => format!("{lead} It is blocked."),
+            (_, 1) => format!("{lead} 1 is blocked."),
+            (_, n) => format!("{lead} {n} are blocked."),
+        }
+    }
+
+    /// "3 assigned to Ana and Maya stay open."
+    fn kept_clause(&self, who: &str) -> String {
+        let stay = if self.kept == 1 { "stays" } else { "stay" };
+        format!("{} assigned to {who} {stay} open.", self.kept)
     }
 
     /// The line in the "Mark project done" box, before anyone taps it.
     #[must_use]
     pub fn box_line(&self) -> String {
+        if self.kept > 0 {
+            let kept = self.kept_clause("others");
+            return match self.open() {
+                0 => format!("No tasks are marked done. {kept}"),
+                1 => format!("1 open task is marked done with it. {kept}"),
+                n => format!("{n} open tasks are marked done with it. {kept}"),
+            };
+        }
         match self.open() {
-            0 => self.sentence(),
+            0 => self.sentence(""),
             1 => "Its 1 open task is marked done with it.".to_string(),
             n => format!("Its {n} open tasks are marked done with it."),
         }
@@ -116,17 +189,31 @@ fn tasks_word(n: usize) -> &'static str {
     }
 }
 
+/// People as a sentence names them: "Ana", "Ana and Maya", "Ana, Maya, Leo
+/// and Sam", or "Ana, Maya and 3 others" for five or more. `unnamed` people
+/// (off the team) add "and others", or count in the others; with no names
+/// at all it is "others".
+#[must_use]
+pub fn names(named: &[String], unnamed: usize) -> String {
+    match named {
+        [] => "others".to_string(),
+        [first, second, rest @ ..] if rest.len() >= 3 => {
+            format!("{first}, {second} and {} others", rest.len() + unnamed)
+        }
+        _ if unnamed > 0 => format!("{} and others", named.join(", ")),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
 /// Who a close would notify, as the confirm step says it: "Maya and Tom get
 /// a notice.", or "Maya, Tom and 3 others get a notice." for five or more.
 #[must_use]
-pub fn notice_line(names: &[String]) -> String {
-    match names {
+pub fn notice_line(people: &[String]) -> String {
+    match people {
         [] => "No one else gets a notice.".to_string(),
         [one] => format!("{one} gets a notice."),
-        [first, second, rest @ ..] if rest.len() >= 3 => {
-            format!("{first}, {second} and {} others get a notice.", rest.len())
-        }
-        [init @ .., last] => format!("{} and {last} get a notice.", init.join(", ")),
+        _ => format!("{} get a notice.", names(people, 0)),
     }
 }
 
@@ -148,12 +235,14 @@ pub fn lane_label(lane: &str) -> &'static str {
 }
 
 /// What a close did. `tasks` are the rows it marked done, so the toast and
-/// the notices count what really changed. `already` means it was closed
-/// before, and nothing changed.
+/// the notices count what really changed. `left_open` are the open tasks
+/// its [`CloseScope`] left alone. `already` means it was closed before, and
+/// nothing changed.
 #[derive(Debug)]
 pub struct Closed {
     pub project: Model,
     pub tasks: Vec<tasks::Model>,
+    pub left_open: Vec<tasks::Model>,
     pub already: bool,
 }
 
@@ -593,25 +682,33 @@ impl Model {
     }
 
     /// Who can close and reopen it: organisation owners, admins and its
-    /// owners (`owners`, from `project_owners`). A close changes other
-    /// people's tasks, so it is a step above editing.
+    /// owners (`owners`, from `project_owners`). A close changes tasks and
+    /// notifies people, so it is a step above editing. An owner who isn't a
+    /// manager closes only their own work ([`CloseScope::OwnWork`]).
     #[must_use]
     pub fn closable_by(can_manage: bool, user_id: i64, owners: &[i64]) -> bool {
         can_manage || owners.contains(&user_id)
     }
 
-    /// Marks the project done, and every task in it that isn't done yet, in
-    /// one transaction. Each task remembers its status in
-    /// `status_before_close` for a reopen. Tasks already done are left as they
-    /// are. Closing a closed project changes nothing.
+    /// Marks the project done, and the tasks in it that `scope` covers
+    /// ([`CloseScope::closes`]) and aren't done yet, in one transaction. Each
+    /// such task remembers its status in `status_before_close` for a reopen.
+    /// Tasks already done, and open tasks the scope leaves (`left_open`), are
+    /// not touched. The project closes either way. Closing a closed project
+    /// changes nothing.
+    ///
+    /// The assignees are read after the tasks are locked. A task edit locks
+    /// its row before changing assignees, so they can't change between the
+    /// check and the write.
     ///
     /// The tasks are written in one statement, past `before_save`, so it sets
     /// `done_at` itself. Postgres reads the old row on the right of `SET`, so
     /// `status_before_close` gets the status from before.
     ///
-    /// `None` when `user_id` can't close it ([`Self::closable_by`]), checked
-    /// against the owners as they are once the project is locked, so an
-    /// owner taken off meanwhile can't.
+    /// `None` when `user_id` can't close it ([`Self::closable_by`]; only
+    /// [`CloseScope::Everything`] counts as a manager), checked against the
+    /// owners as they are once the project is locked, so an owner taken off
+    /// meanwhile can't.
     ///
     /// # Errors
     /// `EntityNotFound` when it is not in this organisation, or database
@@ -621,36 +718,59 @@ impl Model {
         org_id: i64,
         id: i64,
         user_id: i64,
-        can_manage: bool,
+        scope: CloseScope,
     ) -> ModelResult<Option<Closed>> {
         let txn = db.begin().await?;
-        let (project, _) = lock_with_tasks(&txn, org_id, id).await?;
+        let (project, locked) = lock_with_tasks(&txn, org_id, id).await?;
         // An early return drops `txn`, which rolls it back.
         let owners = project_owners::Model::for_project(&txn, org_id, id).await?;
-        if !Self::closable_by(can_manage, user_id, &owners) {
+        if !Self::closable_by(scope == CloseScope::Everything, user_id, &owners) {
             return Ok(None);
         }
         if project.is_closed() {
             return Ok(Some(Closed {
                 project,
                 tasks: Vec::new(),
+                left_open: Vec::new(),
                 already: true,
             }));
         }
+        let ids: Vec<i64> = locked.iter().map(|(id, _)| *id).collect();
+        let assignees = task_assignees::Model::for_tasks(&txn, org_id, &ids).await?;
+        let (closing, kept): (Vec<i64>, Vec<i64>) = ids
+            .into_iter()
+            .partition(|id| scope.closes(assignees.get(id).map_or(&[][..], Vec::as_slice)));
         let now: DateTimeWithTimeZone = chrono::Utc::now().into();
-        let closed = tasks::Entity::update_many()
-            .col_expr(
-                tasks::Column::StatusBeforeClose,
-                Expr::col(tasks::Column::Status),
-            )
-            .col_expr(tasks::Column::Status, Expr::value("done"))
-            .col_expr(tasks::Column::DoneAt, Expr::value(now))
-            .col_expr(tasks::Column::UpdatedAt, Expr::value(now))
-            .filter(tasks::Column::OrganisationId.eq(org_id))
-            .filter(tasks::Column::ProjectId.eq(project.id))
-            .filter(tasks::Column::Status.ne("done"))
-            .exec_with_returning(&txn)
-            .await?;
+        // Always limited to `closing`: never every open task by default.
+        let closed = if closing.is_empty() {
+            Vec::new()
+        } else {
+            tasks::Entity::update_many()
+                .col_expr(
+                    tasks::Column::StatusBeforeClose,
+                    Expr::col(tasks::Column::Status),
+                )
+                .col_expr(tasks::Column::Status, Expr::value("done"))
+                .col_expr(tasks::Column::DoneAt, Expr::value(now))
+                .col_expr(tasks::Column::UpdatedAt, Expr::value(now))
+                .filter(tasks::Column::OrganisationId.eq(org_id))
+                .filter(tasks::Column::ProjectId.eq(project.id))
+                .filter(tasks::Column::Status.ne("done"))
+                .filter(tasks::Column::Id.is_in(closing))
+                .exec_with_returning(&txn)
+                .await?
+        };
+        let left_open = if kept.is_empty() {
+            Vec::new()
+        } else {
+            tasks::Entity::find()
+                .filter(tasks::Column::OrganisationId.eq(org_id))
+                .filter(tasks::Column::Id.is_in(kept))
+                .filter(tasks::Column::Status.ne("done"))
+                .order_by_asc(tasks::Column::Id)
+                .all(&txn)
+                .await?
+        };
         let mut active = project.into_active_model();
         active.closed_at = ActiveValue::Set(Some(now));
         active.closed_by_id = ActiveValue::Set(Some(user_id));
@@ -659,6 +779,7 @@ impl Model {
         Ok(Some(Closed {
             project,
             tasks: closed,
+            left_open,
             already: false,
         }))
     }
@@ -848,7 +969,21 @@ mod tests {
             progress,
             blocked,
             done,
+            kept: 0,
         }
+    }
+
+    fn kept(todo: usize, blocked: usize, kept: usize) -> CloseSummary {
+        CloseSummary {
+            todo,
+            blocked,
+            kept,
+            ..CloseSummary::default()
+        }
+    }
+
+    fn strings(list: &[&str]) -> Vec<String> {
+        list.iter().map(|n| (*n).to_string()).collect()
     }
 
     fn project(lane: &str, closed: bool) -> Model {
@@ -890,7 +1025,7 @@ mod tests {
             (summary(0, 0, 0, 0), "It has no tasks."),
         ];
         for (s, sentence) in cases {
-            assert_eq!(s.sentence(), sentence);
+            assert_eq!(s.sentence("Ana"), sentence, "no kept tasks, no names");
         }
     }
 
@@ -909,7 +1044,7 @@ mod tests {
             "All 2 tasks are already done."
         );
 
-        let names = |list: &[&str]| list.iter().map(|n| (*n).to_string()).collect::<Vec<_>>();
+        let names = strings;
         assert_eq!(notice_line(&[]), "No one else gets a notice.");
         assert_eq!(notice_line(&names(&["Maya"])), "Maya gets a notice.");
         assert_eq!(
@@ -923,6 +1058,72 @@ mod tests {
         assert_eq!(
             notice_line(&names(&["Maya", "Tom", "Leo", "Ana", "Sam"])),
             "Maya, Tom and 3 others get a notice."
+        );
+    }
+
+    #[test]
+    fn a_member_closes_only_their_own_and_unassigned_tasks() {
+        let me = CloseScope::OwnWork(7);
+        assert!(me.closes(&[]), "unassigned");
+        assert!(me.closes(&[7]), "only mine");
+        assert!(!me.closes(&[3]), "someone else's");
+        assert!(!me.closes(&[7, 3]), "shared");
+        assert!(!me.closes(&[3, 7]), "shared, me second");
+        assert!(CloseScope::Everything.closes(&[]));
+        assert!(CloseScope::Everything.closes(&[3, 7]));
+    }
+
+    #[test]
+    fn close_copy_with_tasks_left_open() {
+        assert_eq!(
+            kept(1, 0, 3).sentence("Ana and Maya"),
+            "1 open task will be marked done. 3 assigned to Ana and Maya stay open."
+        );
+        assert_eq!(
+            kept(1, 0, 3).box_line(),
+            "1 open task is marked done with it. 3 assigned to others stay open."
+        );
+        assert_eq!(
+            kept(0, 0, 3).sentence("Ana and Maya"),
+            "No tasks are marked done. 3 assigned to Ana and Maya stay open."
+        );
+        assert_eq!(
+            kept(0, 0, 3).box_line(),
+            "No tasks are marked done. 3 assigned to others stay open."
+        );
+        assert_eq!(
+            kept(1, 1, 1).sentence("Ana"),
+            "2 open tasks will be marked done. 1 is blocked. 1 assigned to Ana stays open."
+        );
+        assert_eq!(
+            kept(0, 1, 2).sentence("others"),
+            "1 open task will be marked done. It is blocked. 2 assigned to others stay open."
+        );
+        assert_eq!(
+            kept(2, 0, 1).box_line(),
+            "2 open tasks are marked done with it. 1 assigned to others stays open."
+        );
+    }
+
+    #[test]
+    fn names_in_a_sentence() {
+        assert_eq!(names(&[], 0), "others");
+        assert_eq!(names(&[], 2), "others");
+        assert_eq!(names(&strings(&["Ana"]), 0), "Ana");
+        assert_eq!(names(&strings(&["Ana", "Maya"]), 0), "Ana and Maya");
+        assert_eq!(
+            names(&strings(&["Ana", "Maya", "Leo", "Sam"]), 0),
+            "Ana, Maya, Leo and Sam"
+        );
+        assert_eq!(
+            names(&strings(&["Ana", "Maya", "Leo", "Sam", "Tom"]), 0),
+            "Ana, Maya and 3 others"
+        );
+        assert_eq!(names(&strings(&["Ana"]), 1), "Ana and others");
+        assert_eq!(names(&strings(&["Ana", "Maya"]), 2), "Ana, Maya and others");
+        assert_eq!(
+            names(&strings(&["Ana", "Maya", "Leo", "Sam", "Tom"]), 1),
+            "Ana, Maya and 4 others"
         );
     }
 

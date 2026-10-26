@@ -360,9 +360,15 @@ async fn a_closed_project_and_the_old_routes() {
         let shop = project_in(&ctx, ORG, "Instagram shop").await;
         let europe = project_in(&ctx, ORG, "Ship to Europe").await;
         move_project(&request, &t.tom, &europe, json!({ "lane": "later" })).await;
-        projects::Model::close(&ctx.db, t.org_id, website.id, t.ana_id, true)
-            .await
-            .unwrap();
+        projects::Model::close(
+            &ctx.db,
+            t.org_id,
+            website.id,
+            t.ana_id,
+            projects::CloseScope::Everything,
+        )
+        .await
+        .unwrap();
         let (status, trigger) =
             move_project(&request, &t.tom, &website, json!({ "lane": "now" })).await;
         assert_eq!(status, 409);

@@ -17,8 +17,8 @@ use crate::{
         order::{self, BUSY},
         project_owners,
         projects::{
-            self, CloseSummary, MoveRefusal, OwnerRights, Progress, ProjectParams, ACCENTS, DONE,
-            DONE_SHOWN, LANES,
+            self, CloseScope, CloseSummary, MoveRefusal, OwnerRights, Progress, ProjectParams,
+            ACCENTS, DONE, DONE_SHOWN, LANES,
         },
         task_assignees, tasks,
     },
@@ -55,7 +55,7 @@ struct DoneCard {
     /// Who marked it done, while they are on the team.
     closed_by: Option<String>,
     done_count: usize,
-    /// Tasks set back to open since the close.
+    /// Open tasks: left open by the close, or set back since.
     open_count: usize,
     can_reopen: bool,
 }
@@ -126,6 +126,17 @@ fn lane_or_default(lane: Option<&str>) -> &str {
 /// this person's name, so a super admin acting here can't.
 fn can_close(member: &CurrentMember, owners: &[i64]) -> bool {
     !member.acting && projects::Model::closable_by(member.can_manage(), member.user.id, owners)
+}
+
+/// Whose tasks this person's close marks done, from their own membership:
+/// owners and admins every open task, a project owner only their own and
+/// unassigned ones. Only for someone [`can_close`] allows.
+fn close_scope(member: &CurrentMember) -> CloseScope {
+    if member.can_manage() {
+        CloseScope::Everything
+    } else {
+        CloseScope::OwnWork(member.user.id)
+    }
 }
 
 /// Approved members, for owner pickers and names on cards.
@@ -288,9 +299,11 @@ fn form_values(
     }
 }
 
-/// What the "Mark project done" box and its confirm step say: the counts,
-/// and who would get a notice (the open tasks' assignees and the project's
-/// owners, on the team, not the viewer).
+/// What the "Mark project done" box and its confirm step say: the counts
+/// for this person's close ([`close_scope`]), who is on the tasks it leaves
+/// open, and who would get a notice (every open task's assignees, those it
+/// closes and those it leaves, and the project's owners, on the team, not
+/// the viewer).
 async fn close_data(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -299,24 +312,38 @@ async fn close_data(
 ) -> Result<serde_json::Value> {
     let org_id = member.org.id;
     let all_tasks = tasks::Model::list_for_org(&ctx.db, org_id).await?;
-    let summary = CloseSummary::of(project.id, &all_tasks);
     let assignees = task_assignees::Model::by_task(&ctx.db, org_id).await?;
-    let mut told: Vec<i64> = all_tasks
+    let scope = close_scope(member);
+    let summary = CloseSummary::for_close(project.id, &all_tasks, &assignees, scope);
+    let on = |t: &tasks::Model| assignees.get(&t.id).map_or(&[][..], Vec::as_slice);
+    let open: Vec<&tasks::Model> = all_tasks
         .iter()
         .filter(|t| t.project_id == Some(project.id) && t.status != "done")
-        .filter_map(|t| assignees.get(&t.id))
-        .flatten()
-        .copied()
         .collect();
+    // People on the tasks left open, in the order first met.
+    let mut keepers: Vec<i64> = Vec::new();
+    for id in open
+        .iter()
+        .filter(|t| !scope.closes(on(t)))
+        .flat_map(|t| on(t))
+    {
+        if *id != member.user.id && !keepers.contains(id) {
+            keepers.push(*id);
+        }
+    }
+    let mut told: Vec<i64> = open.iter().flat_map(|t| on(t)).copied().collect();
     told.extend(owners);
-    let names: Vec<String> = memberships::Model::team(&ctx.db, org_id)
-        .await?
-        .into_iter()
+    let team = memberships::Model::team(&ctx.db, org_id).await?;
+    let name_of = |id: &i64| team.iter().find(|(t, _)| t == id).map(|(_, n)| n.clone());
+    let kept_names: Vec<String> = keepers.iter().filter_map(name_of).collect();
+    let who = projects::names(&kept_names, keepers.len() - kept_names.len());
+    let names: Vec<String> = team
+        .iter()
         .filter(|(id, _)| *id != member.user.id && told.contains(id))
-        .map(|(_, name)| name)
+        .map(|(_, name)| name.clone())
         .collect();
     Ok(serde_json::json!({
-        "sentence": summary.sentence(),
+        "sentence": summary.sentence(&who),
         "box_line": summary.box_line(),
         "notice": projects::notice_line(&names),
         "summary": summary,
@@ -630,7 +657,8 @@ fn busy_refused(err: ModelError, what: &str) -> Result<Response> {
 }
 
 /// Marks a project done with its open tasks. Owners, admins and the
-/// project's owners. A second close is a no-op.
+/// project's owners; an owner who isn't a manager closes only their own and
+/// unassigned tasks ([`close_scope`]). A second close is a no-op.
 #[debug_handler]
 async fn close(
     member: CurrentMember,
@@ -644,7 +672,7 @@ async fn close(
         member.org.id,
         id,
         member.user.id,
-        member.can_manage(),
+        close_scope(&member),
     )
     .await
     {
@@ -655,29 +683,43 @@ async fn close(
     if !closed.already {
         // The close is already committed, so a failed notice must not turn
         // the reply into "nothing was changed".
-        if let Err(err) =
-            super::notifications::project_closed(&ctx, &member, &closed.project, &closed.tasks)
-                .await
+        if let Err(err) = super::notifications::project_closed(
+            &ctx,
+            &member,
+            &closed.project,
+            &closed.tasks,
+            &closed.left_open,
+        )
+        .await
         {
             tracing::error!(error = %err, project_id = id, "could not send the closed notices");
         }
     }
     let name = &closed.project.name;
+    let closed_ids: Vec<i64> = closed.tasks.iter().map(|t| t.id).collect();
+    let kept_ids: Vec<i64> = closed.left_open.iter().map(|t| t.id).collect();
     tracing::info!(
         user_id = member.user.id,
         org_id = member.org.id,
         project_id = id,
         tasks = closed.tasks.len(),
+        left_open = closed.left_open.len(),
+        ?closed_ids,
+        ?kept_ids,
         already = closed.already,
         acting = member.acting,
         "marked a project done"
     );
     // The number really changed, which can be fewer than the confirm said.
-    let message = match (closed.already, closed.tasks.len()) {
-        (true, _) => format!("{name} is already done."),
-        (false, 0) => format!("{name} done."),
-        (false, 1) => format!("{name} done. 1 task closed."),
-        (false, n) => format!("{name} done. {n} tasks closed."),
+    let message = match (closed.already, closed.tasks.len(), closed.left_open.len()) {
+        (true, _, _) => format!("{name} is already done."),
+        (false, 0, 0) => format!("{name} done."),
+        (false, 1, 0) => format!("{name} done. 1 task closed."),
+        (false, n, 0) => format!("{name} done. {n} tasks closed."),
+        (false, 0, 1) => format!("{name} done. 1 task left open."),
+        (false, 0, k) => format!("{name} done. {k} tasks left open."),
+        (false, 1, k) => format!("{name} done. 1 task closed, {k} left open."),
+        (false, n, k) => format!("{name} done. {n} tasks closed, {k} left open."),
     };
     let to = member.url("/roadmap?lane=done");
     done_or_reopened(&headers, &to, &message)
