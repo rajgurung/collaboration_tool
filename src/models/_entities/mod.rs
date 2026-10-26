@@ -22,6 +22,7 @@ pub mod oauth_clients;
 pub mod oauth_codes;
 pub mod org_keys;
 pub mod organisations;
+pub mod project_owners;
 pub mod projects;
 pub mod reactions;
 pub mod saved_views;

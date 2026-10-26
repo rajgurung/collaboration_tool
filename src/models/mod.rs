@@ -48,6 +48,7 @@ pub mod notifications;
 pub mod oauth_clients;
 pub mod oauth_codes;
 pub mod org_keys;
+pub mod project_owners;
 pub mod saved_views;
 pub mod secrets;
 pub mod task_assignees;
