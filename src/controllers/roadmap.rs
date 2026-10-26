@@ -330,10 +330,10 @@ async fn form_data(
     values: serde_json::Value,
     errors: &crate::views::forms::FieldErrors,
 ) -> Result<serde_json::Value> {
-    // For the edit form's delete confirm and "Made with Claude" line. Only a
-    // bool about Claude reaches the template, never the grant.
     // A new project's maker picks its owners, unless a super admin acting.
     let mut owners_locked = member.acting;
+    // For the edit form's delete confirm and "Made with Claude" line. Only a
+    // bool about Claude reaches the template, never the grant.
     let project = match project_id {
         Some(id) => {
             let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
