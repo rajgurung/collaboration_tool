@@ -391,6 +391,19 @@ fn connection(parts: &Parts) -> Result<McpConnection, Fail> {
         .ok_or_else(|| Fail::Broken("no connection on an /mcp request".into()))
 }
 
+/// Adding and deleting projects is for the organisation's owners and admins,
+/// as in the web app.
+fn planner(member: &CurrentMember, what: &str) -> Result<(), Fail> {
+    if member.can_manage() {
+        Ok(())
+    } else {
+        Err(Fail::Refused(format!(
+            "Only admins can {what} projects in {}. Ask an admin to do it in Collab Tool.",
+            member.org.name
+        )))
+    }
+}
+
 fn a_minute_ago() -> chrono::DateTime<chrono::Utc> {
     chrono::Utc::now() - chrono::Duration::seconds(60)
 }
@@ -532,7 +545,7 @@ impl CollabServer {
     }
 
     #[tool(
-        description = "Create a project in a roadmap lane. The owners, if any, are notified.",
+        description = "Create a project in a roadmap lane. Organisation owners and admins only. The owners, if any, are notified.",
         annotations(destructive_hint = false, open_world_hint = false)
     )]
     async fn create_project(
@@ -713,6 +726,7 @@ impl CollabServer {
 
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
         let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        planner(&member, "add")?;
         // Both shapes, merged. `owners()` drops repeats.
         let names: Vec<String> = input
             .owners
@@ -942,6 +956,7 @@ impl CollabServer {
 
     async fn delete_project_for(&self, parts: &Parts, input: DeleteProject) -> Outcome {
         let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        planner(&member, "delete")?;
         let removed = projects::Model::remove_made_by(
             &self.ctx.db,
             member.org.id,

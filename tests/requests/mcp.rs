@@ -7,7 +7,9 @@ use collab::{
     },
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
-use sea_orm::{ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+};
 use serde_json::{json, Value};
 use serial_test::serial;
 
@@ -371,6 +373,53 @@ async fn create_project_fills_in_a_colour_and_tells_the_owner() {
         .await;
         assert!(error);
         assert!(message.as_str().unwrap().contains("lane"), "{message}");
+    })
+    .await;
+}
+
+/// Adding and deleting projects is for owners and admins, from Claude too.
+#[tokio::test]
+#[serial]
+async fn a_member_cannot_add_or_delete_projects_from_claude() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
+        let alice = token_for(&ctx, "alice@example.com").await;
+        let bob = token_for(&ctx, "bob@example.com").await;
+        let (_, made) = tool(
+            &request,
+            &alice,
+            "create_project",
+            json!({ "organisation": "acme", "name": "Launch", "lane": "now", "status": "Active" }),
+        )
+        .await;
+        let before = collab::models::projects::Entity::find().count(&ctx.db).await.unwrap();
+
+        let (error, message) = tool(
+            &request,
+            &bob,
+            "create_project",
+            json!({ "organisation": "acme", "name": "Bob's plan", "lane": "now", "status": "Active" }),
+        )
+        .await;
+        assert!(error);
+        assert_eq!(
+            message,
+            "Only admins can add projects in Acme. Ask an admin to do it in Collab Tool."
+        );
+        let (error, message) = tool(
+            &request,
+            &bob,
+            "delete_project",
+            json!({ "organisation": "acme", "project_id": made["id"] }),
+        )
+        .await;
+        assert!(error);
+        assert!(message.as_str().unwrap().starts_with("Only admins can delete projects"), "{message}");
+        assert_eq!(
+            collab::models::projects::Entity::find().count(&ctx.db).await.unwrap(),
+            before
+        );
     })
     .await;
 }

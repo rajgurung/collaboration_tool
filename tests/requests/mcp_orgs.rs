@@ -986,6 +986,22 @@ async fn delete_tools_stay_in_their_org() {
     request::<App, _, _>(|request, ctx| async move {
         setup(&request, &ctx).await;
         let himalayan = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        // Only admins add projects, so Raj is one in Softly.
+        let raj = users::Model::find_by_email(&ctx.db, "raj@example.com")
+            .await
+            .unwrap();
+        let mut softly_raj = memberships::Entity::find()
+            .filter(memberships::Column::UserId.eq(raj.id))
+            .filter(memberships::Column::Username.eq("raj"))
+            .all(&ctx.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|m| m.role == memberships::role::MEMBER)
+            .unwrap()
+            .into_active_model();
+        softly_raj.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+        softly_raj.update(&ctx.db).await.unwrap();
         let softly = token_in(&ctx, "raj@example.com", "softly").await;
         let (_, task) = tool(
             &request,
