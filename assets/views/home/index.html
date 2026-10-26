@@ -1,5 +1,6 @@
 {% extends "layouts/base.html" %}
 {% block title %}Collaboration Tool: roadmaps, tasks, meetings and chat{% endblock title %}
+{% block head %}{% if canonical %}<link rel="canonical" href="{{ canonical }}">{% endif %}{% endblock head %}
 {% block body %}
 {% set app_name = t(key="app-name", lang="en-US") %}
 <div class="landing">
