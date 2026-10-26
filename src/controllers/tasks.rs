@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     controllers::notifications::{self, TaskBefore},
-    extractors::{current_member::CurrentMember, session::redirect_response},
+    extractors::{
+        current_member::{forbidden, CurrentMember},
+        session::redirect_response,
+    },
     models::{
         field_error, memberships, note_reactions,
         notifications::{mention_parts, Part, EVERYONE},
@@ -43,6 +46,9 @@ const GROUPS: [(&str, &str); 3] = [
     ("person", "Person"),
     ("none", "None"),
 ];
+
+/// Why a member can't delete a task, in the app and through Claude.
+pub const DELETE_REFUSED: &str = "Only owners and admins can delete tasks.";
 
 #[derive(Debug, Default, Deserialize)]
 struct ListQuery {
@@ -930,6 +936,8 @@ async fn update(
     }
 }
 
+/// Owners and admins delete a task, with its notes, for good. Members mark
+/// it done instead.
 #[debug_handler]
 async fn destroy(
     member: CurrentMember,
@@ -937,6 +945,10 @@ async fn destroy(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response> {
+    member.require_own_membership()?;
+    if !member.can_manage() {
+        return Err(forbidden(DELETE_REFUSED));
+    }
     let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     task.remove(&ctx.db).await?;
     if !headers.contains_key("hx-request") {

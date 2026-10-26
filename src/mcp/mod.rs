@@ -632,7 +632,7 @@ impl CollabServer {
     }
 
     #[tool(
-        description = "Delete a task this connection created in the last 24 hours, to undo a mistake. Its notes and assignees go with it. Anything else must be deleted in Collab Tool.",
+        description = "Owners and admins only. Delete a task this connection created in the last 24 hours, to undo a mistake. Its notes and assignees go with it. Anything else must be deleted in Collab Tool.",
         annotations(destructive_hint = true, open_world_hint = false)
     )]
     async fn delete_task(
@@ -933,6 +933,12 @@ impl CollabServer {
 
     async fn delete_task_for(&self, parts: &Parts, input: DeleteTask) -> Outcome {
         let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        if !member.can_manage() {
+            return Err(Fail::Refused(
+                "Only owners and admins can delete tasks. Ask one of them, or mark it done instead."
+                    .into(),
+            ));
+        }
         let removed = tasks::Model::remove_made_by(
             &self.ctx.db,
             member.org.id,

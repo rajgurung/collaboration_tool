@@ -925,3 +925,45 @@ async fn chores_need_no_project() {
     })
     .await;
 }
+
+#[tokio::test]
+#[serial]
+async fn only_owners_and_admins_delete_tasks() {
+    request::<App, _, _>(|request, ctx| async move {
+        let team = super::juniper::juniper(&request, &ctx).await;
+        let project = project_in(&ctx, &team.ana.slug, "Spring blend").await;
+        request
+            .post(&team.ana.at("/tasks"))
+            .as_member(&team.ana)
+            .form(&task_form("Order tins", project.id, ""))
+            .await;
+        let task = tasks::Entity::find().one(&ctx.db).await.unwrap().unwrap();
+        let sheet = |who: &TestMember| {
+            request
+                .get(&who.at(&format!("/tasks/{}", task.id)))
+                .as_member(who)
+                .add_header("HX-Request", "true")
+        };
+        let delete = |who: &TestMember| {
+            request
+                .post(&who.at(&format!("/tasks/{}/delete", task.id)))
+                .as_member(who)
+                .add_header("HX-Request", "true")
+        };
+
+        let shown = sheet(&team.tom).await.text();
+        assert!(shown.contains("Order tins"));
+        assert!(!shown.contains("Delete task"), "members aren't offered it");
+        let res = delete(&team.tom).await;
+        assert_eq!(res.status_code(), 403);
+        assert!(res
+            .text()
+            .contains("Only owners and admins can delete tasks."));
+        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
+
+        assert!(sheet(&team.maya).await.text().contains("Delete task"));
+        assert_eq!(delete(&team.maya).await.status_code(), 200);
+        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    })
+    .await;
+}

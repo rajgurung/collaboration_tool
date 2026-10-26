@@ -625,6 +625,7 @@ for (const name of ["htmx:responseError", "htmx:sendError"]) {
     }
     const reopen = elt?.closest<HTMLElement>("[data-reopen]");
     if (reopen) showToast({ kind: "error", message: refusalText(xhr) ?? `Couldn't reopen ${reopen.dataset.name}. Try again.` });
+    if (elt?.closest("[data-task-delete]")) showToast({ kind: "error", message: refusalText(xhr) ?? "Couldn't delete the task. Try again." });
   });
 }
 
