@@ -363,7 +363,7 @@ fn renders_a_message_as_one_block() {
         serde_json::json!({
             "org_base": "/o/acme",
             "message": {
-                "id": 42, "conversation_id": 7, "author": "alice", "color": "#ffb454",
+                "id": 42, "conversation_id": 7, "author_id": 1, "author": "alice", "color": "#ffb454",
                 "parts": [{ "text": "Stock count Friday", "mention": false }],
                 "at": "09:31", "own": own, "start": true, "show_time": true,
                 "read_receipts": read_receipts, "receipt": null,
@@ -519,7 +519,7 @@ fn renders_a_removed_photo_as_a_live_swap_of_the_link() {
         serde_json::json!({
             "org_base": "/o/acme",
             "message": {
-                "id": 7, "conversation_id": 3, "author": "tom", "color": "#ffb454",
+                "id": 7, "conversation_id": 3, "author_id": 2, "author": "tom", "color": "#ffb454",
                 "parts": [{ "text": "Van fuel £62", "mention": false }], "body": "Van fuel £62",
                 "at": "09:31", "own": false, "start": true, "show_time": true,
                 "read_receipts": false, "receipt": null, "reactions": [], "picks": [],
