@@ -332,17 +332,19 @@ async fn form_data(
 ) -> Result<serde_json::Value> {
     // For the edit form's delete confirm and "Made with Claude" line. Only a
     // bool about Claude reaches the template, never the grant.
+    // A new project's maker picks its owners, unless a super admin acting.
+    let mut owners_locked = member.acting;
     let project = match project_id {
         Some(id) => {
             let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
             let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+            owners_locked = !owner_rights(member).allows(&owners);
             let close = if can_close(member, &owners) {
                 Some(close_data(ctx, member, &project, &owners).await?)
             } else {
                 None
             };
             Some(serde_json::json!({
-                "can_change_owners": owner_rights(member).allows(&owners),
                 "name": project.name,
                 "task_count": tasks::Model::count_in_project(&ctx.db, member.org.id, id).await?,
                 "made_with_claude": project.claude_grant_id.is_some(),
@@ -359,6 +361,7 @@ async fn form_data(
             "project": project,
             "form": values,
             "errors": errors,
+            "owners_locked": owners_locked,
             "team": team(ctx, member.org.id).await?,
             "lanes": LANES,
             "accents": ACCENTS,
@@ -406,8 +409,17 @@ async fn create(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     headers: HeaderMap,
-    axum_extra::extract::Form(params): axum_extra::extract::Form<ProjectParams>,
+    axum_extra::extract::Form(mut params): axum_extra::extract::Form<ProjectParams>,
 ) -> Result<Response> {
+    // A super admin acting here makes the project, but not its owners, as
+    // with an edit.
+    if member.acting {
+        params = ProjectParams {
+            owner_ids: Vec::new(),
+            owner_id: String::new(),
+            ..params
+        };
+    }
     let result = projects::Model::create(&ctx.db, member.org.id, &params, None).await;
     if let Ok(project) = &result {
         let owners = project_owners::Model::for_project(&ctx.db, member.org.id, project.id).await?;
@@ -789,14 +801,15 @@ async fn saved(
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let data = form_data(
-                ctx,
-                member,
-                project_id,
-                form_values(Some(params), None),
-                &errors,
-            )
-            .await?;
+            let mut values = form_values(Some(params), None);
+            // The owners were ignored, not saved: show the project's own.
+            if let Some(id) = project_id {
+                let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+                if !owner_rights(member).allows(&owners) {
+                    values["owner_ids"] = serde_json::json!(owners);
+                }
+            }
+            let data = form_data(ctx, member, project_id, values, &errors).await?;
             invalid_form(v, "roadmap/_form.html", FORM_ID, member.fragment(data))
         }
     }

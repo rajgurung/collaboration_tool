@@ -32,7 +32,7 @@ use crate::{
     extractors::{bearer::McpConnection, current_member::CurrentMember},
     models::{
         claude_update_notices, memberships, order, project_owners,
-        projects::{self, Progress, ProjectParams, ACCENTS},
+        projects::{self, Progress, ProjectParams, ACCENTS, MAX_OWNERS},
         task_assignees,
         task_notes::{self, NoteParams},
         tasks::{self, Refusal, Removed, TaskParams},
@@ -713,13 +713,6 @@ impl CollabServer {
 
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
         let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
-        let db = &self.ctx.db;
-        let recent =
-            projects::Model::count_made_by(db, connection.grant_id, a_minute_ago()).await?;
-        if recent >= PROJECTS_PER_MINUTE {
-            return Err(paused(&member, PROJECTS_PER_MINUTE, "projects"));
-        }
-        let team = Team::load(&self.ctx, &member).await?;
         // Both shapes, merged. `owners()` drops repeats.
         let names: Vec<String> = input
             .owners
@@ -728,6 +721,16 @@ impl CollabServer {
             .chain(input.owner)
             .filter(|name| !name.trim().is_empty())
             .collect();
+        if names.len() as u64 > MAX_OWNERS {
+            return Err(Fail::Refused("owners: Choose up to 50 owners.".into()));
+        }
+        let db = &self.ctx.db;
+        let recent =
+            projects::Model::count_made_by(db, connection.grant_id, a_minute_ago()).await?;
+        if recent >= PROJECTS_PER_MINUTE {
+            return Err(paused(&member, PROJECTS_PER_MINUTE, "projects"));
+        }
+        let team = Team::load(&self.ctx, &member).await?;
         let owner_ids = team.ids(&member, &names)?;
         let count = projects::Model::list_for_org(db, member.org.id)
             .await?

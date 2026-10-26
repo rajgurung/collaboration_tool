@@ -239,6 +239,78 @@ async fn a_super_admin_acting_cant_change_owners() {
         assert_eq!(res.status_code(), 200, "{}", res.text());
         assert_eq!(owners(&ctx, &website).await, vec![t.ana_id]);
         assert!(inbox(&ctx, t.tom_id).await.is_empty());
+
+        // Nor on a new project: it is made with no owners.
+        let res = request
+            .post(&t.ana.at("/roadmap/projects"))
+            .add_header(
+                "cookie",
+                format!("{}; acting_org={}", admin.1.to_str().unwrap(), t.org_id),
+            )
+            .add_header("x-org-id", t.org_id.to_string())
+            .add_header("HX-Request", "true")
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(project_body("Acting launch", &[t.tom_id]))
+            .await;
+        assert_eq!(res.status_code(), 200, "{}", res.text());
+        let made = projects::Entity::find()
+            .filter(projects::Column::Name.eq("Acting launch"))
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(owners(&ctx, &made).await.is_empty());
+        assert!(inbox(&ctx, t.tom_id).await.is_empty());
+    })
+    .await;
+}
+
+/// A non-owner's edit that fails shows the saved owners again, not the
+/// ticks the server ignored.
+#[tokio::test]
+#[serial]
+async fn a_failed_edit_shows_the_saved_owners_to_a_non_owner() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = juniper_project(&ctx, "Website").await;
+        own(&ctx, &website, &[t.leo_id]).await;
+        let res = request
+            .post(&t.tom.at(&format!("/roadmap/projects/{}", website.id)))
+            .as_member(&t.tom)
+            .add_header("HX-Request", "true")
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(project_body("", &[]))
+            .await;
+        assert_eq!(res.status_code(), 422);
+        let html = res.text();
+        assert!(html.contains("Give the project a name"));
+        assert!(
+            html.contains(&format!(r#"name="owner_ids" value="{}" checked"#, t.leo_id)),
+            "{html}"
+        );
+        assert_eq!(owners(&ctx, &website).await, vec![t.leo_id]);
+    })
+    .await;
+}
+
+/// More than 50 owners is refused before anything is looked up.
+#[tokio::test]
+#[serial]
+async fn more_than_fifty_owners_are_refused() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = juniper_project(&ctx, "Website").await;
+        let many: Vec<i64> = (1..=51).collect();
+        let res = request
+            .post(&t.ana.at(&format!("/roadmap/projects/{}", website.id)))
+            .as_member(&t.ana)
+            .add_header("HX-Request", "true")
+            .content_type("application/x-www-form-urlencoded")
+            .bytes(project_body("Website", &many))
+            .await;
+        assert_eq!(res.status_code(), 422);
+        assert!(res.text().contains("Choose up to 50 owners."));
+        assert!(owners(&ctx, &website).await.is_empty());
     })
     .await;
 }

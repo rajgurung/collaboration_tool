@@ -22,8 +22,8 @@
     {{<text_field name="status" label="Status" value={form.status} error={errors.status | default(value="")}/>}}
   </div>
   {# A new project's maker picks its owners; on an edit only admins and the
-     project's owners can change them (the server ignores anyone else's). #}
-  {% set owners_locked = project and not project.can_change_owners %}
+     project's owners can change them (the server ignores anyone else's).
+     A super admin acting never can. #}
   <fieldset class="field m-0 border-0 p-0" {% if owners_locked %}disabled{% endif %}>
     <legend class="field-label mb-1.5">Owners{% if not owners_locked %} <span class="font-normal">· tap to add or remove</span>{% endif %}</legend>
     <div class="flex flex-wrap gap-2">

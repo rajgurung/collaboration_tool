@@ -206,6 +206,10 @@ static LANE_RE: LazyLock<regex::Regex> =
 static ACCENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^#[0-9a-fA-F]{6}$").expect("accent regex is valid"));
 
+/// The most owners a project can have, so one post can't make a huge
+/// query.
+pub const MAX_OWNERS: u64 = 50;
+
 /// The project form. `owner_ids` comes from repeated checkbox fields.
 #[derive(Debug, Deserialize, Validate)]
 pub struct ProjectParams {
@@ -226,6 +230,7 @@ pub struct ProjectParams {
     #[validate(regex(path = *ACCENT_RE, message = "Choose a colour."))]
     pub accent: String,
     #[serde(default)]
+    #[validate(length(max = MAX_OWNERS, message = "Choose up to 50 owners."))]
     pub owner_ids: Vec<i64>,
     /// The single owner an edit sheet opened before several owners were
     /// possible posts, as text. Read only when `owner_ids` is empty, so
@@ -253,7 +258,9 @@ impl ProjectParams {
 
     /// The chosen owners, without repeats, in the order given. Each must be
     /// an approved member of the organisation; one that isn't refuses the
-    /// whole list.
+    /// whole list. Call it in the transaction that saves them: it reads the
+    /// memberships `FOR SHARE`, so a removal committing now is waited for and
+    /// seen, and one starting later waits, then takes them off.
     ///
     /// # Errors
     /// An `owner_ids` field error, or database errors.
@@ -268,7 +275,13 @@ impl ProjectParams {
         if ids.is_empty() {
             return Ok(ids);
         }
-        let found = memberships::Model::team_among(db, org_id, ids.iter().copied()).await?;
+        let found = memberships::Entity::find()
+            .in_tenant(org_id)
+            .filter(memberships::Column::Status.eq(memberships::status::ACTIVE))
+            .filter(memberships::Column::UserId.is_in(ids.clone()))
+            .lock_shared()
+            .all(db)
+            .await?;
         if found.len() == ids.len() {
             Ok(ids)
         } else {
@@ -380,9 +393,10 @@ impl Model {
         claude_grant: Option<Uuid>,
     ) -> ModelResult<Self> {
         ValidatorTrait::validate(params)?;
-        let owners = params.owners(db, org_id).await?;
+        let txn = db.begin().await?;
+        let owners = params.owners(&txn, org_id).await?;
         let mut project = ActiveModel {
-            sort_order: ActiveValue::Set(next_sort(db, org_id).await?),
+            sort_order: ActiveValue::Set(next_sort(&txn, org_id).await?),
             claude_grant_id: ActiveValue::Set(claude_grant),
             // The mirror of the first owner; see `set_owners`.
             owner_id: ActiveValue::Set(owners.first().copied()),
@@ -390,7 +404,6 @@ impl Model {
         }
         .set_tenant(org_id)?;
         apply(&mut project, params);
-        let txn = db.begin().await?;
         let project = project.insert(&txn).await?;
         project_owners::Model::replace(&txn, org_id, project.id, &owners).await?;
         txn.commit().await?;
