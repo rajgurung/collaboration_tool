@@ -17,10 +17,11 @@ The security review changed these points. They win over the text below.
    folder (`kind = 'shared'`) for every organisation. `create_starters`
    makes it for new organisations. At runtime `shared()` only looks it up by
    kind. If it is somehow missing, it makes it inside a transaction holding
-   `pg_advisory_xact_lock(org)`, and looks again inside it first. On any
-   failure it logs and carries on without Shared. The Documents page never
-   500s because of it. Down drops the index and the column. The renames
-   are not undone, and the Shared folders stay as ordinary folders.
+   `pg_advisory_xact_lock(org)`, and looks again inside it first. It never
+   renames anything. If the insert fails (an ordinary "Shared" holds the
+   name), it logs the error and members see no Shared row. The Documents
+   page never 500s because of it. Down drops the index and the column. The
+   renames are not undone, and the Shared folders stay as ordinary folders.
 2. **`unlock`.** A member who sends no `login_id` is refused. A login id
    from another organisation gets the same 403 as a login they can't see.
 3. **`logins::show`.** The gate runs before `login_data`, on both the HTMX
@@ -107,17 +108,20 @@ CREATE UNIQUE INDEX "idx-folders-org-shared" ON folders (organisation_id)
   WHERE kind = 'shared';
 ```
 
-Down: `DROP INDEX "idx-folders-org-shared"; ALTER TABLE folders DROP
-COLUMN kind;`
+Then `backfill_sql()`. Down: `SET LOCAL lock_timeout = '5s'; DROP INDEX
+"idx-folders-org-shared"; ALTER TABLE folders DROP COLUMN kind;`
 
-- **What it does.** Adds an empty column and an index. No rows change.
-  Shared folders are made by the app on first use, not by the migration.
-- **Rollback.** Reversible. Down drops the column, so the Shared folder
-  stays as an ordinary folder called "Shared", which the old code shows to
-  everyone (today's access). To roll forward again, mark it by hand:
-  `UPDATE folders SET kind = 'shared' WHERE lower(name) = 'shared'` per
-  org, after checking each is the one we made. Otherwise first use would
-  meet the name clash below and rename it "Shared (old)".
+- **What it does.** Adds the `kind` column and the index. Re-marks a
+  Shared left by an earlier down (named "Shared", with our note, at most
+  one per org because of the name index), so members keep its files.
+  Renames any other folder called "Shared" to "Shared (old)", or "Shared
+  (old N)" if that is taken. Inserts one Shared per org that has none.
+  Holds a lock on `folders` briefly; `lock_timeout` makes it give up
+  after 5 seconds rather than queue behind a long query.
+- **Rollback.** Reversible. Down drops the index and the column and keeps
+  the data: each Shared stays as an ordinary folder called "Shared", which
+  the old code shows to everyone (today's access), and renamed folders keep their new
+  names. Running up again re-marks the same Shared folders.
 - Regenerate `src/models/_entities/folders.rs` (`kind: Option<String>`).
 
 ## What changes, file by file
@@ -133,11 +137,11 @@ COLUMN kind;`
   The one gate, with a doc comment.
 - `is_built_in(&self) -> bool`: `is_shared() || is_logins()`.
 - `shared(db, org_id) -> ModelResult<Self>`, like `chat_photos`: find by
-  `kind = 'shared'`; else insert `{name: "Shared", note: SHARED_NOTE, kind:
-  "shared"}`. On a unique violation, find by kind again (two first loads at
-  once). If still none, an ordinary folder holds the name: in one
-  transaction rename it "Shared (old)" (`tracing::warn!` with org and
-  folder id) and insert ours. That folder stays managers only.
+  `kind = 'shared'`; else, inside a transaction holding an advisory lock
+  for the org, look again and insert `{name: "Shared", note: SHARED_NOTE,
+  kind: "shared"}` (`tracing::warn!`). It never renames. If an ordinary
+  folder holds the name, the insert fails; `folder_rows` logs the error
+  and members see no Shared row.
   `SHARED_NOTE`: "Photos and files for the whole team. Everyone can open
   them and add to them."
 - `STARTERS` becomes `[(name, note, kind); 3]` with Shared added.
@@ -290,10 +294,16 @@ folder, now including Shared.
 - **NULL uploader in Shared** (a former member's file): managers only.
 - **Chat photos**: hidden from members in Documents. Opened and deleted
   through chat as today.
-- **Old "Shared" folder** in production: renamed "Shared (old)" on first
-  use. Before deploy, run `SELECT organisation_id, id FROM folders WHERE
+- **Old "Shared" folder** in production: renamed "Shared (old)" by the
+  migration. Before deploy, run `SELECT organisation_id, id FROM folders WHERE
   lower(name) = 'shared'`. Unverified: expected none.
 - **Super admin acting**: `require_own_membership` first, as today.
+
+- **Missing and unnamed logins.** `show`, `reveal` and `copy` return 404
+  for an id that doesn't exist or is in another org, and 403 for a login
+  in this org the member isn't named on. So a member can tell that an id
+  exists in their own org. Accepted: ids are not secret, and nothing about
+  the login is shown.
 
 ## Tests
 
@@ -301,8 +311,9 @@ folder, now including Shared.
 
 - `shared` makes one folder; a second call returns it; two at once give
   one row.
-- Name clash: an ordinary "Shared" with a file becomes "Shared (old)",
-  keeps its file and `kind` NULL.
+- Backfill: an ordinary "Shared" becomes "Shared (old)" (or "Shared (old
+  N)") with `kind` NULL; each org gets one Shared; running it twice
+  changes nothing. After a down, it re-marks the same Shared folder.
 - `create_starters` makes Company, Logins and Shared.
 - `edit` keeps built-in names (note still changes); `delete_if_empty`
   refuses both built-in folders, even when empty.
