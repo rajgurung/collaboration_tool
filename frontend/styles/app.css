@@ -506,7 +506,8 @@
   body[data-reordering] .list-task .row-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
   /* Roadmap cards fold to one line, so a lane fits on a phone screen. */
   body[data-reordering] .roadmap-card[data-project-id] { gap: 0; padding: 14px 8px 10px 16px; cursor: default; }
-  body[data-reordering] .roadmap-card[data-project-id] > :not(.rm-fold) { display: none; }
+  /* !important: the card's children carry Tailwind display utilities, which sit in a later layer. */
+  body[data-reordering] .roadmap-card[data-project-id] > :not(.rm-fold) { display: none !important; }
   body[data-reordering] .roadmap-card[data-project-id] > .rm-fold { display: flex; }
   @media (min-width: 900px) {
     .rm-fold .move-btn { width: 32px; height: 32px; border-radius: 9px; }
