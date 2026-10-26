@@ -57,6 +57,20 @@ closer has no claim to.
 8. No change to who may create projects, pick owners or move tasks. No notice
    when a task is moved into a project.
 
+9. Roadmap rights, as in Jira (added by Raj, same PR). Organisation owners
+   and admins can do everything on the roadmap, as today. A member who owns
+   a project can edit its name, status text, colour and summary (owners
+   only by the existing rule), and close or reopen it with the close guard.
+   They can't change its lane, from the form or a drag: planning lanes is
+   for managers. Everything else is for managers only: add, delete,
+   reorder, change lane, and Claude's `create_project` and `delete_project`.
+   Members who don't own a project can't edit it. Refusals are a 403 with a
+   toast ("Only admins can add projects."). Controls a person can't use are
+   hidden: "+ Project", Reorder, card drag, and the edit pencil on projects
+   they don't own. Tasks are unchanged: anyone can still edit any task,
+   including assigning it to themselves. The "took you off" notice covers
+   that.
+
 Rejected:
 
 - Only managers may close a project with others' tasks in it. This blocks the

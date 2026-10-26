@@ -318,3 +318,29 @@ Staff:
   `false`. Model tests now pass a `CloseScope`.
 - **Logging.** The close's `tracing::info!` logs the kept and closed task
   ids, not titles.
+
+Roadmap rights (extra scope from Raj, brief decision 9), in separate
+commits after the close guard:
+
+- **Who.** Managers (`can_manage`) as today. A member who owns the project
+  (`project_owners`) may open its edit sheet and save name, status, colour
+  and summary; owners by `OwnerRights`; close and reopen with
+  `CloseScope::OwnWork`. Everyone else, and every other write, managers
+  only: `new`/`create`, `delete`, `move` (reorder), `lane`, and the MCP
+  `create_project` and `delete_project`.
+- **Lane.** Owners who aren't managers can't change it. The edit sheet shows
+  the lane select disabled with the current lane in a hidden field, and
+  `update_from` keeps the locked row's lane when the editor may not plan,
+  as it ignores `owner_ids`.
+- **Refusals.** 403 through `forbidden`, which the frontend shows as a
+  toast: "Only admins can add projects.", "Only admins and this project's
+  owners can change it.", "Only admins can move projects between lanes."
+  Delete keeps `require_manager`.
+- **UI.** "+ Project" and both Reorder buttons, and `draggable` on lane
+  cards, only for managers; `?reorder=1` only turns on Reorder for them. The
+  edit pencil only for managers and the project's owners.
+- **Tasks.** Unchanged.
+- **Tests.** Non-owner member: 403 on new, create, edit, update, delete,
+  move, lane. Member owner: edits and closes their own project; a posted
+  lane is ignored; 403 on move, lane, delete. Manager unchanged. MCP
+  `create_project` refused for a member. Roadmap page hides the controls.
