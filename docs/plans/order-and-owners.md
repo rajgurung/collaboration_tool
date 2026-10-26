@@ -1059,6 +1059,10 @@ Claude beyond `create_project`; an owner filter. Also: the desktop list
 view (`view=list`) shows the new order but gets no Reorder button (the
 mockup doesn't draw it). Dropping `projects.owner_id` is a later PR.
 
+Done since: the drop-project-owner-id PR dropped `projects.owner_id`, the
+mirror write and the legacy `owner_id` form field
+(`m20261026_150000_drop_project_owner_id`).
+
 ## Risks
 
 - **A missed `owner_id` reader** silently drops a right or a notice. The

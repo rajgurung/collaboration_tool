@@ -402,7 +402,7 @@ async fn project_owners_hear_about_new_and_blocked_tasks() {
             .as_member(&alice)
             .form(&serde_json::json!({
                 "name": "Launch", "lane": "now", "status": "In progress", "progress": "40",
-                "accent": "#72e5b4", "owner_id": bob_id.to_string(), "summary": "",
+                "accent": "#72e5b4", "owner_ids": bob_id, "summary": "",
             }))
             .await;
         assert_eq!(

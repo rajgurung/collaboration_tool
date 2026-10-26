@@ -274,7 +274,7 @@ fn form_values(
     match (params, project) {
         (Some(p), _) => serde_json::json!({
             "name": p.name, "lane": p.lane, "status": p.status,
-            "accent": p.accent, "owner_ids": p.posted_owners().unwrap_or_default(),
+            "accent": p.accent, "owner_ids": p.owner_ids,
             "summary": p.summary,
         }),
         (None, Some((p, owners))) => serde_json::json!({
@@ -414,11 +414,7 @@ async fn create(
     // A super admin acting here makes the project, but not its owners, as
     // with an edit.
     if member.acting {
-        params = ProjectParams {
-            owner_ids: Vec::new(),
-            owner_id: String::new(),
-            ..params
-        };
+        params.owner_ids.clear();
     }
     let result = projects::Model::create(&ctx.db, member.org.id, &params, None).await;
     if let Ok(project) = &result {

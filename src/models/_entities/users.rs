@@ -70,8 +70,6 @@ pub enum Relation {
         on_delete = "SetNull"
     )]
     Organisations,
-    #[sea_orm(has_many = "super::projects::Entity")]
-    Projects,
     #[sea_orm(has_many = "super::reactions::Entity")]
     Reactions,
     #[sea_orm(has_many = "super::saved_views::Entity")]
@@ -163,12 +161,6 @@ impl Related<super::oauth_codes::Entity> for Entity {
 impl Related<super::organisations::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Organisations.def()
-    }
-}
-
-impl Related<super::projects::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Projects.def()
     }
 }
 

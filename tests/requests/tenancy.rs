@@ -59,7 +59,6 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
             status: "Active".to_string(),
             accent: "#ffb454".to_string(),
             owner_ids: vec![owner.id],
-            owner_id: String::new(),
             summary: SECRET.to_string(),
         },
         None,
@@ -190,7 +189,6 @@ async fn org_a_cannot_reach_org_b() {
                 status: "Active".to_string(),
                 accent: "#ffb454".to_string(),
                 owner_ids: vec![],
-                owner_id: String::new(),
                 summary: String::new(),
             },
         None,)
@@ -260,7 +258,7 @@ async fn org_a_cannot_reach_org_b() {
         }
         let posts = [
             (format!("/roadmap/projects/{}", globex.project.id), serde_json::json!({
-                "name": "hijacked", "lane": "now", "status": "x", "accent": "#ffb454", "owner_id": "", "summary": ""
+                "name": "hijacked", "lane": "now", "status": "x", "accent": "#ffb454", "summary": ""
             })),
             (format!("/roadmap/projects/{}/close", globex.project.id), serde_json::json!({})),
             (format!("/roadmap/projects/{}/reopen", globex.project.id), serde_json::json!({})),
@@ -377,8 +375,6 @@ async fn org_a_cannot_reach_org_b() {
             ("/tasks", format!("title=t&priority=high&project_id={}", globex.project.id)),
             ("/tasks", format!("title=t&priority=high&project_id={}&assignee_ids={b_user}", acme_project.id)),
             ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_ids={b_user}")),
-            // An edit sheet from before several owners posts the old field.
-            ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_id={b_user}")),
             ("/meetings", format!("title=m&held_on=2026-10-01&summary=s&attendee_ids={b_user}")),
             ("/chat/groups", format!("name=g&member_ids={b_user}")),
         ];

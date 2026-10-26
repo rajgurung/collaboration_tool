@@ -102,18 +102,6 @@ async fn an_admin_makes_two_owners_and_each_hears_once() {
         save(&request, &t.maya, &website, &[t.leo_id, t.tom_id]).await;
         assert_eq!(inbox(&ctx, t.tom_id).await, vec![owner_notice("Website")]);
         assert_eq!(inbox(&ctx, t.leo_id).await.len(), 1);
-
-        // Every owner keeps the first-added one in the old column, unread.
-        let saved = projects::Entity::find_by_id(website.id)
-            .one(&ctx.db)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            saved.owner_id,
-            Some(t.leo_id),
-            "the mirror of the first owner"
-        );
     })
     .await;
 }
@@ -315,28 +303,6 @@ async fn more_than_fifty_owners_are_refused() {
     .await;
 }
 
-#[tokio::test]
-#[serial]
-async fn an_old_sheet_keeps_its_one_owner() {
-    request::<App, _, _>(|request, ctx| async move {
-        let t = juniper(&request, &ctx).await;
-        let website = juniper_project(&ctx, "Website").await;
-        own(&ctx, &website, &[t.leo_id]).await;
-        let res = request
-            .post(&t.ana.at(&format!("/roadmap/projects/{}", website.id)))
-            .as_member(&t.ana)
-            .add_header("HX-Request", "true")
-            .form(&serde_json::json!({
-                "name": "Website", "lane": "next", "status": "Active",
-                "accent": "#72e5b4", "owner_id": t.leo_id.to_string(), "summary": "",
-            }))
-            .await;
-        assert_eq!(res.status_code(), 200);
-        assert_eq!(owners(&ctx, &website).await, vec![t.leo_id]);
-    })
-    .await;
-}
-
 /// Every owner can close and reopen, and hears about it once.
 #[tokio::test]
 #[serial]
@@ -514,54 +480,17 @@ async fn cards_show_three_owners_then_a_count() {
     .await;
 }
 
-/// `projects.owner_id` is written as a mirror of the first owner and never
-/// read: owners come from `project_owners`. Only these two lines in the
-/// projects model may name it, and no template may read a single owner,
-/// so a missed reader fails here, not as a lost notice or right.
+/// `projects.owner_id` is gone: owners come from `project_owners`. No code
+/// or template may name it, and no template may read a single owner.
 #[test]
-fn no_owner_id_read_outside_the_mirror() {
-    let allowed = [
-        // The legacy form field, for sheets opened before the deploy.
-        (
-            "src/models/projects.rs",
-            "let legacy = self.owner_id.trim();",
-        ),
-        // The mirror write in `set_owners`.
-        (
-            "src/models/projects.rs",
-            ".col_expr(Column::OwnerId, Expr::value(ids.first().copied()))",
-        ),
-    ];
-    let read = regex::Regex::new(r"\.owner_id\b|Column::OwnerId\b").unwrap();
+fn nothing_names_the_dropped_owner_id() {
+    let rust = regex::Regex::new(r"\bowner_id\b").unwrap();
+    let template = regex::Regex::new(r"\bowner_id\b|\.owner\b").unwrap();
     let mut offenders = Vec::new();
-    let mut dirs = vec![std::path::PathBuf::from("src")];
-    while let Some(dir) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.to_string_lossy().replace('\\', "/");
-            if path.is_dir() {
-                dirs.push(path);
-                continue;
-            }
-            if path.extension().is_none_or(|e| e != "rs")
-                || name.starts_with("src/models/_entities/")
-            {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).unwrap();
-            for (n, line) in text.lines().enumerate() {
-                let known = allowed
-                    .iter()
-                    .any(|(file, text)| name == *file && line.trim() == *text);
-                if read.is_match(line) && !known {
-                    offenders.push(format!("{name}:{}: {}", n + 1, line.trim()));
-                }
-            }
-        }
-    }
-    // Templates read `owners` (or `owner_ids`), never the single owner.
-    let template_read = regex::Regex::new(r"\bowner_id\b|\.owner\b").unwrap();
-    let mut dirs = vec![std::path::PathBuf::from("assets/views")];
+    let mut dirs = vec![
+        std::path::PathBuf::from("src"),
+        std::path::PathBuf::from("assets/views"),
+    ];
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(&dir).unwrap() {
             let path = entry.unwrap().path();
@@ -570,9 +499,14 @@ fn no_owner_id_read_outside_the_mirror() {
                 continue;
             }
             let name = path.to_string_lossy().replace('\\', "/");
+            let pattern = if name.starts_with("src/") {
+                &rust
+            } else {
+                &template
+            };
             let text = std::fs::read_to_string(&path).unwrap();
             for (n, line) in text.lines().enumerate() {
-                if template_read.is_match(line) {
+                if pattern.is_match(line) {
                     offenders.push(format!("{name}:{}: {}", n + 1, line.trim()));
                 }
             }

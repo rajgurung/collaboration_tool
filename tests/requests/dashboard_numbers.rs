@@ -53,7 +53,6 @@ async fn dashboard_numbers_follow_the_tasks() {
                 status: "Active".to_string(),
                 accent: "#72e5b4".to_string(),
                 owner_ids: vec![alice.id],
-                owner_id: String::new(),
                 summary: String::new(),
             },
             None,

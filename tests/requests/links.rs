@@ -280,7 +280,7 @@ async fn world(request: &TestServer, ctx: &AppContext, seen: &mut Seen) -> World
         .as_member(&alice)
         .form(&json!({
             "name": "Website", "lane": "next", "status": "Planned",
-            "accent": "#72e5b4", "owner_id": "", "summary": "",
+            "accent": "#72e5b4", "summary": "",
         })))
     .await;
     seen.write("create a project", &res, 200);

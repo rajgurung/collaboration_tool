@@ -843,7 +843,7 @@ async fn editing_a_closed_project_is_refused() {
             .add_header("HX-Request", "true")
             .form(&json!({
                 "name": "Website 2", "lane": "later", "status": "Active",
-                "accent": "#6cb6ff", "owner_id": "", "summary": "",
+                "accent": "#6cb6ff", "summary": "",
             }))
             .await;
         for res in [edit, save] {
@@ -1218,7 +1218,6 @@ async fn home_shows_the_donut_for_now_projects() {
                 status: "Idea".to_string(),
                 accent: "#c9d76a".to_string(),
                 owner_ids: vec![],
-                owner_id: String::new(),
                 summary: String::new(),
             },
             None,

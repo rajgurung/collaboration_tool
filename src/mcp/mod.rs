@@ -258,7 +258,7 @@ impl From<loco_rs::Error> for Fail {
 fn tool_field(field: &str) -> &str {
     match field {
         "assignee_ids" => "assignees",
-        "owner_ids" | "owner_id" => "owners",
+        "owner_ids" => "owners",
         other => other,
     }
 }
@@ -741,7 +741,6 @@ impl CollabServer {
             status: input.status,
             accent: ACCENTS[count % ACCENTS.len()].to_string(),
             owner_ids,
-            owner_id: String::new(),
             summary: input.summary.unwrap_or_default(),
         };
         let project =
