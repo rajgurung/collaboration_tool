@@ -628,79 +628,338 @@ for (const name of ["htmx:responseError", "htmx:sendError"]) {
   });
 }
 
-// Task board: drag a card to another column to change its status. Cards stay
-// links, so keyboards and phones open the task and change the status there.
+// Card order. Tasks move inside a board column (or a phone list group), and
+// projects inside a roadmap lane: by drag on desktop, or by the arrows in
+// Reorder mode. Each move posts the card's column and the visible card it now
+// sits before (or after), so hidden cards (Mine, a search) keep their places.
+type MoveKind = "task" | "project";
+const CARD = ".task-card, .list-task, .roadmap-card[data-project-id]";
+
+const kindOf = (card: HTMLElement): MoveKind => (card.dataset.projectId ? "project" : "task");
+const idOf = (card: HTMLElement) => card.dataset.taskId ?? card.dataset.projectId ?? "";
+// The column a card is in now: its status, or its roadmap lane.
+const columnOf = (card: HTMLElement) => (kindOf(card) === "task" ? card.dataset.status : card.dataset.cardLane) ?? "";
+
+// The cards in a cell, list group or lane, in order.
+function cardsIn(container: Element | null, kind: MoveKind): HTMLElement[] {
+  if (!container) return [];
+  const own = kind === "task" ? "[data-task-id]" : "[data-project-id]";
+  return Array.from(container.children).filter((el): el is HTMLElement => el instanceof HTMLElement && el.matches(own));
+}
+
+// The card it now sits before, else the one it sits after, else neither (an
+// empty column: the end).
+function anchorOf(card: HTMLElement): Record<string, string> {
+  const list = cardsIn(card.parentElement, kindOf(card));
+  const at = list.indexOf(card);
+  const next = list[at + 1];
+  const prev = list[at - 1];
+  if (next) return { before: idOf(next) };
+  if (prev) return { after: idOf(prev) };
+  return {};
+}
+
+// A board grouped by person shows a task once per assignee, so the other
+// copies need a redraw after any move.
+const personBoard = (card: HTMLElement) =>
+  card.classList.contains("task-card") && (document.getElementById("task-board")?.getAttribute("hx-get") ?? "").includes("group=person");
+
+function failedText(card: HTMLElement): string {
+  const place = card.classList.contains("task-card") ? "board" : card.classList.contains("list-task") ? "list" : "roadmap";
+  return `Couldn't move ${card.dataset.name ?? "it"}. The ${place} is back as it was.`;
+}
+
+// The toast a refusal carries in its HX-Trigger (a closed project, a busy
+// lock), if any.
+function triggerToast(res: Response): string | null {
+  try {
+    return (JSON.parse(res.headers.get("HX-Trigger") ?? "{}") as { toast?: { message?: string } }).toast?.message ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Moves go out one at a time, in the order they were made. A failure drops
+// the rest (they were worked out on a page that is about to be redrawn), and
+// the board refreshes only once the queue is empty, so a redraw never lands
+// between two moves.
+let moveQueue: Promise<void> = Promise.resolve();
+let moveRound = 0;
+let movesWaiting = 0;
+let refreshDue: string | null = null;
+
+function sendMove(card: HTMLElement, undo: () => void, refresh: boolean) {
+  const kind = kindOf(card);
+  const id = idOf(card);
+  const url = kind === "task" ? orgUrl(`/tasks/${id}/move`) : orgUrl(`/roadmap/projects/${id}/move`);
+  const event = kind === "task" ? "tasks-changed" : "roadmap-changed";
+  const body = new URLSearchParams({ [kind === "task" ? "status" : "lane"]: columnOf(card), ...anchorOf(card) });
+  const round = moveRound;
+  movesWaiting += 1;
+  if (refresh) refreshDue = event;
+  moveQueue = moveQueue
+    .then(async () => {
+      if (round !== moveRound) return;
+      let res: Response | null = null;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "HX-Request": "true", "Content-Type": "application/x-www-form-urlencoded", ...orgHeaders() },
+          body,
+          credentials: "same-origin",
+        });
+      } catch {
+        res = null;
+      }
+      if (res && staleRefusal(res)) {
+        moveRound += 1;
+        return;
+      }
+      if (res?.ok) return;
+      moveRound += 1;
+      undo();
+      showToast({ kind: "error", message: (res && triggerToast(res)) ?? failedText(card) });
+      refreshDue = event;
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      movesWaiting -= 1;
+      if (movesWaiting === 0 && refreshDue) {
+        const due = refreshDue;
+        refreshDue = null;
+        htmx.trigger(document.body, due);
+      }
+    });
+}
+
+// Puts a card back where it was, for a failed save.
+function undoer(card: HTMLElement): () => void {
+  const parent = card.parentElement;
+  const next = card.nextSibling;
+  const column = columnOf(card);
+  return () => {
+    if (!parent) return;
+    const from = card.parentElement;
+    parent.insertBefore(card, next && next.parentNode === parent ? next : null);
+    if (kindOf(card) === "task") card.dataset.status = column;
+    else card.dataset.cardLane = column;
+    markEnds(parent);
+    if (from && from !== parent) markEnds(from);
+  };
+}
+
+// The first card's up arrow and the last card's down arrow hide, keeping
+// their space so the arrows line up.
+function markEnds(container: Element) {
+  const cards = cardsIn(container, container.querySelector("[data-project-id]") ? "project" : "task");
+  cards.forEach((card, i) => {
+    for (const [dir, none] of [["up", i === 0], ["down", i === cards.length - 1]] as const) {
+      const button = card.querySelector<HTMLElement>(`[data-move="${dir}"]`);
+      if (!button) continue;
+      button.classList.toggle("is-none", none);
+      if (none) {
+        button.setAttribute("tabindex", "-1");
+        button.setAttribute("aria-hidden", "true");
+      } else {
+        button.removeAttribute("tabindex");
+        button.removeAttribute("aria-hidden");
+      }
+    }
+  });
+}
+
+// Desktop drag. One drop line is moved around, never one per card.
 let dragged: HTMLElement | null = null;
-// Roadmap cards drag the same way between lanes; see roadmapDrop.
+const dropLine = document.createElement("div");
+dropLine.className = "drop-line";
+dropLine.setAttribute("aria-hidden", "true");
+
+function clearDropMarks() {
+  dropLine.remove();
+  document.querySelectorAll(".drop-note").forEach((el) => el.remove());
+  document.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+}
+
+// Where a dragged card may land: a cell in its own swimlane (another
+// swimlane is another project or person, which a drag doesn't change), or a
+// roadmap column.
+function dropTarget(event: DragEvent): HTMLElement | null {
+  if (!dragged) return null;
+  const target = event.target as Element | null;
+  if (kindOf(dragged) === "project") return target?.closest<HTMLElement>("[data-drop-lane]") ?? null;
+  const cell = target?.closest<HTMLElement>("[data-drop-status]") ?? null;
+  return cell && cell.closest("section.lane") === dragged.closest("section.lane") ? cell : null;
+}
+
+const isDone = (column: HTMLElement) => (column.dataset.dropStatus ?? column.dataset.dropLane) === "done";
+
 document.addEventListener("dragstart", (event) => {
   const card = (event.target as Element | null)?.closest<HTMLElement>(".task-card, .roadmap-card[draggable]");
   if (!card || !event.dataTransfer) return;
   dragged = card;
   event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("text/plain", card.dataset.taskId ?? card.dataset.projectId ?? "");
+  event.dataTransfer.setData("text/plain", idOf(card));
   card.classList.add("is-dragging");
 });
 document.addEventListener("dragend", () => {
   dragged?.classList.remove("is-dragging");
   dragged = null;
-  document.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+  clearDropMarks();
 });
 document.addEventListener("dragover", (event) => {
-  const cell = (event.target as Element | null)?.closest<HTMLElement>(
-    dragged?.dataset.projectId ? "[data-drop-lane]" : "[data-drop-status]",
-  );
-  if (!cell || !dragged) return;
+  const column = dropTarget(event);
+  if (!column || !dragged) return;
   event.preventDefault();
-  document.querySelectorAll(".is-drop-target").forEach((el) => el !== cell && el.classList.remove("is-drop-target"));
-  cell.classList.add("is-drop-target");
+  if (isDone(column)) {
+    // Done takes the card as a whole: tasks land at the top; a project opens
+    // the close confirm, so nothing lights up there.
+    dropLine.remove();
+    if (kindOf(dragged) === "project" || column.classList.contains("is-drop-target")) return;
+    clearDropMarks();
+    column.classList.add("is-drop-target");
+    const note = document.createElement("span");
+    note.className = "drop-note";
+    note.textContent = "Lands at the top";
+    column.prepend(note);
+    return;
+  }
+  document.querySelectorAll(".drop-note").forEach((el) => el.remove());
+  document.querySelectorAll(".is-drop-target").forEach((el) => el.classList.remove("is-drop-target"));
+  const over = (event.target as Element | null)?.closest<HTMLElement>(CARD);
+  if (over && over.parentElement === column) {
+    const box = over.getBoundingClientRect();
+    const above = event.clientY < box.top + box.height / 2;
+    column.insertBefore(dropLine, above ? over : over.nextSibling);
+  } else if (!dropLine.parentElement || dropLine.parentElement !== column) {
+    // Empty space: the end, before the add and "All done" links.
+    column.insertBefore(dropLine, column.querySelector(".cell-more, .cell-add, .roadmap-empty"));
+  }
+});
+document.addEventListener("dragleave", (event) => {
+  const column = dropTarget(event);
+  const into = event.relatedTarget as Node | null;
+  if (column && !(into && column.contains(into))) clearDropMarks();
 });
 document.addEventListener("drop", (event) => {
-  if (dragged?.dataset.projectId) {
-    roadmapDrop(event, dragged);
+  const column = dropTarget(event);
+  const card = dragged;
+  if (!column || !card) return;
+  event.preventDefault();
+  const line = dropLine.parentElement === column;
+  const lineAt = dropLine.nextElementSibling;
+  const lineAfter = dropLine.previousElementSibling;
+  clearDropMarks();
+  if (isDone(column)) {
+    if (kindOf(card) === "project") roadmapDone(card);
+    else if (card.dataset.status !== "done") dropOnDone(card, column);
     return;
   }
-  const cell = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-status]");
-  const card = dragged;
-  if (!cell || !card) return;
-  event.preventDefault();
-  cell.classList.remove("is-drop-target");
-  const status = cell.dataset.dropStatus ?? "";
-  if (status === card.dataset.status) return;
-  // Move the card straight away; the board refreshes from the server after the save.
-  cell.insertBefore(card, cell.querySelector(".cell-add"));
-  card.dataset.status = status;
-  void htmx.ajax("POST", orgUrl(`/tasks/${card.dataset.taskId}/status`), { values: { status }, swap: "none" });
+  // Dropped back where it was: nothing to send.
+  if (!line || lineAt === card || lineAfter === card) return;
+  const undo = undoer(card);
+  const from = card.parentElement;
+  const changed = column !== from;
+  column.insertBefore(card, lineAt);
+  if (kindOf(card) === "task") card.dataset.status = column.dataset.dropStatus ?? "";
+  else card.dataset.cardLane = column.dataset.dropLane ?? "";
+  markEnds(column);
+  if (from && changed) markEnds(from);
+  sendMove(card, undo, changed || personBoard(card));
 });
 
-// A project dropped on another lane moves there straight away; the lane
-// refreshes from the server after the save. Done is not a lane: a drop there
-// opens the edit sheet's "Mark project done" confirm, for those allowed.
-function roadmapDrop(event: DragEvent, card: HTMLElement) {
-  const column = (event.target as Element | null)?.closest<HTMLElement>("[data-drop-lane]");
-  if (!column) return;
-  event.preventDefault();
-  column.classList.remove("is-drop-target");
-  const lane = column.dataset.dropLane ?? "";
-  const id = card.dataset.projectId;
-  if (lane === card.dataset.cardLane) return;
-  if (lane === "done") {
-    if (!("canClose" in card.dataset)) {
-      showToast({ kind: "error", message: "Only owners, admins and the project's owner can mark it done." });
-      return;
-    }
-    void htmx.ajax("GET", orgUrl(`/roadmap/projects/${id}/edit`), { target: "#project-dialog-body" }).then(() => {
-      const dialog = document.getElementById("project-dialog") as HTMLDialogElement | null;
-      const confirm = dialog?.querySelector<HTMLElement>("[data-close-open]");
-      if (!dialog || !confirm) return;
-      dialog.showModal();
-      confirm.click();
-    });
+// A task dropped on Done goes to the top there; the sheet's status route
+// saves it and refreshes the board, as before.
+function dropOnDone(card: HTMLElement, cell: HTMLElement) {
+  cell.insertBefore(card, cardsIn(cell, "task")[0] ?? cell.querySelector(".cell-more, .cell-add"));
+  card.dataset.status = "done";
+  void htmx.ajax("POST", orgUrl(`/tasks/${card.dataset.taskId}/status`), { values: { status: "done" }, swap: "none" });
+}
+
+// A project dropped on Done opens the edit sheet's "Mark project done"
+// confirm, for those allowed.
+function roadmapDone(card: HTMLElement) {
+  if (!("canClose" in card.dataset)) {
+    showToast({ kind: "error", message: "Only this project's owners and admins can mark it done." });
     return;
   }
-  column.insertBefore(card, column.querySelector(".roadmap-empty"));
-  card.dataset.cardLane = lane;
-  void htmx.ajax("POST", orgUrl(`/roadmap/projects/${id}/lane`), { values: { lane }, swap: "none" });
+  void htmx.ajax("GET", orgUrl(`/roadmap/projects/${card.dataset.projectId}/edit`), { target: "#project-dialog-body" }).then(() => {
+    const dialog = document.getElementById("project-dialog") as HTMLDialogElement | null;
+    const confirm = dialog?.querySelector<HTMLElement>("[data-close-open]");
+    if (!dialog || !confirm) return;
+    dialog.showModal();
+    confirm.click();
+  });
 }
+
+// Reorder mode lives on <body>, so it outlasts the board's and roadmap's
+// refreshes (they swap their own parts, never the body). A new page ends it,
+// except a phone lane switch on the roadmap, which carries `reorder=1`.
+function startReorder(what: string) {
+  document.body.dataset.reordering = what;
+  visible<HTMLElement>("[data-move]:not(.is-none)")?.focus();
+}
+function endReorder() {
+  delete document.body.dataset.reordering;
+  visible<HTMLElement>("[data-reorder-start]")?.focus();
+}
+function visible<T extends HTMLElement>(selector: string): T | undefined {
+  return Array.from(document.querySelectorAll<T>(selector)).find((el) => el.getClientRects().length > 0);
+}
+
+function moveByArrow(card: HTMLElement, dir: string, button: HTMLElement) {
+  const container = card.parentElement;
+  if (!container) return;
+  const cards = cardsIn(container, kindOf(card));
+  const at = cards.indexOf(card);
+  const other = cards[dir === "up" ? at - 1 : at + 1];
+  if (!other) return;
+  const undo = undoer(card);
+  container.insertBefore(card, dir === "up" ? other : other.nextSibling);
+  markEnds(container);
+  card.classList.add("is-moved");
+  window.setTimeout(() => card.classList.remove("is-moved"), 1000);
+  // Moving the node can drop focus; keep it on this arrow, or the other one
+  // when this one is now hidden.
+  const again = button.classList.contains("is-none") ? card.querySelector<HTMLElement>(`[data-move="${dir === "up" ? "down" : "up"}"]`) : button;
+  again?.focus();
+  const now = cardsIn(container, kindOf(card));
+  const where = container.closest("[aria-label]")?.getAttribute("aria-label") ?? "";
+  const status = document.getElementById("reorder-status");
+  if (status) status.textContent = `${card.dataset.name ?? ""}, ${now.indexOf(card) + 1} of ${now.length} in ${where}`;
+  sendMove(card, undo, personBoard(card));
+}
+
+document.addEventListener(
+  "click",
+  (event) => {
+    const target = event.target as Element | null;
+    const start = target?.closest<HTMLElement>("[data-reorder-start]");
+    if (start) {
+      startReorder(start.dataset.reorderStart ?? "tasks");
+      return;
+    }
+    if (target?.closest("[data-reorder-done]")) {
+      endReorder();
+      return;
+    }
+    const mode = document.body.dataset.reordering;
+    if (!mode) return;
+    // A phone lane switch keeps the mode on the next page.
+    const lane = target?.closest<HTMLAnchorElement>("a[data-lane-switch]");
+    if (lane && mode === "roadmap" && !lane.href.includes("reorder=1")) lane.href += "&reorder=1";
+    // Cards don't open while reordering; HTMX never sees the click.
+    const card = target?.closest<HTMLElement>(CARD);
+    if (!card) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const button = target?.closest<HTMLElement>("[data-move]");
+    if (button && !button.classList.contains("is-none")) moveByArrow(card, button.dataset.move ?? "", button);
+  },
+  true,
+);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.dataset.reordering && !document.querySelector("dialog[open]")) endReorder();
+});
 
 // Collapsed swimlanes stay collapsed, across board refreshes and visits.
 const LANES_KEY = "collab:collapsed-lanes";

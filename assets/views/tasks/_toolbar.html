@@ -13,6 +13,7 @@
     {{<icon name="search" class="h-4 w-4"/>}}
     <input type="search" name="q" value="{{ board.q }}" aria-label="Search tasks" placeholder="Search tasks">
   </form>
+  {% if board.layout == "board" %}<button type="button" class="reorder-btn" data-reorder-start="tasks">{{<icon name="arrow-up-down" class="h-4 w-4"/>}}Reorder</button>{% endif %}
   <div class="ml-auto flex items-center gap-2">
     <span class="meta" id="swimlanes-label-{{ board.layout }}">{% if board.layout == "list" %}Group by{% else %}Swimlanes{% endif %}</span>
     <nav class="segmented segmented-sm" aria-labelledby="swimlanes-label-{{ board.layout }}">
@@ -22,3 +23,6 @@
     </nav>
   </div>
 </div>
+{% if board.layout == "board" %}
+<div class="reorder-bar" role="region" aria-label="Reordering"><div><b>Reordering</b><span class="meta">Move tasks with the arrows.</span></div><button type="button" class="btn btn-primary" data-reorder-done>Done</button></div>
+{% endif %}

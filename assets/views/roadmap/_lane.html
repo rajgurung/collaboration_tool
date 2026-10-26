@@ -1,8 +1,9 @@
 <div id="roadmap-lane" class="flex flex-col gap-3"
      hx-get="{{ org_url(path="/roadmap/list?lane=" ~ (lane)) }}{% if show_all %}&all=1{% endif %}" hx-trigger="roadmap-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
   <nav class="segmented mobile-only" aria-label="Lane">
-    {% for l in lanes %}<a href="{{ org_url(path="/roadmap?lane=" ~ (l.key)) }}" {% if l.current %}aria-current="true"{% endif %}><span class="seg-in">{{ l.label }}<span class="seg-count">{{ l.count }}</span></span></a>{% endfor %}
+    {% for l in lanes %}<a href="{{ org_url(path="/roadmap?lane=" ~ (l.key)) }}" data-lane-switch {% if l.current %}aria-current="true"{% endif %}><span class="seg-in">{{ l.label }}<span class="seg-count">{{ l.count }}</span></span></a>{% endfor %}
   </nav>
+  <div class="reorder-bar" role="region" aria-label="Reordering"><div><b>Reordering</b><span class="meta">Move projects with the arrows.</span></div><button type="button" class="btn btn-primary" data-reorder-done>Done</button></div>
   <div class="roadmap">
     {% for l in lanes %}
     <section class="roadmap-col" data-lane="{{ l.key }}" {% if l.current %}data-current{% endif %} aria-label="{{ l.label }}">
@@ -10,7 +11,10 @@
         <span class="flex items-center gap-2"><h2 class="m-0 text-[15px] font-bold">{{ l.label }}</h2><span class="meta tabular-nums">{{ l.count }}</span></span>
         <span class="meta text-[13px]">{{ l.hint }}</span>
       </header>
-      <p class="meta m-0 px-1 text-sm mobile-only">{{ l.hint }}</p>
+      <div class="lane-hint mobile-only">
+        <p class="meta m-0 flex-1 px-1 text-sm">{% if l.key == "done" %}Finished projects{% else %}{{ l.hint }}{% endif %}</p>
+        {% if l.key == "done" %}<span class="meta pr-1 font-semibold">Newest first</span>{% else %}<button type="button" class="reorder-btn" data-reorder-start="roadmap">{{<icon name="arrow-up-down" class="h-4 w-4"/>}}Reorder</button>{% endif %}
+      </div>
       <div class="roadmap-cards" data-drop-lane="{{ l.key }}">
         {% if l.key == "done" %}
         {% for card in l.cards %}
@@ -65,6 +69,8 @@
             {% if card.blocked > 0 %}<span class="pill pill-blocked">{{ card.blocked }} blocked</span>{% endif %}
             {% include "roadmap/_owners.html" %}
           </div>
+          {# Reorder mode folds the card to this line. #}
+          <div class="rm-fold"><span class="rm-text"><b class="truncate-1">{{ card.name }}</b><span class="meta truncate-1">{{ card.status }}</span></span>{{<move_arrows name={card.name} first={loop.first} last={loop.last}/>}}</div>
         </article>
         {% else %}
         <div class="roadmap-empty">No projects here yet.</div>

@@ -5,3 +5,8 @@
 {% component avatar(name: string, color: string = "#e8dfce", size: string = "md", label: bool = true) %}<span {% if label %}title="{{ name }}" aria-label="{{ name }}"{% else %}aria-hidden="true"{% endif %} class="avatar avatar-{{ size }}" style="background: {{ color }}">{{ name | truncate(length=1, end="") | upper }}</span>{% endcomponent avatar %}
 
 {% component status_icon(status: string, class: string = "h-5 w-5") %}<span class="status-{{ status }} inline-grid shrink-0" title="{% if status == "todo" %}To do{% elif status == "progress" %}In progress{% elif status == "blocked" %}Blocked{% else %}Done{% endif %}">{{<icon name={"status-" ~ status} class={class}/>}}</span>{% endcomponent status_icon %}
+
+{# Up and down arrows for Reorder mode. The first card in a column hides its
+   up arrow, the last its down arrow; the space stays so arrows line up. The
+   client re-marks them after each move. `sm` is the desktop's 32px size. #}
+{% component move_arrows(name: string, first: bool = false, last: bool = false, sm: bool = false) %}<span class="move{% if sm %} move-sm{% endif %}"><button type="button" class="move-btn{% if first %} is-none{% endif %}" data-move="up" aria-label="Move {{ name }} up"{% if first %} tabindex="-1" aria-hidden="true"{% endif %}>{{<icon name="arrow-up" class="move-icon"/>}}</button><button type="button" class="move-btn{% if last %} is-none{% endif %}" data-move="down" aria-label="Move {{ name }} down"{% if last %} tabindex="-1" aria-hidden="true"{% endif %}>{{<icon name="arrow-down" class="move-icon"/>}}</button></span>{% endcomponent move_arrows %}

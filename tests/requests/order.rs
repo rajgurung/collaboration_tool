@@ -438,3 +438,86 @@ async fn a_busy_move_says_try_again() {
     })
     .await;
 }
+
+/// What the pages draw for ordering: arrows on open cards only, Reorder
+/// where it can be used, and the "newest first" labels on Done.
+#[tokio::test]
+#[serial]
+async fn the_pages_draw_reorder_where_it_works() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        let pid = Some(website.id);
+        task_in(&ctx, t.org_id, pid, "Order tins", "todo", &[t.ana_id]).await;
+        task_in(&ctx, t.org_id, pid, "Book the courier", "todo", &[t.ana_id]).await;
+        task_in(&ctx, t.org_id, pid, "Old label", "done", &[t.ana_id]).await;
+
+        let tasks_page = page(&request, &t.ana, "/tasks?filter=all").await;
+        // A card is a div with a link over it, never a button inside a link.
+        assert!(tasks_page.contains(r#"class="task-card" draggable="true""#));
+        assert!(tasks_page.contains(r#"class="task-card-link" draggable="false""#));
+        assert!(tasks_page.contains(r#"class="list-row-link" draggable="false""#));
+        assert!(tasks_page.contains(r#"data-name="Order tins""#));
+        assert!(tasks_page.contains(r#"aria-label="Move Order tins up""#));
+        assert!(
+            !tasks_page.contains("Move Old label"),
+            "no arrows on done cards"
+        );
+        assert!(tasks_page.contains("· Newest first"));
+        assert_eq!(
+            tasks_page.matches(r#"data-reorder-start="tasks""#).count(),
+            2,
+            "board and phone list"
+        );
+        // The first card's up arrow and the last's down arrow are hidden.
+        assert!(tasks_page.contains(
+            r#"class="move-btn is-none" data-move="up" aria-label="Move Order tins up" tabindex="-1" aria-hidden="true""#
+        ));
+        assert!(tasks_page.contains(r#"class="move-btn" data-move="up" aria-label="Move Book the courier up">"#));
+        assert!(tasks_page.contains(
+            r#"class="move-btn is-none" data-move="down" aria-label="Move Book the courier down""#
+        ));
+        assert!(
+            tasks_page.contains(r#"<div id="reorder-status" class="sr-only" aria-live="polite">"#)
+        );
+
+        let done = page(&request, &t.ana, "/tasks?filter=done").await;
+        assert!(
+            !done.contains("data-reorder-start"),
+            "Done keeps its own order"
+        );
+        let table = page(&request, &t.ana, "/tasks?view=list").await;
+        assert_eq!(
+            table.matches("data-reorder-start").count(),
+            1,
+            "only the phone list"
+        );
+
+        let roadmap = page(&request, &t.ana, "/roadmap?lane=done").await;
+        assert!(roadmap.contains("Newest first"));
+        assert!(roadmap.contains(r#"data-reorder-start="roadmap""#));
+        assert!(roadmap.contains(r#"aria-label="Move Website up""#));
+        assert!(!roadmap.contains("data-reordering"));
+    })
+    .await;
+}
+
+/// A phone lane switch in Reorder mode carries `reorder=1`, and the next
+/// page opens in the mode.
+#[tokio::test]
+#[serial]
+async fn reorder_mode_survives_a_lane_switch() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        project_in(&ctx, ORG, "Website").await;
+        let plain = page(&request, &t.leo, "/roadmap?lane=next").await;
+        assert!(
+            plain.contains("data-lane-switch"),
+            "the links the client adds it to"
+        );
+        assert!(!plain.contains(r#"data-reordering="roadmap""#));
+        let switched = page(&request, &t.leo, "/roadmap?lane=now&reorder=1").await;
+        assert!(switched.contains(r#"data-reordering="roadmap""#));
+    })
+    .await;
+}

@@ -6,7 +6,7 @@
     <div class="board-grid">
       <div class="board-head">
         {% for c in board.columns %}
-        <div class="board-col-head"><span class="dot dot-ring" style="--dot: {{ c.color }}"></span>{{ c.label }}<span class="meta">{{ c.count }}</span></div>
+        <div class="board-col-head"><span class="dot dot-ring" style="--dot: {{ c.color }}"></span>{{ c.label }}<span class="meta">{{ c.count }}</span>{% if c.key == "done" %}<span class="col-order">· Newest first</span>{% endif %}</div>
         {% endfor %}
       </div>
 
@@ -26,18 +26,24 @@
           {% set column = board.columns[loop.index0] %}
           <div class="cell" data-drop-status="{{ column.key }}" aria-label="{{ column.label }}">
             {% for card in cell %}
-            <a href="{{ org_url(path="/tasks/" ~ (card.id)) }}" class="task-card" draggable="true" data-task-id="{{ card.id }}" data-status="{{ card.status }}"
-               hx-get="{{ org_url(path="/tasks/" ~ (card.id)) }}" hx-target="#task-sheet-body"
-               hx-on::after-request="document.getElementById('task-sheet').showModal()">
-              {% if board.group != "project" and card.project %}<span class="task-card-project"><span class="dot" style="--dot: {{ card.accent }}"></span>{{ card.project }}</span>{% endif %}
-              <span class="task-card-title">{{ card.title }}</span>
+            {# A card, with a link stretched over it (see .task-card-link) and the Reorder arrows beside the title. #}
+            <div class="task-card" draggable="true" data-task-id="{{ card.id }}" data-status="{{ card.status }}" data-name="{{ card.title }}">
+              <span class="task-card-top">
+                <a href="{{ org_url(path="/tasks/" ~ (card.id)) }}" class="task-card-link" draggable="false"
+                   hx-get="{{ org_url(path="/tasks/" ~ (card.id)) }}" hx-target="#task-sheet-body"
+                   hx-on::after-request="document.getElementById('task-sheet').showModal()">
+                  {% if board.group != "project" and card.project %}<span class="task-card-project"><span class="dot" style="--dot: {{ card.accent }}"></span>{{ card.project }}</span>{% endif %}
+                  <span class="task-card-title">{{ card.title }}</span>
+                </a>
+                {% if column.key != "done" %}{{<move_arrows name={card.title} first={loop.first} last={loop.last} sm={true}/>}}{% endif %}
+              </span>
               <span class="task-card-meta">
                 <span class="prio prio-{{ card.priority }}" title="{{ card.priority | capitalize }} priority" aria-label="{{ card.priority | capitalize }} priority"><i></i><i></i><i></i></span>
                 {% if card.due %}<span class="due {% if card.overdue %}due-overdue{% endif %}">{% if card.overdue %}Overdue · {% endif %}{{ card.due }}</span>{% endif %}
                 {% if card.notes > 0 %}<span class="flex items-center gap-1">{{<icon name="message-circle" class="h-3.5 w-3.5"/>}}{{ card.notes }}</span>{% endif %}
                 <span class="avatar-stack ml-auto">{% for p in card.people %}{{<avatar name={p.name} color={p.color} size="xs"/>}}{% endfor %}</span>
               </span>
-            </a>
+            </div>
             {% endfor %}
             {% if column.key == "done" and lane.more_done %}<a href="{{ org_url(path="/tasks?filter=done") }}{% if lane.project_id %}&project={{ lane.project_id }}{% elif lane.person_id %}&person={{ lane.person_id }}{% endif %}{% if board.q %}&q={{ board.q }}{% endif %}" class="cell-more">All done tasks</a>{% endif %}
             {% if not lane.closed %}

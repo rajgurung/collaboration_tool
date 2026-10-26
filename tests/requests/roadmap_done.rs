@@ -309,9 +309,10 @@ fn no_lane_compare_outside_projects() {
         r#""lane": p.lane"#,
         r#""lane": project.lane"#,
         "/roadmap?lane={}\", project.lane",
-        // Input: Claude's create_project, and the roadmap's `?lane=`.
+        // Input: Claude's create_project, the roadmap's `?lane=`, and a move's lane.
         "lane: input.lane",
         "query.lane",
+        "&form.lane, place",
         // A reopen's toast names the lane the project is back in.
         "lane_label(&project.lane)",
     ];

@@ -36,6 +36,8 @@ struct LaneQuery {
     lane: Option<String>,
     /// Any value shows every done project, not just the newest few.
     all: Option<String>,
+    /// Any value opens the page in Reorder mode, after a phone lane switch.
+    reorder: Option<String>,
 }
 
 /// A closed project's card in the Done column.
@@ -243,7 +245,8 @@ async fn index(
     Query(query): Query<LaneQuery>,
 ) -> Result<Response> {
     let lane = lane_or_default(query.lane.as_deref());
-    let data = lane_data(&ctx, &member, lane, query.all.is_some()).await?;
+    let mut data = lane_data(&ctx, &member, lane, query.all.is_some()).await?;
+    data["reordering"] = serde_json::json!(query.reorder.is_some());
     format::render().view(&v, "roadmap/index.html", member.page("roadmap", data))
 }
 
