@@ -403,7 +403,7 @@ impl Model {
     ///
     /// # Errors
     /// `EntityNotFound` when it is not in this organisation, or database
-    /// errors.
+    /// errors, including a lock timeout ([`order::is_busy`]).
     pub async fn remove(db: &DatabaseConnection, org_id: i64, id: i64) -> ModelResult<Removed> {
         let txn = db.begin().await?;
         let (project, task_ids) = lock_with_tasks(&txn, org_id, id).await?;
@@ -418,7 +418,7 @@ impl Model {
     ///
     /// # Errors
     /// `EntityNotFound` when it is not in this organisation, or database
-    /// errors.
+    /// errors, including a lock timeout ([`order::is_busy`]).
     pub async fn remove_made_by(
         db: &DatabaseConnection,
         org_id: i64,
@@ -567,15 +567,7 @@ impl Model {
             Slot::Renumber(rows) => {
                 let (mine, others): (Vec<_>, Vec<_>) =
                     rows.into_iter().partition(|(r, _)| *r == id);
-                order::write_renumber(
-                    &txn,
-                    "projects",
-                    org_id,
-                    &others,
-                    "t.lane = $4 AND t.closed_at IS NULL",
-                    vec![lane.into()],
-                )
-                .await?;
+                order::write_renumber(&txn, org_id, &others, order::Cards::Lane(lane)).await?;
                 mine.first().map_or(order::STEP, |(_, n)| *n)
             }
         };
@@ -624,24 +616,33 @@ impl Model {
     /// `done_at` itself. Postgres reads the old row on the right of `SET`, so
     /// `status_before_close` gets the status from before.
     ///
+    /// `None` when `user_id` can't close it ([`Self::closable_by`]), checked
+    /// against the owners as they are once the project is locked, so an
+    /// owner taken off meanwhile can't.
+    ///
     /// # Errors
     /// `EntityNotFound` when it is not in this organisation, or database
-    /// errors.
+    /// errors, including a lock timeout ([`order::is_busy`]).
     pub async fn close(
         db: &DatabaseConnection,
         org_id: i64,
         id: i64,
         user_id: i64,
-    ) -> ModelResult<Closed> {
+        can_manage: bool,
+    ) -> ModelResult<Option<Closed>> {
         let txn = db.begin().await?;
         let (project, _) = lock_with_tasks(&txn, org_id, id).await?;
         // An early return drops `txn`, which rolls it back.
+        let owners = project_owners::Model::for_project(&txn, org_id, id).await?;
+        if !Self::closable_by(can_manage, user_id, &owners) {
+            return Ok(None);
+        }
         if project.is_closed() {
-            return Ok(Closed {
+            return Ok(Some(Closed {
                 project,
                 tasks: Vec::new(),
                 already: true,
-            });
+            }));
         }
         let now: DateTimeWithTimeZone = chrono::Utc::now().into();
         let closed = tasks::Entity::update_many()
@@ -662,11 +663,11 @@ impl Model {
         active.closed_by_id = ActiveValue::Set(Some(user_id));
         let project = active.update(&txn).await?;
         txn.commit().await?;
-        Ok(Closed {
+        Ok(Some(Closed {
             project,
             tasks: closed,
             already: false,
-        })
+        }))
     }
 
     /// Puts a closed project back in its lane. Tasks the close marked done go
@@ -674,18 +675,30 @@ impl Model {
     /// cleared the saved status). Tasks done before the close stay done.
     /// Reopening an open project changes nothing.
     ///
+    /// `None` when `user_id` can't reopen it, as for [`Self::close`].
+    ///
     /// # Errors
     /// `EntityNotFound` when it is not in this organisation, or database
-    /// errors.
-    pub async fn reopen(db: &DatabaseConnection, org_id: i64, id: i64) -> ModelResult<Reopened> {
+    /// errors, including a lock timeout ([`order::is_busy`]).
+    pub async fn reopen(
+        db: &DatabaseConnection,
+        org_id: i64,
+        id: i64,
+        user_id: i64,
+        can_manage: bool,
+    ) -> ModelResult<Option<Reopened>> {
         let txn = db.begin().await?;
         let (project, _) = lock_with_tasks(&txn, org_id, id).await?;
+        let owners = project_owners::Model::for_project(&txn, org_id, id).await?;
+        if !Self::closable_by(can_manage, user_id, &owners) {
+            return Ok(None);
+        }
         if !project.is_closed() {
-            return Ok(Reopened {
+            return Ok(Some(Reopened {
                 project,
                 tasks: Vec::new(),
                 already: true,
-            });
+            }));
         }
         let now: DateTimeWithTimeZone = chrono::Utc::now().into();
         let restored = tasks::Entity::update_many()
@@ -725,11 +738,11 @@ impl Model {
         active.closed_by_id = ActiveValue::Set(None);
         let project = active.update(&txn).await?;
         txn.commit().await?;
-        Ok(Reopened {
+        Ok(Some(Reopened {
             project,
             tasks: restored,
             already: false,
-        })
+        }))
     }
 }
 
@@ -777,7 +790,7 @@ async fn lock_with_tasks<C: ConnectionTrait>(
     org_id: i64,
     id: i64,
 ) -> ModelResult<(Model, Vec<(i64, Option<Uuid>)>)> {
-    order::lock(db, "tasks", org_id).await?;
+    order::lock_then_unlimit(db, "tasks", org_id).await?;
     let project = Entity::find_by_id(id)
         .in_tenant(org_id)
         .lock_exclusive()

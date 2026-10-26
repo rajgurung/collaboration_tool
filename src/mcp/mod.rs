@@ -31,7 +31,7 @@ use crate::{
     data::notify_hub::NotifyHub,
     extractors::{bearer::McpConnection, current_member::CurrentMember},
     models::{
-        claude_update_notices, memberships, project_owners,
+        claude_update_notices, memberships, order, project_owners,
         projects::{self, Progress, ProjectParams, ACCENTS},
         task_assignees,
         task_notes::{self, NoteParams},
@@ -237,6 +237,9 @@ impl From<ModelError> for Fail {
                 .collect::<Vec<_>>()
                 .join(" ");
             return Self::Refused(message);
+        }
+        if order::is_busy(&err) {
+            return Self::Refused(order::BUSY.into());
         }
         match err {
             ModelError::EntityNotFound => Self::NotFound,

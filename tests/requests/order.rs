@@ -360,7 +360,7 @@ async fn a_closed_project_and_the_old_routes() {
         let shop = project_in(&ctx, ORG, "Instagram shop").await;
         let europe = project_in(&ctx, ORG, "Ship to Europe").await;
         move_project(&request, &t.tom, &europe, json!({ "lane": "later" })).await;
-        projects::Model::close(&ctx.db, t.org_id, website.id, t.ana_id)
+        projects::Model::close(&ctx.db, t.org_id, website.id, t.ana_id, true)
             .await
             .unwrap();
         let (status, trigger) =
@@ -434,6 +434,51 @@ async fn a_busy_move_says_try_again() {
             trigger.contains("Someone else is moving cards. Try again."),
             "{trigger}"
         );
+        assert_eq!(column(&ctx, t.org_id, "todo").await, ["A"]);
+    })
+    .await;
+}
+
+/// A close or delete waiting behind a move gives up the same way: 409 and a
+/// toast, with nothing changed.
+#[tokio::test]
+#[serial]
+async fn a_busy_close_or_delete_says_try_again() {
+    request::<App, _, _>(|request, ctx| async move {
+        use sea_orm::TransactionTrait;
+        let t = juniper(&request, &ctx).await;
+        let website = project_in(&ctx, ORG, "Website").await;
+        task_in(&ctx, t.org_id, Some(website.id), "A", "todo", &[]).await;
+        let conn = sea_orm::Database::connect(&ctx.config.database.uri)
+            .await
+            .unwrap();
+        let held = conn.begin().await.unwrap();
+        collab::models::order::lock(&held, "tasks", t.org_id)
+            .await
+            .unwrap();
+        for action in ["close", "delete"] {
+            let res = request
+                .post(
+                    &t.ana
+                        .at(&format!("/roadmap/projects/{}/{action}", website.id)),
+                )
+                .as_member(&t.ana)
+                .add_header("HX-Request", "true")
+                .await;
+            assert_eq!(res.status_code(), 409, "{action}");
+            let trigger = res.headers()["hx-trigger"].to_str().unwrap().to_string();
+            assert!(
+                trigger.contains("Someone else is moving cards. Try again."),
+                "{action}: {trigger}"
+            );
+        }
+        held.rollback().await.unwrap();
+        let website = projects::Entity::find_by_id(website.id)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .expect("not deleted");
+        assert!(!website.is_closed());
         assert_eq!(column(&ctx, t.org_id, "todo").await, ["A"]);
     })
     .await;

@@ -537,15 +537,7 @@ impl Model {
             Slot::Renumber(rows) => {
                 let (mine, others): (Vec<_>, Vec<_>) =
                     rows.into_iter().partition(|(r, _)| *r == id);
-                order::write_renumber(
-                    &txn,
-                    "tasks",
-                    org_id,
-                    &others,
-                    "t.status = $4",
-                    vec![status.into()],
-                )
-                .await?;
+                order::write_renumber(&txn, org_id, &others, order::Cards::Status(status)).await?;
                 mine.first().map_or(order::STEP, |(_, n)| *n)
             }
         };

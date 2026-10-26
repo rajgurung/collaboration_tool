@@ -399,7 +399,7 @@ async fn projects_move_inside_and_across_lanes() {
         .unwrap()[0]
         .1
         .id;
-    projects::Model::close(&ctx.db, org_id, gift.id, ana)
+    projects::Model::close(&ctx.db, org_id, gift.id, ana, true)
         .await
         .unwrap();
     assert!(matches!(
@@ -545,7 +545,8 @@ async fn a_move_that_waits_too_long_is_busy() {
 }
 
 /// T1: a renumber writes only rows still in the column it worked out. A
-/// task whose status changed meanwhile keeps the place it got.
+/// task whose status changes while the renumber waits for it keeps the
+/// place it got.
 #[tokio::test]
 #[serial]
 async fn a_renumber_skips_a_row_that_left_the_column() {
@@ -557,21 +558,59 @@ async fn a_renumber_skips_a_row_that_left_the_column() {
     let c = task(ctx, org_id, "C", "todo").await;
     squash(ctx, &[&a, &b, &c]).await;
     let b = reload(ctx, &b).await;
-    let blocked = b.set_status(&ctx.db, "blocked").await.unwrap();
 
-    order::write_renumber(
-        &ctx.db,
-        "tasks",
-        org_id,
-        &[(a.id, STEP), (blocked.id, 2 * STEP), (c.id, 3 * STEP)],
-        "t.status = $4",
-        vec!["todo".into()],
-    )
-    .await
-    .unwrap();
+    // B's status change is in flight: the move still reads B in To do, then
+    // its renumber waits on B's row.
+    let conn = sea_orm::Database::connect(&ctx.config.database.uri)
+        .await
+        .unwrap();
+    let changing = conn.begin().await.unwrap();
+    let blocked = b.set_status(&changing, "blocked").await.unwrap();
+    let db = ctx.db.clone();
+    let (b_id, c_id) = (blocked.id, c.id);
+    let moving = tokio::spawn(async move {
+        tasks::Model::move_to(&db, org_id, c_id, "todo", Place::Before(b_id)).await
+    });
+    assert_waiting(&moving, &conn).await;
+    changing.commit().await.unwrap();
+    moving.await.unwrap().unwrap().unwrap();
+
     assert_eq!(reload(ctx, &a).await.sort_order, STEP);
+    assert_eq!(reload(ctx, &c).await.sort_order, 2 * STEP);
     assert_eq!(reload(ctx, &blocked).await.sort_order, blocked.sort_order);
-    assert_eq!(reload(ctx, &c).await.sort_order, 3 * STEP);
+}
+
+async fn setting(txn: &sea_orm::DatabaseTransaction, name: &str) -> String {
+    txn.query_one_raw(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        "SELECT current_setting($1) AS v",
+        [name.into()],
+    ))
+    .await
+    .unwrap()
+    .unwrap()
+    .try_get::<String>("", "v")
+    .unwrap()
+}
+
+/// A close or delete holds the order lock while it writes many rows, so
+/// only the wait for the lock has a limit.
+#[tokio::test]
+#[serial]
+async fn the_long_lock_drops_the_timeouts_after_the_wait() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let txn = ctx.db.begin().await.unwrap();
+    let before = setting(&txn, "statement_timeout").await;
+    order::lock(&txn, "tasks", 1).await.unwrap();
+    assert_eq!(setting(&txn, "statement_timeout").await, "10s");
+    txn.rollback().await.unwrap();
+
+    let txn = ctx.db.begin().await.unwrap();
+    order::lock_then_unlimit(&txn, "tasks", 1).await.unwrap();
+    assert_eq!(setting(&txn, "statement_timeout").await, before);
+    assert_ne!(setting(&txn, "lock_timeout").await, "5s");
+    txn.rollback().await.unwrap();
 }
 
 /// T2: a close takes the tasks' order lock first, so it waits for a move.
@@ -596,10 +635,11 @@ async fn a_close_waits_for_a_move() {
     let (conn, moving) = hold_order_lock(ctx, "tasks", org_id).await;
     let db = ctx.db.clone();
     let id = website.id;
-    let close = tokio::spawn(async move { projects::Model::close(&db, org_id, id, ana).await });
+    let close =
+        tokio::spawn(async move { projects::Model::close(&db, org_id, id, ana, true).await });
     assert_waiting(&close, &conn).await;
     moving.commit().await.unwrap();
-    let closed = close.await.unwrap().unwrap();
+    let closed = close.await.unwrap().unwrap().unwrap();
     assert_eq!(closed.tasks.len(), 1);
     assert_eq!(reload(ctx, &tins).await.status, "done");
 }

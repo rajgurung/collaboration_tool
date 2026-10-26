@@ -128,7 +128,7 @@ pub(super) async fn task_in(
 /// Closes a project through the model, as the owner.
 async fn close(ctx: &AppContext, owner: &TestMember, project: &projects::Model) {
     let user = owner_id(ctx, owner).await;
-    projects::Model::close(&ctx.db, owner.org_id, project.id, user)
+    projects::Model::close(&ctx.db, owner.org_id, project.id, user, true)
         .await
         .unwrap();
 }
@@ -315,6 +315,8 @@ fn no_lane_compare_outside_projects() {
         "&form.lane, place",
         // A reopen's toast names the lane the project is back in.
         "lane_label(&project.lane)",
+        // A renumber's SQL, which skips closed projects itself.
+        "t.lane = $4 AND t.closed_at IS NULL",
     ];
     // `..lane(` is struct update syntax, not a field read.
     let lane_read = regex::Regex::new(r"(^|[^.])\.lane\b|Column::Lane\b").unwrap();

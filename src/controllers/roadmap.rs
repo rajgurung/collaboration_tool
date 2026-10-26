@@ -13,7 +13,9 @@ use crate::{
         session::redirect_response,
     },
     models::{
-        memberships, project_owners,
+        memberships,
+        order::{self, BUSY},
+        project_owners,
         projects::{
             self, CloseSummary, MoveRefusal, OwnerRights, Progress, ProjectParams, ACCENTS, DONE,
             DONE_SHOWN, LANES,
@@ -563,7 +565,10 @@ async fn destroy(
 ) -> Result<Response> {
     member.require_manager()?;
     member.require_own_membership()?;
-    let removed = projects::Model::remove(&ctx.db, member.org.id, id).await?;
+    let removed = match projects::Model::remove(&ctx.db, member.org.id, id).await {
+        Ok(removed) => removed,
+        Err(err) => return busy_refused(err, "delete"),
+    };
     tracing::info!(
         user_id = member.user.id,
         org_id = member.org.id,
@@ -589,18 +594,31 @@ async fn destroy(
         .empty()
 }
 
-/// The project for a close or reopen: in this organisation (else 404), for
-/// someone allowed (else 403).
-async fn closable(ctx: &AppContext, member: &CurrentMember, id: i64) -> Result<projects::Model> {
+/// The check before a close or reopen: in this organisation (else 404), for
+/// someone allowed (else 403). The model checks the owners again once the
+/// project is locked.
+async fn closable(ctx: &AppContext, member: &CurrentMember, id: i64) -> Result<()> {
     member.require_own_membership()?;
-    let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
     if !can_close(member, &owners) {
-        return Err(forbidden(
-            "Only this project's owners and admins can do that.",
-        ));
+        return Err(not_closable());
     }
-    Ok(project)
+    Ok(())
+}
+
+fn not_closable() -> Error {
+    forbidden("Only this project's owners and admins can do that.")
+}
+
+/// A close, reopen or delete that waited too long behind a card move: 409
+/// with a "try again" toast, as a move gets. Other errors pass through.
+fn busy_refused(err: ModelError, what: &str) -> Result<Response> {
+    if order::is_busy(&err) {
+        tracing::warn!(error = %err, "a project {what} waited too long for a card move");
+        return super::tasks::move_refused(Some(BUSY));
+    }
+    Err(err.into())
 }
 
 /// Marks a project done with its open tasks. Owners, admins and the
@@ -613,7 +631,19 @@ async fn close(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     closable(&ctx, &member, id).await?;
-    let closed = projects::Model::close(&ctx.db, member.org.id, id, member.user.id).await?;
+    let closed = match projects::Model::close(
+        &ctx.db,
+        member.org.id,
+        id,
+        member.user.id,
+        member.can_manage(),
+    )
+    .await
+    {
+        Ok(Some(closed)) => closed,
+        Ok(None) => return Err(not_closable()),
+        Err(err) => return busy_refused(err, "close"),
+    };
     if !closed.already {
         // The close is already committed, so a failed notice must not turn
         // the reply into "nothing was changed".
@@ -654,7 +684,19 @@ async fn reopen(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     closable(&ctx, &member, id).await?;
-    let reopened = projects::Model::reopen(&ctx.db, member.org.id, id).await?;
+    let reopened = match projects::Model::reopen(
+        &ctx.db,
+        member.org.id,
+        id,
+        member.user.id,
+        member.can_manage(),
+    )
+    .await
+    {
+        Ok(Some(reopened)) => reopened,
+        Ok(None) => return Err(not_closable()),
+        Err(err) => return busy_refused(err, "reopen"),
+    };
     let project = &reopened.project;
     if !reopened.already {
         // The reopen is already committed, as with a close.

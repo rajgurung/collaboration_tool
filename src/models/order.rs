@@ -95,6 +95,25 @@ pub async fn lock<C: ConnectionTrait>(txn: &C, what: &str, org_id: i64) -> Model
     Ok(())
 }
 
+/// [`lock`] for a close, reopen or delete: only the wait for the lock is
+/// limited. The timeouts go back to the server's own afterwards, so a big
+/// project's delete isn't cut off at 10 seconds.
+///
+/// # Errors
+/// On database errors, including a wait that was too long.
+pub async fn lock_then_unlimit<C: ConnectionTrait>(
+    txn: &C,
+    what: &str,
+    org_id: i64,
+) -> ModelResult<()> {
+    lock(txn, what, org_id).await?;
+    txn.execute_unprepared("SET LOCAL lock_timeout = DEFAULT")
+        .await?;
+    txn.execute_unprepared("SET LOCAL statement_timeout = DEFAULT")
+        .await?;
+    Ok(())
+}
+
 /// Whether `err` is a lock or statement timeout (SQLSTATE `55P03` or
 /// `57014`): someone else's move held the lock too long.
 #[must_use]
@@ -113,37 +132,44 @@ pub fn is_busy(err: &ModelError) -> bool {
     }
 }
 
-/// Writes a renumber in one statement, for rows still in the column it was
-/// worked out for: `column` is SQL on `t` (e.g. `t.status = $4`), with its
-/// values from `$4` on. A row that left the column meanwhile keeps its new
-/// place.
+/// The column a renumber was worked out for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Cards<'a> {
+    /// Tasks with this status.
+    Status(&'a str),
+    /// Open projects in this lane.
+    Lane(&'a str),
+}
+
+/// Writes a renumber in one statement, for rows still in `column`. A row
+/// that left the column meanwhile keeps its new place.
 ///
 /// # Errors
 /// On database errors.
-pub async fn write_renumber<C: ConnectionTrait>(
+pub(crate) async fn write_renumber<C: ConnectionTrait>(
     db: &C,
-    table: &str,
     org_id: i64,
     rows: &[(i64, i64)],
-    column: &str,
-    values: Vec<sea_orm::Value>,
+    column: Cards<'_>,
 ) -> ModelResult<()> {
     if rows.is_empty() {
         return Ok(());
     }
+    let (table, filter, value) = match column {
+        Cards::Status(status) => ("tasks", "t.status = $4", status),
+        Cards::Lane(lane) => ("projects", "t.lane = $4 AND t.closed_at IS NULL", lane),
+    };
     let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
     let orders: Vec<i64> = rows.iter().map(|(_, n)| *n).collect();
     let sql = format!(
         "UPDATE {table} t SET sort_order = v.s \
            FROM unnest($1::bigint[], $2::bigint[]) AS v(id, s) \
-          WHERE t.id = v.id AND t.organisation_id = $3 AND {column}"
+          WHERE t.id = v.id AND t.organisation_id = $3 AND {filter}"
     );
-    let mut all: Vec<sea_orm::Value> = vec![ids.into(), orders.into(), org_id.into()];
-    all.extend(values);
     db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
         sql,
-        all,
+        [ids.into(), orders.into(), org_id.into(), value.into()],
     ))
     .await?;
     Ok(())
