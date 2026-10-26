@@ -8,7 +8,10 @@ use collab::{
     },
 };
 use loco_rs::{app::AppContext, prelude::TenantActiveModelExt, testing::prelude::*};
-use migration::m20261026_120000_project_owners::{COPY_OWNERS, FIRST_OWNER_BACK};
+use migration::{
+    m20261026_120000_project_owners::{COPY_OWNERS, FIRST_OWNER_BACK},
+    MigrationTrait, MigratorTrait, SchemaManager,
+};
 use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, EntityTrait, Statement};
 use serial_test::serial;
 
@@ -101,11 +104,19 @@ async fn insert_owner(
     .await
 }
 
+/// The migration that dropped `projects.owner_id`.
+fn drop_owner_id() -> Box<dyn MigrationTrait> {
+    migration::Migrator::migrations()
+        .into_iter()
+        .find(|m| m.name() == "m20261026_150000_drop_project_owner_id")
+        .unwrap()
+}
+
 async fn sql(ctx: &AppContext, query: &str) {
     ctx.db.execute_unprepared(query).await.unwrap();
 }
 
-/// Reads `projects.owner_id`, which the app no longer maps.
+/// Reads `projects.owner_id`; only there while the drop is rolled back.
 async fn owner_id(ctx: &AppContext, project_id: i64) -> Option<i64> {
     ctx.db
         .query_one_raw(Statement::from_string(
@@ -117,6 +128,21 @@ async fn owner_id(ctx: &AppContext, project_id: i64) -> Option<i64> {
         .unwrap()
         .try_get::<Option<i64>>("", "owner_id")
         .unwrap()
+}
+
+async fn has_owner_id_column(ctx: &AppContext) -> bool {
+    ctx.db
+        .query_one_raw(Statement::from_string(
+            ctx.db.get_database_backend(),
+            "SELECT count(*) AS n FROM information_schema.columns
+              WHERE table_name = 'projects' AND column_name = 'owner_id'",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<i64>("", "n")
+        .unwrap()
+        == 1
 }
 
 #[tokio::test]
@@ -188,12 +214,17 @@ async fn the_database_refuses_rows_across_organisations() {
     );
 }
 
-/// The project owners migration's own SQL, both ways.
+/// The project owners migration's own SQL, both ways. It needs the
+/// `owner_id` column, so the drop is rolled back first.
 #[tokio::test]
 #[serial]
 async fn the_migration_copies_owners_and_writes_the_first_back() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
+    drop_owner_id()
+        .down(&SchemaManager::new(&ctx.db))
+        .await
+        .unwrap();
     let (org, ana) = sign_up(ctx, "Juniper Tea Co", "ana").await;
     let (_, bob) = sign_up(ctx, "Bramble Bakery", "bob").await;
     let (_, leo) = sign_up(ctx, "Leo Lettering", "leo").await;
@@ -231,4 +262,35 @@ async fn the_migration_copies_owners_and_writes_the_first_back() {
     assert_eq!(owner_id(ctx, website).await, Some(ana), "the first added");
     assert_eq!(owner_id(ctx, later).await, None);
     assert_eq!(owner_id(ctx, stray).await, None, "no owners means no owner");
+}
+
+/// Up drops `projects.owner_id`; down puts it back, with its foreign key,
+/// holding each project's first-added owner.
+#[tokio::test]
+#[serial]
+async fn dropping_owner_id_rolls_back_with_the_first_owner() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let schema = SchemaManager::new(&ctx.db);
+    assert!(!has_owner_id_column(ctx).await, "migrated up: no column");
+
+    let (org, ana) = sign_up(ctx, "Juniper Tea Co", "ana").await;
+    let (_, leo) = sign_up(ctx, "Leo Lettering", "leo").await;
+    add_member(ctx, org, leo, "leo").await;
+    let website = project(ctx, org, "Website").await;
+    let later = project(ctx, org, "Ship to Europe").await;
+    project_owners::Model::replace(&ctx.db, org, website, &[leo, ana])
+        .await
+        .unwrap();
+
+    drop_owner_id().down(&schema).await.unwrap();
+    assert!(has_owner_id_column(ctx).await);
+    assert_eq!(owner_id(ctx, website).await, Some(leo), "the first added");
+    assert_eq!(owner_id(ctx, later).await, None);
+    // The foreign key is back: deleting the user clears the column.
+    sql(ctx, &format!("DELETE FROM users WHERE id = {leo}")).await;
+    assert_eq!(owner_id(ctx, website).await, None);
+
+    drop_owner_id().up(&schema).await.unwrap();
+    assert!(!has_owner_id_column(ctx).await);
 }
