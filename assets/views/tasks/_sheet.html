@@ -40,7 +40,9 @@
 
   {% include "tasks/_note_form.html" %}
 
+  {% if me.can_manage and not me.acting %}
   <div class="border-t border-line pt-3">
-    <button type="button" class="btn-text-danger" hx-post="{{ org_url(path="/tasks/" ~ (task.id) ~ "/delete") }}" hx-confirm="Delete “{{ task.title }}”? Its notes go with it.">Delete task</button>
+    <button type="button" class="btn-text-danger" data-task-delete hx-post="{{ org_url(path="/tasks/" ~ (task.id) ~ "/delete") }}" hx-confirm="Delete “{{ task.title }}”? Its notes go with it.">Delete task</button>
   </div>
+  {% endif %}
 </div>

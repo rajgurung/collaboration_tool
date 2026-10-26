@@ -597,14 +597,9 @@ async fn a_page_load_ignores_the_claim() {
     .await;
 }
 
-async fn beta_company(ctx: &AppContext, beta_id: i64) -> folders::Model {
-    folders::Model::list_for_org(&ctx.db, beta_id)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|s| s.folder.name == "Company")
-        .unwrap()
-        .folder
+/// Beta's Shared folder, which every member can add to.
+async fn beta_shared(ctx: &AppContext, beta_id: i64) -> folders::Model {
+    folders::Model::shared(&ctx.db, beta_id).await.unwrap()
 }
 
 fn a_pdf() -> MultipartForm {
@@ -623,7 +618,7 @@ async fn document_count(ctx: &AppContext) -> u64 {
 async fn a_document_upload_from_another_org_is_refused_and_nothing_is_stored() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
-        let folder = beta_company(&ctx, t.beta_id).await;
+        let folder = beta_shared(&ctx, t.beta_id).await;
         let res = request
             .post(
                 &t.beta
@@ -646,7 +641,7 @@ async fn a_document_upload_from_another_org_is_refused_and_nothing_is_stored() {
 async fn a_document_upload_with_the_right_org_goes_through() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
-        let folder = beta_company(&ctx, t.beta_id).await;
+        let folder = beta_shared(&ctx, t.beta_id).await;
         let res = request
             .post(
                 &t.beta
@@ -667,7 +662,7 @@ async fn a_document_upload_with_the_right_org_goes_through() {
 async fn a_multipart_post_with_no_header_fails_closed() {
     request::<App, _, _>(|request, ctx| async move {
         let t = tabs(&request, &ctx).await;
-        let folder = beta_company(&ctx, t.beta_id).await;
+        let folder = beta_shared(&ctx, t.beta_id).await;
         let res = request
             .post(
                 &t.beta

@@ -57,6 +57,7 @@ pub mod documents;
 pub mod done_tasks;
 
 pub mod logins;
+pub mod member_access;
 pub mod note_reactions;
 
 pub mod create_org;

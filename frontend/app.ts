@@ -625,6 +625,7 @@ for (const name of ["htmx:responseError", "htmx:sendError"]) {
     }
     const reopen = elt?.closest<HTMLElement>("[data-reopen]");
     if (reopen) showToast({ kind: "error", message: refusalText(xhr) ?? `Couldn't reopen ${reopen.dataset.name}. Try again.` });
+    if (elt?.closest("[data-task-delete]")) showToast({ kind: "error", message: refusalText(xhr) ?? "Couldn't delete the task. Try again." });
   });
 }
 
@@ -1890,7 +1891,9 @@ function uploadFinished({ file, row }: Upload, successful: boolean, status: numb
     ? "Stopped part way. Check your connection."
     : status === 413
       ? "Too big. The limit is 25 MB. Try saving a smaller copy."
-      : "Couldn't add it. Try again, or reload the page.";
+      : status === 403
+        ? "Only owners and admins can add to this folder."
+        : "Couldn't add it. Try again, or reload the page.";
   const failed = uploadRow(file.name, message, dropped);
   if (!failed) return;
   if (dropped) failedFiles.set(failed, file);
@@ -2829,7 +2832,10 @@ document.addEventListener("click", (event) => {
   const sheet = document.querySelector<HTMLDialogElement>("#login-sheet");
   if (!link || !sheet || !matchMedia("(min-width: 900px)").matches) return;
   event.preventDefault();
-  void htmx.ajax("GET", link.href, { target: "#login-sheet-body", swap: "innerHTML" }).then(() => sheet.showModal());
+  // A refusal swaps nothing and says why in a toast, so the sheet stays shut.
+  void htmx.ajax("GET", link.href, { target: "#login-sheet-body", swap: "innerHTML" }).then(() => {
+    if (sheet.querySelector("#login-sheet-body")?.hasChildNodes()) sheet.showModal();
+  });
 });
 document.addEventListener(
   "close",

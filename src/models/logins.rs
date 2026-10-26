@@ -1,5 +1,6 @@
 //! Shared logins, kept in folders next to files. Title, username, website
-//! and notes are plain text that every member can read. The password and
+//! and notes are plain text that owners, admins and the members named on a
+//! login can read ([`Model::can_see`]). The password and
 //! recovery codes are encrypted with the organisation's data key; they are
 //! decrypted only to show or copy them, for a session that re-entered the
 //! app password, and every time is logged.
@@ -190,6 +191,14 @@ impl ActiveModelBehavior for ActiveModel {
     }
 }
 
+/// Logins hold secrets, and Shared is open to every member.
+fn not_in_shared() -> ModelError {
+    field_error(
+        "folder_id",
+        "Logins can't go in Shared. Choose another folder.",
+    )
+}
+
 impl Model {
     /// The logins in a folder, newest first.
     ///
@@ -261,6 +270,9 @@ impl Model {
         client: &Client,
         params: &LoginParams,
     ) -> ModelResult<Self> {
+        if folder.is_shared() {
+            return Err(not_in_shared());
+        }
         let org_id = folder.organisation_id;
         let (checked, url) = params.checked(true)?;
         let kek = Kek::get(ctx)?;
@@ -335,7 +347,11 @@ impl Model {
         let access = params.access_ids(&txn, org_id).await?;
         let folder_id = match params.folder_id {
             Some(id) if id != self.folder_id => {
-                folders::Model::find_in_org(&txn, org_id, id).await?.id
+                let folder = folders::Model::find_in_org(&txn, org_id, id).await?;
+                if folder.is_shared() {
+                    return Err(not_in_shared());
+                }
+                folder.id
             }
             _ => self.folder_id,
         };
@@ -449,6 +465,26 @@ impl Model {
         member: &CurrentMember,
     ) -> ModelResult<bool> {
         if !member.via_session || member.acting || member.org.id != self.organisation_id {
+            return Ok(false);
+        }
+        if member.can_manage() {
+            return Ok(true);
+        }
+        login_accesses::Model::is_named(db, self.id, member.user.id).await
+    }
+
+    /// Whether this person may see the login's plain fields: an owner or
+    /// admin, or a member named on it. Unlike [`Self::can_reveal`], any
+    /// session or token counts, so the page answers the same everywhere.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn can_see<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        member: &CurrentMember,
+    ) -> ModelResult<bool> {
+        if member.org.id != self.organisation_id {
             return Ok(false);
         }
         if member.can_manage() {

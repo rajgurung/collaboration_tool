@@ -186,7 +186,7 @@ async fn create_for_user_sets_up_general_and_the_starter_folders() {
         .map(|f| f.folder.name)
         .collect();
     names.sort();
-    assert_eq!(names, ["Company", "Logins"]);
+    assert_eq!(names, ["Company", "Logins", "Shared"]);
 }
 
 #[tokio::test]

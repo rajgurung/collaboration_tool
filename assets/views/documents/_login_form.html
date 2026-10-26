@@ -46,7 +46,7 @@
   <label class="field">
     <span class="field-label">Notes</span>
     <textarea class="input" name="notes" rows="2" maxlength="2000" {% if form.errors.notes %}aria-invalid="true"{% endif %}>{{ form.values.notes }}</textarea>
-    {% if form.errors.notes %}<span class="field-error">{{ form.errors.notes }}</span>{% else %}<span class="field-hint">Visible to every member. Not encrypted, so never put passwords here.</span>{% endif %}
+    {% if form.errors.notes %}<span class="field-error">{{ form.errors.notes }}</span>{% else %}<span class="field-hint">Visible to owners, admins and the people named here. Not encrypted, so never put passwords here.</span>{% endif %}
   </label>
   {% if form.editing %}
   <label class="field">
@@ -54,7 +54,10 @@
     <select class="input" name="folder_id">
       {% for f in form.folders %}<option value="{{ f.id }}" {% if f.id == form.values.folder_id %}selected{% endif %}>{{ f.name }}</option>{% endfor %}
     </select>
+    {% if form.errors.folder_id %}<span class="field-error">{{ form.errors.folder_id }}</span>{% endif %}
   </label>
+  {% elif form.errors.folder_id %}
+  <p class="field-error m-0">{{ form.errors.folder_id }}</p>
   {% endif %}
   <div class="sheet-sticky-foot"><button type="submit" class="btn btn-primary btn-lg w-full">{{ form.submit }}</button></div>
 </form>

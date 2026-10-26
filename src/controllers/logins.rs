@@ -13,7 +13,7 @@ use loco_rs::prelude::*;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::documents::{folder_rows, no_framing};
+use super::documents::{folder_rows, no_entry, no_framing, Selected, SHARED_WITH_YOU};
 use crate::{
     extractors::{
         current_member::{forbidden, CurrentMember},
@@ -35,6 +35,9 @@ use crate::{
         time,
     },
 };
+
+/// The refusal for a login this person can't see. It never names the login.
+const LOGIN_CLOSED: &str = "Only owners, admins and people named on this login can see it.";
 
 /// Someone in the "Who can see the password" picker.
 #[derive(Debug, Serialize)]
@@ -99,7 +102,9 @@ fn and_list(names: &[String]) -> String {
     }
 }
 
-/// Everything the login page, its side sheet and its edit form show.
+/// Everything the login page, its side sheet and its edit form show. Callers
+/// check [`logins::Model::can_see`] first. The edit form, with every folder
+/// and person, is built for owners and admins only.
 async fn login_data(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -134,21 +139,22 @@ async fn login_data(
             .cloned(),
     );
     ask.truncate(2);
-    let folder = folders::Model::find_in_org(&ctx.db, member.org.id, login.folder_id).await?;
+    // Members reach a login from "Shared with you", not its folder.
+    let folder = if member.can_manage() {
+        let folder = folders::Model::find_in_org(&ctx.db, member.org.id, login.folder_id).await?;
+        data!({ "href": member.url(&format!("/documents/folders/{}", folder.id)), "name": folder.name })
+    } else {
+        data!({ "href": member.url("/documents/shared-with-you"), "name": SHARED_WITH_YOU })
+    };
     let can_reveal = login.can_reveal(&ctx.db, member).await?;
     let unlocked = can_reveal
         && member
             .user
             .secrets_unlocked(member.session_id.as_deref(), member.org.id);
-    let folders_list: Vec<serde_json::Value> = folders::Model::list_for_org(&ctx.db, member.org.id)
-        .await?
-        .into_iter()
-        .map(|s| data!({ "id": s.folder.id, "name": s.folder.name }))
-        .collect();
     let added_on = time::local(login.created_at, member.tz())
         .format("%-d %b")
         .to_string();
-    Ok(data!({
+    let mut data = data!({
         "login": {
             "id": login.id,
             "title": login.title,
@@ -163,14 +169,24 @@ async fn login_data(
             "added_by": creator.unwrap_or_else(|| "a former member".to_string()),
             "added_on": added_on,
         },
-        "folder": { "id": folder.id, "name": folder.name },
+        "folder": folder,
         "can_reveal": can_reveal,
         "unlocked_seconds": if unlocked { member.user.unlocked_seconds_left() } else { 0 },
         "managers": and_list(&managers),
         "named": and_list(&named),
         "ask": ask.join(" or "),
         "owners": and_list(&owners),
-        "form": {
+    });
+    if !member.can_manage() {
+        return Ok(data);
+    }
+    let folders_list: Vec<serde_json::Value> = folders::Model::list_for_org(&ctx.db, member.org.id)
+        .await?
+        .into_iter()
+        .filter(|s| !s.folder.is_shared())
+        .map(|s| data!({ "id": s.folder.id, "name": s.folder.name }))
+        .collect();
+    data["form"] = data!({
             "form_id": format!("login-{}-form", login.id),
             "action": member.url(&format!("/documents/logins/{}", login.id)),
             "editing": true,
@@ -186,8 +202,8 @@ async fn login_data(
             "people": picker(ctx, member, &named_ids).await?,
             "errors": {},
             "submit": "Save changes",
-        },
-    }))
+    });
+    Ok(data)
 }
 
 /// A login's page. HTMX requests (the desktop side sheet) get only the
@@ -208,6 +224,9 @@ async fn show(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let login = logins::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if !login.can_see(&ctx.db, &member).await? {
+        return no_entry(&v, &member, &headers, LOGIN_CLOSED);
+    }
     let mut page = login_data(&ctx, &member, &login).await?;
     if headers.contains_key("hx-request") {
         page["sheet"] = true.into();
@@ -215,8 +234,12 @@ async fn show(
             .header(header::CACHE_CONTROL.as_str(), "no-store")
             .view(&v, "documents/_login.html", member.page("documents", page));
     }
-    page["folders"] =
-        serde_json::to_value(folder_rows(&ctx, &member, Some(login.folder_id)).await?)?;
+    let selected = if member.can_manage() {
+        Selected::Folder(login.folder_id)
+    } else {
+        Selected::SharedWithYou
+    };
+    page["folders"] = serde_json::to_value(folder_rows(&ctx, &member, selected).await?)?;
     page["open_edit"] = (query.edit.is_some() && member.can_manage()).into();
     format::render()
         .header(header::CACHE_CONTROL.as_str(), "no-store")
@@ -401,6 +424,18 @@ async fn unlock(
             .ok(),
         None => None,
     };
+    // A member unlocks only for a login they can see. No login, another
+    // organisation's, and one they aren't named on all get the same answer,
+    // before any password is checked or counted.
+    if !member.can_manage() {
+        let allowed = match &login {
+            Some(login) => login.can_see(&ctx.db, &member).await?,
+            None => false,
+        };
+        if !allowed {
+            return plain(StatusCode::FORBIDDEN, LOGIN_CLOSED);
+        }
+    }
     let about = login.as_ref().map(|l| (l.id, l.title.as_str()));
     let user = &member.user;
     match auth_attempts::Model::begin_reauth(&ctx.db, &user.email, user.id, &client.ip).await? {

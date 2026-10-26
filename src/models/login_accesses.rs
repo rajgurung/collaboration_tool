@@ -61,6 +61,29 @@ impl Model {
             .collect())
     }
 
+    /// The organisation's logins that name `user_id`, by title: a member's
+    /// "Shared with you".
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn logins_for<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        user_id: i64,
+    ) -> ModelResult<Vec<logins::Model>> {
+        let named = sea_orm::sea_query::Query::select()
+            .column(Column::LoginId)
+            .from(Entity)
+            .and_where(Column::UserId.eq(user_id))
+            .to_owned();
+        Ok(logins::Entity::find()
+            .in_tenant(org_id)
+            .filter(logins::Column::Id.in_subquery(named))
+            .order_by_asc(logins::Column::Title)
+            .all(db)
+            .await?)
+    }
+
     /// Names exactly `user_ids` among the organisation's active members.
     /// Callers check every id is an active member first.
     ///

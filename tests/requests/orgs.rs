@@ -105,13 +105,8 @@ async fn app_pages_carry_their_org_on_body() {
         conversation_members::Model::add(&ctx.db, &general, alice)
             .await
             .unwrap();
-        let folder = folders::Model::list_for_org(&ctx.db, beta)
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap()
-            .folder;
+        // Alice is a member in Beta, so she opens Shared.
+        let folder = folders::Model::shared(&ctx.db, beta).await.unwrap();
         let folder_path = format!("/documents/folders/{}", folder.id);
         let chat_path = format!("/chat/{}", general.id);
         for path in [

@@ -1,11 +1,12 @@
-//! Document folders, one level deep. Every member can see every folder and
-//! add to it; owners and admins create, rename and delete them.
+//! Document folders, one level deep. Owners and admins see every folder and
+//! create, rename and delete them. Members see only the built-in Shared
+//! folder, and add to it ([`Model::open_to`]).
 use std::collections::HashMap;
 
 use loco_rs::prelude::*;
 use sea_orm::{
     sea_query::{ExprTrait, Func},
-    FromQueryResult, SqlErr,
+    DbBackend, FromQueryResult, SqlErr, Statement, TransactionTrait,
 };
 use serde::Deserialize;
 
@@ -20,13 +21,27 @@ pub const LOGINS: &str = "Logins";
 /// The folder photos posted in chat channels go to.
 pub const CHAT_PHOTOS: &str = "Chat photos";
 
-/// The folders every organisation starts with, and their notes.
-pub const STARTERS: [(&str, Option<&str>); 2] = [
-    ("Company", None),
+/// The name of the built-in folder every member can see and add to.
+pub const SHARED: &str = "Shared";
+
+/// The Shared folder's note. The migration that added `kind` uses the same.
+pub const SHARED_NOTE: &str =
+    "Photos and files for the whole team. Everyone can open them and add to them.";
+
+/// Values of `folders.kind`. Ordinary folders have none.
+pub mod kind {
+    pub const SHARED: &str = "shared";
+}
+
+/// The folders every organisation starts with: name, note and kind.
+pub const STARTERS: [(&str, Option<&str>, Option<&str>); 3] = [
+    ("Company", None, None),
     (
         LOGINS,
         Some("Shared logins for the team. Never put passwords in notes."),
+        None,
     ),
+    (SHARED, Some(SHARED_NOTE), Some(kind::SHARED)),
 ];
 
 #[derive(Debug, Deserialize, Validate)]
@@ -106,6 +121,25 @@ impl Model {
         self.name.eq_ignore_ascii_case(LOGINS)
     }
 
+    /// The built-in folder every member can see and add to.
+    #[must_use]
+    pub fn is_shared(&self) -> bool {
+        self.kind.as_deref() == Some(kind::SHARED)
+    }
+
+    /// The one Documents gate: whether someone may see this folder and the
+    /// files in it. Owners and admins see every folder; members only Shared.
+    #[must_use]
+    pub fn open_to(&self, can_manage: bool) -> bool {
+        can_manage || self.is_shared()
+    }
+
+    /// Shared and Logins keep their names and can't be deleted.
+    #[must_use]
+    pub fn is_built_in(&self) -> bool {
+        self.is_shared() || self.is_logins()
+    }
+
     /// Adds the starter folders to a new organisation.
     ///
     /// # Errors
@@ -115,10 +149,11 @@ impl Model {
         org_id: i64,
         created_by_id: i64,
     ) -> ModelResult<()> {
-        for (name, note) in STARTERS {
+        for (name, note, kind) in STARTERS {
             ActiveModel {
                 name: ActiveValue::Set(name.to_string()),
                 note: ActiveValue::Set(note.map(str::to_string)),
+                kind: ActiveValue::Set(kind.map(str::to_string)),
                 created_by_id: ActiveValue::Set(Some(created_by_id)),
                 ..Default::default()
             }
@@ -233,6 +268,53 @@ impl Model {
         }
     }
 
+    /// The organisation's Shared folder. The migration and
+    /// [`Self::create_starters`] make it. If it is somehow missing, it is
+    /// made here, under a lock on the organisation so two requests make one.
+    ///
+    /// # Errors
+    /// On database errors, including a name clash with an ordinary folder.
+    pub async fn shared(db: &DatabaseConnection, org_id: i64) -> ModelResult<Self> {
+        let find = |db| {
+            Entity::find()
+                .in_tenant(org_id)
+                .filter(Column::Kind.eq(kind::SHARED))
+                .one(db)
+        };
+        if let Some(folder) = find(db).await? {
+            return Ok(folder);
+        }
+        let txn = db.begin().await?;
+        txn.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+            [format!("shared-folder:{org_id}").into()],
+        ))
+        .await?;
+        let folder = match Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::Kind.eq(kind::SHARED))
+            .one(&txn)
+            .await?
+        {
+            Some(folder) => folder,
+            None => {
+                tracing::warn!(org_id, "Shared folder was missing; making it");
+                ActiveModel {
+                    name: ActiveValue::Set(SHARED.to_string()),
+                    note: ActiveValue::Set(Some(SHARED_NOTE.to_string())),
+                    kind: ActiveValue::Set(Some(kind::SHARED.to_string())),
+                    ..Default::default()
+                }
+                .set_tenant(org_id)?
+                .insert(&txn)
+                .await?
+            }
+        };
+        txn.commit().await?;
+        Ok(folder)
+    }
+
     /// # Errors
     /// `EntityNotFound` when the folder is not in this organisation.
     pub async fn find_in_org<C: ConnectionTrait>(
@@ -298,6 +380,9 @@ impl Model {
     ) -> ModelResult<Self> {
         let params = params.cleaned();
         ValidatorTrait::validate(&params)?;
+        if self.is_built_in() && params.name != self.name {
+            return Err(field_error("name", "Built-in folders keep their name."));
+        }
         if Self::name_taken(db, self.organisation_id, &params.name, Some(self.id)).await? {
             return Err(taken());
         }
@@ -311,8 +396,15 @@ impl Model {
     /// logins even if one arrives after this check.
     ///
     /// # Errors
-    /// `Message` when the folder still has files or logins, or database errors.
+    /// `Message` for a built-in folder or one that still has files or
+    /// logins, or database errors.
     pub async fn delete_if_empty<C: ConnectionTrait>(self, db: &C) -> ModelResult<()> {
+        if self.is_built_in() {
+            return Err(ModelError::Message(format!(
+                "The {} folder is built in, so it can't be deleted.",
+                self.name
+            )));
+        }
         if documents::Model::count_in_folder(db, self.organisation_id, self.id).await? > 0
             || logins::Model::count_in_folder(db, self.organisation_id, self.id).await? > 0
         {

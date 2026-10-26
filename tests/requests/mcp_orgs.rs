@@ -876,6 +876,29 @@ deleted from Claude.";
             .await
             .unwrap()
             .is_some());
+
+        // Members can't delete tasks, even their own connection's; an
+        // admin's connection can.
+        let kreepas = token_in(&ctx, "kreepa@example.com", HIMALAYAN).await;
+        let fresh = claude_task(&request, &kreepas, "Kreepa's mistake").await;
+        let (error, result) = delete(&request, &kreepas, "delete_task", "task_id", fresh).await;
+        assert!(error, "{result}");
+        assert_eq!(
+            result,
+            "Only owners and admins can delete tasks. Ask one of them, or mark it done instead."
+        );
+        assert!(task_row(&ctx, fresh).await.is_some());
+        let mut admin: memberships::ActiveModel =
+            memberships::Model::default_for_user(&ctx.db, kreepa)
+                .await
+                .unwrap()
+                .unwrap()
+                .into();
+        admin.role = ActiveValue::Set(memberships::role::ADMIN.to_string());
+        admin.update(&ctx.db).await.unwrap();
+        let (error, result) = delete(&request, &kreepas, "delete_task", "task_id", fresh).await;
+        assert!(!error, "{result}");
+        assert!(task_row(&ctx, fresh).await.is_none());
     })
     .await;
 }

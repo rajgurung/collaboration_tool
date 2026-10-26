@@ -197,12 +197,13 @@ async fn a_photo_posted_in_a_channel_is_stored_in_chat_photos_and_shown() {
         let image = open_photo(&request, &bob, general.id, message.id).await;
         assert_eq!(image.status_code(), 200);
         assert_eq!(image.as_bytes().as_ref(), PNG);
-        // Still in Documents, as before.
+        // Members open it through chat; in Documents, Chat photos is for
+        // owners and admins.
         let image = request
             .get(&bob.at(&format!("/documents/files/{file_id}")))
             .add_header(bob.cookie.0.clone(), bob.cookie.1.clone())
             .await;
-        assert_eq!(image.status_code(), 200);
+        assert_eq!(image.status_code(), 403);
 
         // A second photo reuses the folder.
         send_photo(&request, &bob, general.id, None, "two.png", PNG).await;

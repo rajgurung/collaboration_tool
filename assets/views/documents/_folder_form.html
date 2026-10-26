@@ -1,10 +1,18 @@
 <form id="{{ form_id }}" method="post" action="{{ action }}" hx-post="{{ action }}" class="grid gap-4">
+  {% if built_in %}
+  <label class="field">
+    <span class="field-label">Name</span>
+    <input class="input" type="text" name="name" value="{{ values.name }}" readonly aria-describedby="{{ form_id }}-name-hint"{% if errors.name %} aria-invalid="true"{% endif %}>
+    {% if errors.name %}<span class="field-error" id="{{ form_id }}-name-hint">{{ errors.name }}</span>{% else %}<span class="field-hint" id="{{ form_id }}-name-hint">Built-in folders keep their name.</span>{% endif %}
+  </label>
+  {% else %}
   {{<text_field name="name" label="Name" value={values.name} error={errors.name | default(value="")}/>}}
+  {% endif %}
   <label class="field">
     <span class="field-label">Note (optional)</span>
     <textarea name="note" class="input" rows="3" maxlength="500" placeholder="What goes here, or where the paper originals are kept">{{ values.note }}</textarea>
     {% if errors.note %}<span class="field-error">{{ errors.note }}</span>{% endif %}
   </label>
-  <p class="field-hint m-0">Everyone in {{ org.name }} can see this folder and add to it.</p>
+  <p class="field-hint m-0">{% if shared %}Everyone in {{ org.name }} can see this folder and add to it.{% else %}Only owners and admins can see this folder.{% endif %}</p>
   <button type="submit" class="btn btn-primary btn-lg w-full">{{ submit }}</button>
 </form>

@@ -53,9 +53,9 @@
     <div class="list">
       <button type="button" class="add-row" data-pick="photo"><span class="tile">{{<icon name="camera" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Photo</span><span class="meta block">Take one, or pick from your photos</span></span></button>
       <button type="button" class="add-row" data-pick="file"><span class="tile">{{<icon name="paperclip" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">File</span><span class="meta block">PDF, Word, Excel or PowerPoint</span></span></button>
-      {% if me.can_manage %}<button type="button" class="add-row" data-dialog-open="new-login-title"><span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Login</span><span class="meta block">Username, password and notes. The password is kept locked.</span></span></button>{% endif %}
+      {% if me.can_manage and not folder.is_shared %}<button type="button" class="add-row" data-dialog-open="new-login-title"><span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Login</span><span class="meta block">Username, password and notes. The password is kept locked.</span></span></button>{% endif %}
     </div>
-    <p class="meta m-0">Up to 25 MB each. Everyone in {{ org.name }} can open what you add.</p>
+    <p class="meta m-0">Up to 25 MB each. {% if folder.is_shared %}Everyone in {{ org.name }} can open what you add.{% else %}Only owners and admins can open what you add here.{% endif %}</p>
   </div>
 </dialog>
 
@@ -66,9 +66,11 @@
   <div class="sheet-handle"></div>
   <div class="sheet-body flex flex-col gap-4">
     <div class="flex items-center gap-2"><h2 id="folder-settings-title" class="m-0 flex-1 text-[19px] font-bold">Folder settings</h2><button type="button" class="icon-btn" data-dialog-close aria-label="Close">{{<icon name="x" class="h-5 w-5"/>}}</button></div>
-    {% set form_id = "folder-" ~ folder.id ~ "-form" %}{% set action = org_url(path="/documents/folders/" ~ folder.id) %}{% set values = {"name": folder.name, "note": folder.note | default(value="")} %}{% set errors = {} %}{% set submit = "Save" %}
+    {% set form_id = "folder-" ~ folder.id ~ "-form" %}{% set action = org_url(path="/documents/folders/" ~ folder.id) %}{% set values = {"name": folder.name, "note": folder.note | default(value="")} %}{% set errors = {} %}{% set submit = "Save" %}{% set built_in = folder.is_built_in %}{% set shared = folder.is_shared %}
     {% include "documents/_folder_form.html" %}
-    {% if not empty %}
+    {% if folder.is_built_in %}
+    <p class="meta m-0">{{ folder.name }} is built in, so it can't be deleted.</p>
+    {% elif not empty %}
     <p class="meta m-0">Only empty folders can be deleted.</p>
     {% else %}
     <form method="post" action="{{ org_url(path="/documents/folders/" ~ (folder.id) ~ "/delete") }}" hx-post="{{ org_url(path="/documents/folders/" ~ (folder.id) ~ "/delete") }}"

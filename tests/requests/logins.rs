@@ -157,6 +157,23 @@ async fn unlock(
     .await
 }
 
+/// [`unlock`] for one login, as the page sends it. Members must name one.
+async fn unlock_for(
+    request: &TestServer,
+    cookie: &TestMember,
+    password: &str,
+    login_id: i64,
+) -> axum_test::TestResponse {
+    let login_id = login_id.to_string();
+    post(
+        request,
+        cookie,
+        "/documents/logins/unlock",
+        &[("password", password), ("login_id", &login_id)],
+    )
+    .await
+}
+
 async fn reveal(request: &TestServer, cookie: &TestMember, id: i64) -> axum_test::TestResponse {
     post(
         request,
@@ -240,10 +257,10 @@ async fn owners_add_logins_and_the_database_holds_no_plaintext() {
         let page = request
             .get(
                 &acme
-                    .bob
+                    .carol
                     .at(&format!("/documents/folders/{}", acme.folder.id)),
             )
-            .add_header(acme.bob.0.clone(), acme.bob.1.clone())
+            .add_header(acme.carol.0.clone(), acme.carol.1.clone())
             .await
             .text();
         assert!(page.contains("Companies House"));
@@ -251,8 +268,8 @@ async fn owners_add_logins_and_the_database_holds_no_plaintext() {
         assert!(page.contains("1 login"));
         assert!(!page.contains(SECRET));
         let list = request
-            .get(&acme.bob.at("/documents"))
-            .add_header(acme.bob.0.clone(), acme.bob.1.clone())
+            .get(&acme.carol.at("/documents"))
+            .add_header(acme.carol.0.clone(), acme.carol.1.clone())
             .await
             .text();
         assert!(list.contains("1 login · Updated"), "{list}");
@@ -466,27 +483,84 @@ async fn only_owners_admins_and_named_members_can_see_secrets() {
     request::<App, _, _>(|request, ctx| async move {
         let acme = acme(&request, &ctx).await;
         let dave_id = user_id(&ctx, "dave@example.com").await;
-        add(&request, &acme.alice, acme.folder.id, &[("access", dave_id.to_string())]).await;
+        add(
+            &request,
+            &acme.alice,
+            acme.folder.id,
+            &[("access", dave_id.to_string())],
+        )
+        .await;
         let id = only_login(&ctx).await.id;
 
-        // bob is not named: he sees the entry, not the password.
-        let page = request
+        // bob is not named: he can't see the login at all, or unlock for it.
+        let res = request
             .get(&acme.bob.at(&format!("/documents/logins/{id}")))
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
+            .await;
+        assert_eq!(res.status_code(), 403);
+        assert!(res
+            .text()
+            .contains("Only owners, admins and people named on this login can see it."));
+        assert!(!res.text().contains("office@example.com"));
+        assert!(!res.text().contains("Companies House"));
+        let res = request
+            .get(&acme.bob.at(&format!("/documents/logins/{id}")))
+            .add_header(acme.bob.0.clone(), acme.bob.1.clone())
+            .add_header("hx-request", "true")
+            .await;
+        assert_eq!(res.status_code(), 403, "the side sheet too");
+        assert!(!res.text().contains("Companies House"));
+        assert!(!res.headers()["hx-trigger"]
+            .to_str()
+            .unwrap()
+            .contains("Companies House"));
+        for res in [
+            unlock_for(&request, &acme.bob, USER_PASSWORD, id).await,
+            unlock(&request, &acme.bob, USER_PASSWORD).await,
+        ] {
+            assert_eq!(res.status_code(), 403);
+            assert_eq!(
+                res.text(),
+                "Only owners, admins and people named on this login can see it."
+            );
+        }
+        assert!(events(&ctx, "reauth_failed").await.is_empty());
+        assert!(
+            events(&ctx, "unlock").await.is_empty(),
+            "no password was checked"
+        );
+        // dave is named: he sees the entry, and its edit form isn't sent.
+        let page = request
+            .get(&acme.dave.at(&format!("/documents/logins/{id}")))
+            .add_header(acme.dave.0.clone(), acme.dave.1.clone())
             .await
             .text();
         assert!(page.contains("office@example.com"));
-        assert!(page.contains("Only owners, admins and people named on this login can see the password. Ask alice if you need it."));
-        assert!(!page.contains("data-secret-show"));
-        assert_eq!(unlock(&request, &acme.bob, USER_PASSWORD).await.status_code(), 200);
+        assert!(page.contains("Shared with you"));
+        assert!(
+            !page.contains("name=\"folder_id\""),
+            "no folder list for members"
+        );
+        assert!(!page.contains("Company"), "no folder names for members");
         let res = reveal(&request, &acme.bob, id).await;
         assert_eq!(res.status_code(), 403);
         assert!(!res.text().contains(SECRET));
-        let res = post(&request, &acme.bob, &format!("/documents/logins/{id}/copy"), &[]).await;
+        let res = post(
+            &request,
+            &acme.bob,
+            &format!("/documents/logins/{id}/copy"),
+            &[],
+        )
+        .await;
         assert_eq!(res.status_code(), 403);
 
         for cookie in [&acme.carol, &acme.dave] {
-            assert_eq!(unlock(&request, cookie, USER_PASSWORD).await.status_code(), 200);
+            assert_eq!(
+                unlock_for(&request, cookie, USER_PASSWORD, id)
+                    .await
+                    .status_code(),
+                200
+            );
             let res = reveal(&request, cookie, id).await;
             assert_eq!(res.status_code(), 200);
             assert!(res.text().contains(SECRET));
@@ -495,7 +569,10 @@ async fn only_owners_admins_and_named_members_can_see_secrets() {
 
         // A bearer token is not a session, even for an owner.
         let alice_id = user_id(&ctx, "alice@example.com").await;
-        let membership = memberships::Model::default_for_user(&ctx.db, alice_id).await.unwrap().unwrap();
+        let membership = memberships::Model::default_for_user(&ctx.db, alice_id)
+            .await
+            .unwrap()
+            .unwrap();
         let alice = users::Model::find_by_id(&ctx.db, alice_id).await.unwrap();
         let bearer = CurrentMember::from_membership(alice, acme.org.clone(), membership);
         let login = only_login(&ctx).await;
@@ -742,7 +819,7 @@ async fn removing_someone_lists_the_logins_to_change() {
             .min()
             .unwrap();
         assert_eq!(
-            unlock(&request, &acme.dave, USER_PASSWORD)
+            unlock_for(&request, &acme.dave, USER_PASSWORD, id)
                 .await
                 .status_code(),
             200
@@ -839,18 +916,29 @@ async fn removing_someone_lists_the_logins_to_change() {
 async fn a_folder_with_a_login_cannot_be_deleted() {
     request::<App, _, _>(|request, ctx| async move {
         let acme = acme(&request, &ctx).await;
-        add(&request, &acme.alice, acme.folder.id, &[]).await;
+        let accounts = folders::Model::create(
+            &ctx.db,
+            acme.org.id,
+            user_id(&ctx, "alice@example.com").await,
+            &folders::FolderParams {
+                name: "Accounts".to_string(),
+                note: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+        add(&request, &acme.alice, accounts.id, &[]).await;
         let res = post(
             &request,
             &acme.alice,
-            &format!("/documents/folders/{}/delete", acme.folder.id),
+            &format!("/documents/folders/{}/delete", accounts.id),
             &[],
         )
         .await;
         assert_eq!(res.status_code(), 422);
         assert!(res.text().contains("Only empty folders can be deleted."));
         assert!(
-            folders::Model::find_in_org(&ctx.db, acme.org.id, acme.folder.id)
+            folders::Model::find_in_org(&ctx.db, acme.org.id, accounts.id)
                 .await
                 .is_ok()
         );
@@ -997,8 +1085,11 @@ async fn the_logins_folder_takes_no_files() {
             .add_header(acme.bob.0.clone(), acme.bob.1.clone())
             .await
             .text();
-        assert!(page.contains("Owners and admins add shared logins here."));
         assert!(!page.contains("data-upload"));
+        assert!(
+            page.contains("Only owners and admins can see this folder."),
+            "members can't open Logins"
+        );
     })
     .await;
 }
