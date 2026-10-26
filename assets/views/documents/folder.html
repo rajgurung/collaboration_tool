@@ -53,7 +53,7 @@
     <div class="list">
       <button type="button" class="add-row" data-pick="photo"><span class="tile">{{<icon name="camera" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Photo</span><span class="meta block">Take one, or pick from your photos</span></span></button>
       <button type="button" class="add-row" data-pick="file"><span class="tile">{{<icon name="paperclip" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">File</span><span class="meta block">PDF, Word, Excel or PowerPoint</span></span></button>
-      {% if me.can_manage %}<button type="button" class="add-row" data-dialog-open="new-login-title"><span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Login</span><span class="meta block">Username, password and notes. The password is kept locked.</span></span></button>{% endif %}
+      {% if me.can_manage and not folder.is_shared %}<button type="button" class="add-row" data-dialog-open="new-login-title"><span class="tile tile-key">{{<icon name="key" class="h-5 w-5"/>}}</span><span class="min-w-0 flex-1"><span class="name block">Login</span><span class="meta block">Username, password and notes. The password is kept locked.</span></span></button>{% endif %}
     </div>
     <p class="meta m-0">Up to 25 MB each. {% if folder.is_shared %}Everyone in {{ org.name }} can open what you add.{% else %}Only owners and admins can open what you add here.{% endif %}</p>
   </div>

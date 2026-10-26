@@ -7,7 +7,8 @@ pub struct Migration;
 pub const SHARED_NOTE: &str =
     "Photos and files for the whole team. Everyone can open them and add to them.";
 
-/// Moves any ordinary folder called "Shared" out of the way, as "Shared
+/// Marks a Shared folder left by an earlier down migration as built in
+/// again. Moves any other folder called "Shared" out of the way, as "Shared
 /// (old)", or "Shared (old 2)" and so on if that is taken, so the unique name
 /// index can't fail. Then gives every organisation without one its built-in
 /// Shared folder. Safe to run again.
@@ -21,6 +22,13 @@ DECLARE
   candidate text;
   n int;
 BEGIN
+  -- A Shared left by an earlier down migration is ours: mark it again so
+  -- members keep its files. The name index allows one per organisation.
+  UPDATE folders d SET kind = 'shared'
+  WHERE d.name = 'Shared' AND d.note = '{SHARED_NOTE}' AND d.kind IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM folders s WHERE s.organisation_id = d.organisation_id AND s.kind = 'shared'
+    );
   FOR f IN
     SELECT id, organisation_id FROM folders
     WHERE lower(name) = 'shared' AND kind IS NULL ORDER BY id
@@ -63,11 +71,12 @@ CREATE UNIQUE INDEX "idx-folders-org-shared" ON folders (organisation_id) WHERE 
 
     /// Drops the index and the column. The Shared folders stay, as ordinary
     /// folders called "Shared", and renamed "Shared (old)" folders keep
-    /// their new names.
+    /// their new names. Running up again marks those Shared folders again.
     async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
         m.get_connection()
             .execute_unprepared(
-                r#"DROP INDEX "idx-folders-org-shared";
+                r#"SET LOCAL lock_timeout = '5s';
+DROP INDEX "idx-folders-org-shared";
 ALTER TABLE folders DROP COLUMN kind;"#,
             )
             .await?;

@@ -190,6 +190,33 @@ mod shared {
 
     #[tokio::test]
     #[serial]
+    async fn the_backfill_after_a_down_migration_keeps_the_same_shared_folder() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let (org_id, _) = org(ctx, "Juniper").await;
+        let before = folders::Model::shared(&ctx.db, org_id).await.unwrap();
+        // Down drops the column; up adds it back empty.
+        ctx.db
+            .execute_unprepared("UPDATE folders SET kind = NULL")
+            .await
+            .unwrap();
+        let sql = migration::m20261027_090000_add_kind_to_folders::backfill_sql();
+        ctx.db.execute_unprepared(&sql).await.unwrap();
+
+        let after = folders::Model::shared(&ctx.db, org_id).await.unwrap();
+        assert_eq!(after.id, before.id);
+        assert_eq!(
+            names(ctx, org_id).await,
+            vec![
+                ("Company".to_string(), None),
+                ("Logins".to_string(), None),
+                ("Shared".to_string(), Some("shared".to_string())),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn built_in_folders_keep_their_names_and_stay() {
         let boot = boot_test::<App>().await.unwrap();
         let ctx = &boot.app_context;

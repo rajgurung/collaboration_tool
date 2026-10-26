@@ -2,8 +2,8 @@
   {% if built_in %}
   <label class="field">
     <span class="field-label">Name</span>
-    <input class="input" type="text" name="name" value="{{ values.name }}" readonly aria-describedby="{{ form_id }}-name-hint">
-    <span class="field-hint" id="{{ form_id }}-name-hint">Built-in folders keep their name.</span>
+    <input class="input" type="text" name="name" value="{{ values.name }}" readonly aria-describedby="{{ form_id }}-name-hint"{% if errors.name %} aria-invalid="true"{% endif %}>
+    {% if errors.name %}<span class="field-error" id="{{ form_id }}-name-hint">{{ errors.name }}</span>{% else %}<span class="field-hint" id="{{ form_id }}-name-hint">Built-in folders keep their name.</span>{% endif %}
   </label>
   {% else %}
   {{<text_field name="name" label="Name" value={values.name} error={errors.name | default(value="")}/>}}

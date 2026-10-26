@@ -12,7 +12,7 @@ use loco_rs::{
     testing::prelude::*,
     TestServer,
 };
-use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, IntoActiveModel};
 use serial_test::serial;
 
 use super::{
@@ -328,6 +328,18 @@ async fn members_see_shared_and_the_logins_they_are_named_on() {
         .await;
         assert_eq!(res.status_code(), 200);
         assert!(res.text().contains("Leo price list.pdf"));
+        // Managers get no Login row in Shared's Add sheet: logins can't go there.
+        for who in [maya, ana] {
+            let body = get(
+                &request,
+                who,
+                &format!("/documents/folders/{}", d.shared.id),
+            )
+            .await
+            .text();
+            assert!(body.contains("add-title"));
+            assert!(!body.contains("new-login-title"), "{body}");
+        }
         for folder in [&d.company, &d.logins] {
             let path = format!("/documents/folders/{}", folder.id);
             let res = get(&request, tom, &path).await;
@@ -723,6 +735,50 @@ async fn members_delete_their_general_photos_through_chat_not_documents() {
             .await
             .unwrap()
             .is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn members_lose_a_login_once_unnamed_and_never_see_one_in_shared() {
+    request::<App, _, _>(|request, ctx| async move {
+        let d = docs(&request, &ctx).await;
+        let (tom, maya, ana) = (&d.team.tom, &d.team.maya, &d.team.ana);
+        let sheet = format!("/documents/logins/{}", d.courier);
+        assert_eq!(get_hx(&request, tom, &sheet).await.status_code(), 200);
+
+        // Ana takes Tom off the courier login.
+        let folder_id = d.logins.id.to_string();
+        moved_on(
+            &post(
+                &request,
+                ana,
+                &sheet,
+                &[
+                    ("title", "Courier"),
+                    ("username", "courier@example.com"),
+                    ("folder_id", folder_id.as_str()),
+                ],
+            )
+            .await,
+        );
+        refused(&get_hx(&request, tom, &sheet).await, LOGIN_CLOSED);
+
+        // A login moved into Shared by hand stays out of members' sight.
+        let mut bank = logins::Entity::find_by_id(d.bank)
+            .one(&ctx.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        bank.folder_id = ActiveValue::Set(d.shared.id);
+        bank.update(&ctx.db).await.unwrap();
+        let shared = format!("/documents/folders/{}", d.shared.id);
+        let body = get(&request, tom, &shared).await.text();
+        assert!(body.contains("Leo price list.pdf"));
+        assert!(!body.contains("Bank"), "{body}");
+        assert!(get(&request, maya, &shared).await.text().contains("Bank"));
     })
     .await;
 }

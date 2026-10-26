@@ -961,6 +961,26 @@ async fn only_owners_and_admins_delete_tasks() {
             .contains("Only owners and admins can delete tasks."));
         assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
 
+        // A super admin acting in Juniper: no Delete, and a 403.
+        let admin = super::admin::super_admin_cookie(&request, &ctx).await;
+        let acting = format!("{}; acting_org={}", admin.1.to_str().unwrap(), team.org_id);
+        let res = request
+            .get(&team.tom.at(&format!("/tasks/{}", task.id)))
+            .add_header("cookie", acting.clone())
+            .add_header("HX-Request", "true")
+            .await;
+        assert_eq!(res.status_code(), 200);
+        assert!(res.text().contains("Order tins"));
+        assert!(!res.text().contains("Delete task"));
+        let res = request
+            .post(&team.tom.at(&format!("/tasks/{}/delete", task.id)))
+            .add_header("cookie", acting)
+            .add_header("x-org-id", team.org_id.to_string())
+            .add_header("HX-Request", "true")
+            .await;
+        assert_eq!(res.status_code(), 403);
+        assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 1);
+
         assert!(sheet(&team.maya).await.text().contains("Delete task"));
         assert_eq!(delete(&team.maya).await.status_code(), 200);
         assert_eq!(tasks::Entity::find().count(&ctx.db).await.unwrap(), 0);

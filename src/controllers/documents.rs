@@ -234,7 +234,12 @@ async fn files_data(
     let names = names(ctx, member).await?;
     let open = folder.open_to(member.can_manage());
     let files = documents::Model::for_folder(&ctx.db, member.org.id, folder.id).await?;
-    let logins = logins::Model::for_folder(&ctx.db, member.org.id, folder.id).await?;
+    // Members never see logins here, even one that reached Shared by hand.
+    let logins = if member.can_manage() {
+        logins::Model::for_folder(&ctx.db, member.org.id, folder.id).await?
+    } else {
+        Vec::new()
+    };
     let count = item_count(files.len() as u64, logins.len() as u64);
     let mut items: Vec<(DateTime<FixedOffset>, Item)> = files
         .into_iter()

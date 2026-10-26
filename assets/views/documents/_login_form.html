@@ -46,7 +46,7 @@
   <label class="field">
     <span class="field-label">Notes</span>
     <textarea class="input" name="notes" rows="2" maxlength="2000" {% if form.errors.notes %}aria-invalid="true"{% endif %}>{{ form.values.notes }}</textarea>
-    {% if form.errors.notes %}<span class="field-error">{{ form.errors.notes }}</span>{% else %}<span class="field-hint">Visible to every member. Not encrypted, so never put passwords here.</span>{% endif %}
+    {% if form.errors.notes %}<span class="field-error">{{ form.errors.notes }}</span>{% else %}<span class="field-hint">Visible to owners, admins and the people named here. Not encrypted, so never put passwords here.</span>{% endif %}
   </label>
   {% if form.editing %}
   <label class="field">
