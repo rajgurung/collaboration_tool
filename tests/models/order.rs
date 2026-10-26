@@ -398,9 +398,15 @@ async fn projects_move_inside_and_across_lanes() {
         .unwrap()[0]
         .1
         .id;
-    projects::Model::close(&ctx.db, org_id, gift.id, ana, true)
-        .await
-        .unwrap();
+    projects::Model::close(
+        &ctx.db,
+        org_id,
+        gift.id,
+        ana,
+        projects::CloseScope::Everything,
+    )
+    .await
+    .unwrap();
     assert!(matches!(
         projects::Model::move_to(&ctx.db, org_id, gift.id, "next", Place::End).await,
         Ok(Err(MoveRefusal::Closed(_)))
@@ -428,6 +434,7 @@ async fn other_lane_changes_go_to_the_bottom() {
             &ctx.db,
             &project_params("Instagram shop", "now"),
             OwnerRights::Any,
+            true,
         )
         .await
         .unwrap();
@@ -451,6 +458,7 @@ async fn other_lane_changes_go_to_the_bottom() {
             &ctx.db,
             &project_params("Instagram shop 2", "now"),
             OwnerRights::Any,
+            true,
         )
         .await
         .unwrap();
@@ -634,8 +642,9 @@ async fn a_close_waits_for_a_move() {
     let (conn, moving) = hold_order_lock(ctx, "tasks", org_id).await;
     let db = ctx.db.clone();
     let id = website.id;
-    let close =
-        tokio::spawn(async move { projects::Model::close(&db, org_id, id, ana, true).await });
+    let close = tokio::spawn(async move {
+        projects::Model::close(&db, org_id, id, ana, projects::CloseScope::Everything).await
+    });
     assert_waiting(&close, &conn).await;
     moving.commit().await.unwrap();
     let closed = close.await.unwrap().unwrap().unwrap();

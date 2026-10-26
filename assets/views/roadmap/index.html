@@ -4,10 +4,12 @@
 {# Reorder mode carries over a phone lane switch (`?reorder=1`). #}
 {% block body_attrs %}{% if reordering %} data-reordering="roadmap"{% endif %}{% endblock body_attrs %}
 {% block actions %}
+{% if can_plan %}
 <button type="button" class="reorder-btn desktop-only" data-reorder-start="roadmap">{{<icon name="arrow-up-down" class="h-4 w-4"/>}}Reorder</button>
 <button type="button" class="btn btn-primary"
         hx-get="{{ org_url(path="/roadmap/projects/new") }}" hx-target="#project-dialog-body"
         hx-on::after-request="document.getElementById('project-dialog').showModal()">{{<icon name="plus" class="h-4 w-4"/>}}Project</button>
+{% endif %}
 {% endblock actions %}
 {% block content %}
 {% include "roadmap/_lane.html" %}

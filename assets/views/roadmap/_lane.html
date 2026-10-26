@@ -13,7 +13,7 @@
       </header>
       <div class="lane-hint mobile-only">
         <p class="meta m-0 flex-1 px-1 text-sm">{% if l.key == "done" %}Finished projects{% else %}{{ l.hint }}{% endif %}</p>
-        {% if l.key == "done" %}<span class="meta pr-1 font-semibold">Newest first</span>{% else %}<button type="button" class="reorder-btn" data-reorder-start="roadmap">{{<icon name="arrow-up-down" class="h-4 w-4"/>}}Reorder</button>{% endif %}
+        {% if l.key == "done" %}<span class="meta pr-1 font-semibold">Newest first</span>{% elif can_plan %}<button type="button" class="reorder-btn" data-reorder-start="roadmap">{{<icon name="arrow-up-down" class="h-4 w-4"/>}}Reorder</button>{% endif %}
       </div>
       <div class="roadmap-cards" data-drop-lane="{{ l.key }}">
         {% if l.key == "done" %}
@@ -50,13 +50,13 @@
         {% endif %}
         {% else %}
         {% for card in l.cards %}
-        <article class="roadmap-card" style="--accent-bar: {{ card.accent }}" draggable="true"
+        <article class="roadmap-card" style="--accent-bar: {{ card.accent }}"{% if can_plan %} draggable="true"{% endif %}
                  data-project-id="{{ card.id }}" data-card-lane="{{ l.key }}" data-name="{{ card.name }}"{% if card.can_close %} data-can-close{% endif %}>
           <div class="flex items-center gap-2.5">
             <h3 class="truncate-1 m-0 flex-1 text-base font-bold">{{ card.name }}</h3>
-            <button type="button" class="icon-btn -my-2 -mr-2 h-9 w-9 text-muted" aria-label="Edit {{ card.name }}"
+            {% if card.can_edit %}<button type="button" class="icon-btn -my-2 -mr-2 h-9 w-9 text-muted" aria-label="Edit {{ card.name }}"
                     hx-get="{{ org_url(path="/roadmap/projects/" ~ (card.id) ~ "/edit") }}" hx-target="#project-dialog-body"
-                    hx-on::after-request="if (event.detail.successful) document.getElementById('project-dialog').showModal()">{{<icon name="pencil" class="h-4 w-4"/>}}</button>
+                    hx-on::after-request="if (event.detail.successful) document.getElementById('project-dialog').showModal()">{{<icon name="pencil" class="h-4 w-4"/>}}</button>{% endif %}
           </div>
           {% if card.summary %}<p class="m-0 text-sm leading-relaxed text-muted">{{ card.summary }}</p>{% endif %}
           <div class="flex items-center gap-2.5">

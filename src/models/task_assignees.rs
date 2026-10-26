@@ -43,6 +43,31 @@ impl Model {
         Ok(map)
     }
 
+    /// The assignees of these tasks, as [`Self::by_task`]. No ids, no query.
+    ///
+    /// # Errors
+    /// On database errors.
+    pub async fn for_tasks<C: ConnectionTrait>(
+        db: &C,
+        org_id: i64,
+        task_ids: &[i64],
+    ) -> ModelResult<HashMap<i64, Vec<i64>>> {
+        let mut map: HashMap<i64, Vec<i64>> = HashMap::new();
+        if task_ids.is_empty() {
+            return Ok(map);
+        }
+        for row in Entity::find()
+            .in_tenant(org_id)
+            .filter(Column::TaskId.is_in(task_ids.iter().copied()))
+            .order_by_asc(Column::Id)
+            .all(db)
+            .await?
+        {
+            map.entry(row.task_id).or_default().push(row.user_id);
+        }
+        Ok(map)
+    }
+
     /// # Errors
     /// On database errors.
     pub async fn for_task<C: ConnectionTrait>(

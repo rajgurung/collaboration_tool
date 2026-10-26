@@ -128,9 +128,15 @@ pub(super) async fn task_in(
 /// Closes a project through the model, as the owner.
 async fn close(ctx: &AppContext, owner: &TestMember, project: &projects::Model) {
     let user = owner_id(ctx, owner).await;
-    projects::Model::close(&ctx.db, owner.org_id, project.id, user, true)
-        .await
-        .unwrap();
+    projects::Model::close(
+        &ctx.db,
+        owner.org_id,
+        project.id,
+        user,
+        projects::CloseScope::Everything,
+    )
+    .await
+    .unwrap();
 }
 
 async fn owner_id(ctx: &AppContext, owner: &TestMember) -> i64 {
@@ -621,7 +627,7 @@ async fn the_box_and_reopen_show_only_to_those_allowed() {
         let shop = owned_by(&ctx, &shop, tom_id).await;
         close(&ctx, &ana, &shop).await;
 
-        for (who, allowed) in [(&ana, true), (&maya, true), (&tom, true), (&leo, false)] {
+        for (who, allowed) in [(&ana, true), (&maya, true), (&tom, true)] {
             let sheet = get(
                 &request,
                 who,
@@ -634,6 +640,14 @@ async fn the_box_and_reopen_show_only_to_those_allowed() {
             assert_eq!(done_column(&roadmap).contains("data-reopen"), allowed);
             assert!(done_column(&roadmap).contains("Shop till upgrade"));
         }
+        // Leo can't open the sheet at all, nor reopen.
+        let sheet = request
+            .get(&leo.at(&format!("/roadmap/projects/{}/edit", website.id)))
+            .as_member(&leo)
+            .await;
+        assert_eq!(sheet.status_code(), 403);
+        let roadmap = get(&request, &leo, "/roadmap").await;
+        assert!(!done_column(&roadmap).contains("data-reopen"));
     })
     .await;
 }
@@ -1353,8 +1367,11 @@ async fn dragging_a_card_moves_it_to_that_lane() {
         let (tom_member, _) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
         let website = project_in(&ctx, ORG, "Website").await;
 
-        // Any member can move it, as with the edit sheet.
-        let (status, trigger) = drag(&request, &tom_member, &website, "next").await;
+        // Only owners and admins move it.
+        let (status, _) = drag(&request, &tom_member, &website, "next").await;
+        assert_eq!(status, 403);
+        assert!(find(&ctx, &website).await.in_lane("now"));
+        let (status, trigger) = drag(&request, &ana, &website, "next").await;
         assert_eq!(status, 200);
         assert!(trigger.contains("Website moved to Next."), "{trigger}");
         assert!(trigger.contains("roadmap-changed"));
@@ -1437,6 +1454,295 @@ async fn org_a_cannot_drag_org_b_projects() {
         let (status, _) = drag(&request, &ana, &theirs, "later").await;
         assert_eq!(status, 404);
         assert!(find(&ctx, &theirs).await.in_lane("now"));
+    })
+    .await;
+}
+
+/// Close guard: a project owner who isn't a manager closes only their own
+/// and unassigned tasks.
+async fn sheet(request: &TestServer, who: &TestMember, project: &projects::Model) -> String {
+    get(
+        request,
+        who,
+        &format!("/roadmap/projects/{}/edit", project.id),
+    )
+    .await
+}
+
+async fn bodies(ctx: &AppContext, user: i64) -> Vec<String> {
+    notices(ctx)
+        .await
+        .into_iter()
+        .filter(|n| n.user_id == user)
+        .map(|n| n.body)
+        .collect()
+}
+
+async fn take_off_team(ctx: &AppContext, user: i64) {
+    let mut m = memberships::Entity::find()
+        .filter(memberships::Column::UserId.eq(user))
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into_active_model();
+    m.status = ActiveValue::Set(memberships::status::REMOVED.to_string());
+    m.update(&ctx.db).await.unwrap();
+}
+
+async fn clear_notices(ctx: &AppContext) {
+    notifications::Entity::delete_many()
+        .exec(&ctx.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn a_member_owner_closes_only_their_own_work() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let ana_user = ana_id(&ctx).await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let (_, maya) = teammate(&request, &ctx, "maya", memberships::role::MEMBER).await;
+        let (_, leo) = teammate(&request, &ctx, "leo", memberships::role::MEMBER).await;
+        let spring = project_in(&ctx, ORG, "Spring clean").await;
+        own(&ctx, &spring, &[tom_id, leo]).await;
+        let pid = Some(spring.id);
+        let org = ana.org_id;
+        let sweep = task_in(&ctx, org, pid, "Sweep the shop", "todo", &[tom_id]).await;
+        let tins = task_in(&ctx, org, pid, "Order tins", "progress", &[ana_user]).await;
+        let prices = task_in(&ctx, org, pid, "Price list", "todo", &[ana_user]).await;
+        let labels = task_in(&ctx, org, pid, "Shelf labels", "blocked", &[maya, tom_id]).await;
+        clear_notices(&ctx).await;
+
+        // Ana, the organisation's owner, would close everything.
+        let hers = sheet(&request, &ana, &spring).await;
+        assert!(
+            hers.contains("Its 4 open tasks are marked done with it."),
+            "{hers}"
+        );
+
+        let his = sheet(&request, &tom, &spring).await;
+        assert!(
+            his.contains("1 open task is marked done with it. 3 assigned to others stay open."),
+            "{his}"
+        );
+        assert!(
+            his.contains("1 open task will be marked done. 3 assigned to ana and maya stay open."),
+            "{his}"
+        );
+        assert!(his.contains("ana, maya and leo get a notice."), "{his}");
+
+        let (status, toast) = act(&request, &tom, &spring, "close").await;
+        assert_eq!(status, 200);
+        assert!(
+            toast.contains("Spring clean done. 1 task closed, 3 left open."),
+            "{toast}"
+        );
+        assert!(find(&ctx, &spring).await.is_closed());
+        assert_eq!(reload(&ctx, &sweep).await.status, "done");
+        for t in [&tins, &prices, &labels] {
+            assert_eq!(&reload(&ctx, t).await, t, "{} is untouched", t.title);
+        }
+
+        assert_eq!(
+            bodies(&ctx, ana_user).await,
+            ["marked Spring clean done\n2 of your tasks left open"]
+        );
+        assert_eq!(
+            bodies(&ctx, maya).await,
+            ["marked Spring clean done\n1 of your tasks left open"]
+        );
+        assert_eq!(
+            bodies(&ctx, leo).await,
+            ["marked Spring clean done\n1 task closed, 3 left open"],
+            "a co-owner with no tasks hears the totals"
+        );
+        assert!(bodies(&ctx, tom_id).await.is_empty());
+        assert!(notices(&ctx).await.iter().all(|n| n.kind == "closed"));
+
+        let roadmap = get(&request, &tom, "/roadmap?lane=done").await;
+        assert!(done_column(&roadmap).contains("3 open tasks"), "{roadmap}");
+
+        let (_, toast) = act(&request, &tom, &spring, "reopen").await;
+        assert!(toast.contains("1 task reopened."), "{toast}");
+        assert_eq!(reload(&ctx, &sweep).await.status, "todo");
+        for t in [&tins, &prices, &labels] {
+            assert_eq!(&reload(&ctx, t).await, t, "{} is untouched", t.title);
+        }
+    })
+    .await;
+}
+
+/// Leo's project holds only his and unassigned tasks: today's copy.
+#[tokio::test]
+#[serial]
+async fn a_member_owner_with_only_their_own_work_sees_todays_close() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let (leo, leo_id) = teammate(&request, &ctx, "leo", memberships::role::MEMBER).await;
+        let tins = owned_by(&ctx, &project_in(&ctx, ORG, "Tins").await, leo_id).await;
+        let pid = Some(tins.id);
+        task_in(&ctx, ana.org_id, pid, "Order lids", "todo", &[leo_id]).await;
+        task_in(&ctx, ana.org_id, pid, "Labels", "blocked", &[]).await;
+
+        let his = sheet(&request, &leo, &tins).await;
+        assert!(
+            his.contains("Its 2 open tasks are marked done with it."),
+            "{his}"
+        );
+        assert!(his.contains("2 open tasks will be marked done. 1 is blocked."));
+        assert!(!his.contains("stay open"));
+        let (_, toast) = act(&request, &leo, &tins, "close").await;
+        assert!(toast.contains("Tins done. 2 tasks closed."), "{toast}");
+    })
+    .await;
+}
+
+/// Nothing of Tom's in it: nothing is marked done, and the singular copy.
+/// Leo co-owns it and has a task left open: one notice, not two.
+#[tokio::test]
+#[serial]
+async fn nothing_of_the_closers_is_closed_and_the_copy_is_singular() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let ana_user = ana_id(&ctx).await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let (_, leo) = teammate(&request, &ctx, "leo", memberships::role::MEMBER).await;
+        let spring = project_in(&ctx, ORG, "Spring clean").await;
+        own(&ctx, &spring, &[tom_id, leo, ana_user]).await;
+        let pid = Some(spring.id);
+        let kept = task_in(&ctx, ana.org_id, pid, "Order tins", "todo", &[leo]).await;
+        clear_notices(&ctx).await;
+
+        let his = sheet(&request, &tom, &spring).await;
+        assert!(
+            his.contains("No tasks are marked done. 1 assigned to others stays open."),
+            "{his}"
+        );
+        assert!(his.contains("No tasks are marked done. 1 assigned to leo stays open."));
+        let (_, toast) = act(&request, &tom, &spring, "close").await;
+        assert!(
+            toast.contains("Spring clean done. 1 task left open."),
+            "{toast}"
+        );
+        assert_eq!(&reload(&ctx, &kept).await, &kept);
+        assert_eq!(
+            bodies(&ctx, leo).await,
+            ["marked Spring clean done\n1 of your tasks left open"],
+            "the left-open notice only, not the owners' total"
+        );
+        assert_eq!(
+            bodies(&ctx, ana_user).await,
+            ["marked Spring clean done\n1 task left open"]
+        );
+
+        // One closed and one left open.
+        act(&request, &tom, &spring, "reopen").await;
+        task_in(&ctx, ana.org_id, pid, "Sweep", "todo", &[tom_id]).await;
+        clear_notices(&ctx).await;
+        let (_, toast) = act(&request, &tom, &spring, "close").await;
+        assert!(
+            toast.contains("Spring clean done. 1 task closed, 1 left open."),
+            "{toast}"
+        );
+        assert_eq!(
+            bodies(&ctx, ana_user).await,
+            ["marked Spring clean done\n1 task closed, 1 left open"]
+        );
+    })
+    .await;
+}
+
+/// A task whose only assignee was taken off the team stays open, and they
+/// hear nothing. With a team member on kept tasks too: "ana and others".
+#[tokio::test]
+#[serial]
+async fn a_removed_members_task_stays_open() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let ana_user = ana_id(&ctx).await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let (_, maya) = teammate(&request, &ctx, "maya", memberships::role::MEMBER).await;
+        let spring = owned_by(&ctx, &project_in(&ctx, ORG, "Spring clean").await, tom_id).await;
+        let pid = Some(spring.id);
+        let mayas = task_in(&ctx, ana.org_id, pid, "Shelf labels", "todo", &[maya]).await;
+        take_off_team(&ctx, maya).await;
+        clear_notices(&ctx).await;
+
+        let his = sheet(&request, &tom, &spring).await;
+        assert!(
+            his.contains("No tasks are marked done. 1 assigned to others stays open."),
+            "{his}"
+        );
+
+        task_in(&ctx, ana.org_id, pid, "Order tins", "todo", &[ana_user]).await;
+        let his = sheet(&request, &tom, &spring).await;
+        assert!(
+            his.contains("2 assigned to ana and others stay open."),
+            "{his}"
+        );
+
+        let (_, toast) = act(&request, &tom, &spring, "close").await;
+        assert!(
+            toast.contains("Spring clean done. 2 tasks left open."),
+            "{toast}"
+        );
+        assert_eq!(&reload(&ctx, &mayas).await, &mayas);
+        assert!(bodies(&ctx, maya).await.is_empty());
+    })
+    .await;
+}
+
+/// Taking someone off a task tells them. So a member owner who takes Ana
+/// off one task and then closes does it in the open: only that task closes.
+#[tokio::test]
+#[serial]
+async fn taking_someone_off_a_task_tells_them() {
+    request::<App, _, _>(|request, ctx| async move {
+        let ana = sign_up_member(&request, "Juniper Tea Co", "ana", "ana@example.com").await;
+        let ana_user = ana_id(&ctx).await;
+        let (tom, tom_id) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
+        let spring = owned_by(&ctx, &project_in(&ctx, ORG, "Spring clean").await, tom_id).await;
+        let pid = Some(spring.id);
+        let tins = task_in(&ctx, ana.org_id, pid, "Order tins", "todo", &[ana_user]).await;
+        let prices = task_in(&ctx, ana.org_id, pid, "Price list", "todo", &[ana_user]).await;
+        clear_notices(&ctx).await;
+
+        // Tom swaps Ana for himself on Order tins.
+        let res = request
+            .post(&tom.at(&format!("/tasks/{}", tins.id)))
+            .as_member(&tom)
+            .add_header("HX-Request", "true")
+            .form(&task_form("Order tins", spring.id, &tom_id.to_string()))
+            .await;
+        assert!(res.status_code().is_success(), "{}", res.text());
+        let hers: Vec<notifications::Model> = notices(&ctx)
+            .await
+            .into_iter()
+            .filter(|n| n.user_id == ana_user)
+            .collect();
+        assert_eq!(hers.len(), 1);
+        assert_eq!(hers[0].body, "took you off “Order tins”");
+        assert_eq!(hers[0].kind, "assigned");
+        assert_eq!(hers[0].actor_id, Some(tom_id));
+        assert!(bodies(&ctx, tom_id).await.is_empty(), "not the actor");
+
+        let (_, toast) = act(&request, &tom, &spring, "close").await;
+        assert!(
+            toast.contains("Spring clean done. 1 task closed, 1 left open."),
+            "{toast}"
+        );
+        assert_eq!(reload(&ctx, &tins).await.status, "done");
+        assert_eq!(&reload(&ctx, &prices).await, &prices);
+        assert_eq!(
+            bodies(&ctx, ana_user).await,
+            [
+                "took you off “Order tins”",
+                "marked Spring clean done\n1 of your tasks left open"
+            ]
+        );
     })
     .await;
 }

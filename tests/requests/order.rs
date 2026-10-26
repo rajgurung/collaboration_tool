@@ -304,7 +304,7 @@ async fn the_roadmap_order_shows_everywhere() {
 
         let (status, trigger) = move_project(
             &request,
-            &t.leo,
+            &t.maya,
             &shop,
             json!({ "lane": "now", "before": website.id }),
         )
@@ -330,10 +330,10 @@ async fn the_roadmap_order_shows_everywhere() {
 
         // Across lanes, before a card there.
         let spring = project_in(&ctx, ORG, "Spring blend").await;
-        move_project(&request, &t.leo, &spring, json!({ "lane": "next" })).await;
+        move_project(&request, &t.maya, &spring, json!({ "lane": "next" })).await;
         let (status, _) = move_project(
             &request,
-            &t.leo,
+            &t.maya,
             &website,
             json!({ "lane": "next", "before": spring.id }),
         )
@@ -359,12 +359,18 @@ async fn a_closed_project_and_the_old_routes() {
         let website = project_in(&ctx, ORG, "Website").await;
         let shop = project_in(&ctx, ORG, "Instagram shop").await;
         let europe = project_in(&ctx, ORG, "Ship to Europe").await;
-        move_project(&request, &t.tom, &europe, json!({ "lane": "later" })).await;
-        projects::Model::close(&ctx.db, t.org_id, website.id, t.ana_id, true)
-            .await
-            .unwrap();
+        move_project(&request, &t.maya, &europe, json!({ "lane": "later" })).await;
+        projects::Model::close(
+            &ctx.db,
+            t.org_id,
+            website.id,
+            t.ana_id,
+            projects::CloseScope::Everything,
+        )
+        .await
+        .unwrap();
         let (status, trigger) =
-            move_project(&request, &t.tom, &website, json!({ "lane": "now" })).await;
+            move_project(&request, &t.maya, &website, json!({ "lane": "now" })).await;
         assert_eq!(status, 409);
         assert!(
             trigger.contains("Website is done. Reopen the project first."),
@@ -373,8 +379,8 @@ async fn a_closed_project_and_the_old_routes() {
 
         // The old lane route, from tabs drawn before the deploy: the bottom.
         let res = request
-            .post(&t.tom.at(&format!("/roadmap/projects/{}/lane", shop.id)))
-            .as_member(&t.tom)
+            .post(&t.maya.at(&format!("/roadmap/projects/{}/lane", shop.id)))
+            .as_member(&t.maya)
             .add_header("HX-Request", "true")
             .form(&json!({ "lane": "later" }))
             .await;
@@ -555,14 +561,19 @@ async fn reorder_mode_survives_a_lane_switch() {
     request::<App, _, _>(|request, ctx| async move {
         let t = juniper(&request, &ctx).await;
         project_in(&ctx, ORG, "Website").await;
-        let plain = page(&request, &t.leo, "/roadmap?lane=next").await;
+        let plain = page(&request, &t.maya, "/roadmap?lane=next").await;
         assert!(
             plain.contains("data-lane-switch"),
             "the links the client adds it to"
         );
         assert!(!plain.contains(r#"data-reordering="roadmap""#));
-        let switched = page(&request, &t.leo, "/roadmap?lane=now&reorder=1").await;
+        let switched = page(&request, &t.maya, "/roadmap?lane=now&reorder=1").await;
         assert!(switched.contains(r#"data-reordering="roadmap""#));
+        let member = page(&request, &t.leo, "/roadmap?lane=now&reorder=1").await;
+        assert!(
+            !member.contains(r#"data-reordering="roadmap""#),
+            "members don't reorder"
+        );
     })
     .await;
 }

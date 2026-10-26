@@ -6,7 +6,9 @@ use collab::{
     models::{
         _entities::projects,
         organisations::{self, SignupParams},
-        projects::{self as project_model, ProjectParams},
+        project_owners,
+        projects::{self as project_model, CloseScope, ProjectParams},
+        task_assignees,
         tasks::{self, TaskParams},
     },
 };
@@ -160,10 +162,16 @@ async fn close_marks_every_open_task_done() {
     let ctx = &boot.app_context;
     let w = website(ctx).await;
 
-    let closed = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap()
-        .unwrap();
+    let closed = project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(!closed.already);
     assert_eq!(closed.tasks.len(), 3);
     assert!(closed.project.closed_at.is_some());
@@ -194,19 +202,31 @@ async fn only_an_owner_or_admin_closes_or_reopens() {
     let ctx = &boot.app_context;
     let w = website(ctx).await;
     let id = w.project.id;
-    let close = project_model::Model::close(&ctx.db, w.org_id, id, w.user_id, false)
-        .await
-        .unwrap();
+    let close = project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        id,
+        w.user_id,
+        CloseScope::OwnWork(w.user_id),
+    )
+    .await
+    .unwrap();
     assert!(close.is_none());
     assert_eq!(reload(ctx, &w.todo).await.status, "todo");
 
     collab::models::project_owners::Model::replace(&ctx.db, w.org_id, id, &[w.user_id])
         .await
         .unwrap();
-    project_model::Model::close(&ctx.db, w.org_id, id, w.user_id, false)
-        .await
-        .unwrap()
-        .expect("an owner closes it");
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        id,
+        w.user_id,
+        CloseScope::OwnWork(w.user_id),
+    )
+    .await
+    .unwrap()
+    .expect("an owner closes it");
     collab::models::project_owners::Model::replace(&ctx.db, w.org_id, id, &[])
         .await
         .unwrap();
@@ -223,15 +243,27 @@ async fn close_twice_is_a_no_op() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    let first = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap()
-        .unwrap();
+    let first = project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
-    let second = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap()
-        .unwrap();
+    let second = project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(second.already);
     assert!(second.tasks.is_empty());
     assert_eq!(second.project.closed_at, first.project.closed_at);
@@ -250,9 +282,10 @@ async fn close_of_another_orgs_project_changes_nothing() {
     let w = website(ctx).await;
     let (globex, gina) = org(ctx, "Globex", "gina").await;
 
-    let err = project_model::Model::close(&ctx.db, globex, w.project.id, gina, true)
-        .await
-        .unwrap_err();
+    let err =
+        project_model::Model::close(&ctx.db, globex, w.project.id, gina, CloseScope::Everything)
+            .await
+            .unwrap_err();
     assert!(matches!(err, loco_rs::model::ModelError::EntityNotFound));
     let err = project_model::Model::reopen(&ctx.db, globex, w.project.id, 0, true)
         .await
@@ -274,9 +307,15 @@ async fn reopen_puts_each_task_back() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap();
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap();
 
     let reopened = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id, 0, true)
         .await
@@ -310,9 +349,15 @@ async fn a_task_changed_since_is_left_alone() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap();
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap();
     // Set back to in progress, as a board drag does.
     reload(ctx, &w.todo)
         .await
@@ -344,9 +389,15 @@ async fn a_title_edit_does_not_count_as_a_change() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap();
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap();
 
     // Saved from the form with the status still done, and from a form that
     // leaves the status out.
@@ -380,9 +431,15 @@ async fn a_task_moved_out_keeps_no_saved_status() {
     let ctx = &boot.app_context;
     let w = website(ctx).await;
     let shop = project(ctx, w.org_id, "Shop").await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap();
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap();
 
     let moved = reload(ctx, &w.blocked)
         .await
@@ -391,9 +448,15 @@ async fn a_task_moved_out_keeps_no_saved_status() {
         .unwrap();
     assert_eq!(moved.status_before_close, None);
 
-    project_model::Model::close(&ctx.db, w.org_id, shop.id, w.user_id, true)
-        .await
-        .unwrap();
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        shop.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap();
     project_model::Model::reopen(&ctx.db, w.org_id, shop.id, 0, true)
         .await
         .unwrap();
@@ -412,9 +475,15 @@ async fn a_closed_project_takes_no_new_or_moved_tasks() {
     let w = website(ctx).await;
     let shop = project(ctx, w.org_id, "Shop").await;
     let elsewhere = task(ctx, w.org_id, shop.id, "Shelf labels", "todo", None).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
-        .await
-        .unwrap();
+    project_model::Model::close(
+        &ctx.db,
+        w.org_id,
+        w.project.id,
+        w.user_id,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap();
     let refusal = "Website is done. Reopen the project first.";
 
     let err = tasks::Model::create(
@@ -470,7 +539,14 @@ async fn a_task_added_during_a_close_is_closed_too() {
         .unwrap();
     let (org_id, project_id, user_id) = (w.org_id, w.project.id, w.user_id);
     let close = tokio::spawn(async move {
-        project_model::Model::close(&closing, org_id, project_id, user_id, true).await
+        project_model::Model::close(
+            &closing,
+            org_id,
+            project_id,
+            user_id,
+            CloseScope::Everything,
+        )
+        .await
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!close.is_finished(), "the close waits for the insert");
@@ -505,4 +581,165 @@ async fn a_task_added_during_a_close_is_closed_too() {
     .await
     .unwrap_err();
     assert!(format!("{err:?}").contains("Reopen the project first."));
+}
+
+/// Spring clean, owned by Tom (a project owner closing as a member), with
+/// his task, an unassigned one, Ana's, one shared by Tom and Ana, and one of
+/// Ana's done last week.
+struct SpringClean {
+    org_id: i64,
+    tom: i64,
+    project: project_model::Model,
+    his: tasks::Model,
+    unassigned: tasks::Model,
+    anas: tasks::Model,
+    shared: tasks::Model,
+    done: tasks::Model,
+}
+
+async fn spring_clean(ctx: &AppContext) -> SpringClean {
+    let (org_id, tom) = org(ctx, "Juniper Tea Co", "tom").await;
+    // Any user will do: the close reads assignees, not memberships.
+    let (_, ana) = org(ctx, "Elsewhere", "ana").await;
+    let project = project(ctx, org_id, "Spring clean").await;
+    project_owners::Model::replace(&ctx.db, org_id, project.id, &[tom])
+        .await
+        .unwrap();
+    let pid = project.id;
+    let assigned = |t: tasks::Model, ids: Vec<i64>| async move {
+        task_assignees::Model::replace(&ctx.db, org_id, t.id, &ids)
+            .await
+            .unwrap();
+        t
+    };
+    SpringClean {
+        his: assigned(
+            task(ctx, org_id, pid, "Sweep the shop", "todo", None).await,
+            vec![tom],
+        )
+        .await,
+        unassigned: task(ctx, org_id, pid, "Price list", "progress", None).await,
+        anas: assigned(
+            task(ctx, org_id, pid, "Order tins", "blocked", None).await,
+            vec![ana],
+        )
+        .await,
+        shared: assigned(
+            task(ctx, org_id, pid, "Shelf labels", "todo", None).await,
+            vec![tom, ana],
+        )
+        .await,
+        done: assigned(
+            task(ctx, org_id, pid, "Logo", "done", Some(last_week())).await,
+            vec![ana],
+        )
+        .await,
+        org_id,
+        tom,
+        project,
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn a_member_owner_closes_only_their_own_and_unassigned_tasks() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let s = spring_clean(ctx).await;
+
+    let closed = project_model::Model::close(
+        &ctx.db,
+        s.org_id,
+        s.project.id,
+        s.tom,
+        CloseScope::OwnWork(s.tom),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(closed.project.is_closed(), "the project closes either way");
+    let mut ids: Vec<i64> = closed.tasks.iter().map(|t| t.id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, [s.his.id, s.unassigned.id]);
+    let kept: Vec<i64> = closed.left_open.iter().map(|t| t.id).collect();
+    assert_eq!(kept, [s.anas.id, s.shared.id]);
+
+    for (t, status) in [(&s.his, "todo"), (&s.unassigned, "progress")] {
+        let after = reload(ctx, t).await;
+        assert_eq!(after.status, "done");
+        assert_eq!(after.status_before_close.as_deref(), Some(status));
+    }
+    for t in [&s.anas, &s.shared, &s.done] {
+        assert_eq!(&reload(ctx, t).await, t, "{} is untouched", t.title);
+    }
+
+    // A reopen puts back only what the close changed.
+    let reopened = project_model::Model::reopen(&ctx.db, s.org_id, s.project.id, s.tom, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reopened.tasks.len(), 2);
+    assert_eq!(reload(ctx, &s.his).await.status, "todo");
+    assert_eq!(reload(ctx, &s.unassigned).await.status, "progress");
+    for t in [&s.anas, &s.shared, &s.done] {
+        assert_eq!(&reload(ctx, t).await, t, "{} is untouched", t.title);
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn a_manager_closes_every_open_task() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let s = spring_clean(ctx).await;
+
+    let closed = project_model::Model::close(
+        &ctx.db,
+        s.org_id,
+        s.project.id,
+        s.tom,
+        CloseScope::Everything,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(closed.tasks.len(), 4);
+    assert!(closed.left_open.is_empty());
+    for t in [&s.his, &s.unassigned, &s.anas, &s.shared] {
+        assert_eq!(reload(ctx, t).await.status, "done");
+    }
+    assert_eq!(&reload(ctx, &s.done).await, &s.done);
+}
+
+/// With nothing of the closer's in it, the close changes no task at all:
+/// no fallback to every open task.
+#[tokio::test]
+#[serial]
+async fn a_member_close_with_every_task_kept_changes_no_task() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let s = spring_clean(ctx).await;
+    for t in [&s.his, &s.unassigned] {
+        tasks::Entity::delete_by_id(t.id)
+            .exec(&ctx.db)
+            .await
+            .unwrap();
+    }
+
+    let closed = project_model::Model::close(
+        &ctx.db,
+        s.org_id,
+        s.project.id,
+        s.tom,
+        CloseScope::OwnWork(s.tom),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(closed.project.is_closed());
+    assert!(closed.tasks.is_empty());
+    assert_eq!(closed.left_open.len(), 2);
+    for t in [&s.anas, &s.shared, &s.done] {
+        assert_eq!(&reload(ctx, t).await, t, "{} is untouched", t.title);
+    }
 }
