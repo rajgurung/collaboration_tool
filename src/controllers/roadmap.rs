@@ -34,7 +34,8 @@ use crate::{
 const FORM_ID: &str = "project-sheet";
 
 const ADD_REFUSAL: &str = "Only admins can add projects.";
-const MOVE_REFUSAL: &str = "Only admins can move projects between lanes.";
+const LANE_REFUSAL: &str = "Only admins can move projects between lanes.";
+const REORDER_REFUSAL: &str = "Only admins can reorder the roadmap.";
 
 #[derive(Debug, Default, Deserialize)]
 struct LaneQuery {
@@ -110,12 +111,10 @@ fn owners_of(ids: &[i64], team: &[Person]) -> Owners {
 
 /// Who may change a project's owners in an edit; see [`OwnerRights`].
 fn owner_rights(member: &CurrentMember) -> OwnerRights {
-    if member.acting {
-        OwnerRights::No
-    } else if member.can_manage() {
+    if member.can_manage() && !member.acting {
         OwnerRights::Any
     } else {
-        OwnerRights::IfOwner(member.user.id)
+        OwnerRights::No
     }
 }
 
@@ -391,8 +390,8 @@ async fn form_data(
     values: serde_json::Value,
     errors: &crate::views::forms::FieldErrors,
 ) -> Result<serde_json::Value> {
-    // A new project's maker picks its owners, unless a super admin acting.
-    let mut owners_locked = member.acting;
+    // Only managers pick owners, and not while a super admin is acting.
+    let owners_locked = owner_rights(member) == OwnerRights::No;
     // Only owners and admins move a project between lanes.
     let mut lane_locked = false;
     // For the edit form's delete confirm and "Made with Claude" line. Only a
@@ -401,7 +400,6 @@ async fn form_data(
         Some(id) => {
             let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
             let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
-            owners_locked = !owner_rights(member).allows(&owners);
             lane_locked = !member.can_manage();
             let close = if can_close(member, &owners) {
                 Some(close_data(ctx, member, &project, &owners).await?)
@@ -574,7 +572,7 @@ async fn move_project(
     Path(id): Path<i64>,
     Form(form): Form<MoveForm>,
 ) -> Result<Response> {
-    require_planner(&member, MOVE_REFUSAL)?;
+    require_planner(&member, REORDER_REFUSAL)?;
     let place = super::tasks::move_place(form.before, form.after)?;
     let project =
         match projects::Model::move_to(&ctx.db, member.org.id, id, &form.lane, place).await {
@@ -607,7 +605,7 @@ async fn move_lane(
     Path(id): Path<i64>,
     Form(form): Form<LaneForm>,
 ) -> Result<Response> {
-    require_planner(&member, MOVE_REFUSAL)?;
+    require_planner(&member, LANE_REFUSAL)?;
     if !LANES.contains(&form.to.as_str()) {
         return Err(Error::BadRequest("Choose now, next or later.".to_string()));
     }
@@ -893,8 +891,9 @@ async fn saved(
             let mut values = form_values(Some(params), None);
             // The owners were ignored, not saved: show the project's own.
             if let Some(id) = project_id {
-                let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
-                if !owner_rights(member).allows(&owners) {
+                if owner_rights(member) == OwnerRights::No {
+                    let owners =
+                        project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
                     values["owner_ids"] = serde_json::json!(owners);
                 }
             }

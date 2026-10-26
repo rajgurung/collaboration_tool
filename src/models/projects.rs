@@ -361,27 +361,15 @@ impl ProjectParams {
     }
 }
 
-/// Who may change a project's owners in an edit. Anyone can edit a project;
-/// owners decide who can close it, so only some people can change them.
+/// Who may change a project's owners in an edit. Managers and the project's
+/// owners can edit a project, but owners decide who can close it, so only
+/// managers change them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OwnerRights {
     /// An organisation owner or admin, through their own membership.
     Any,
-    /// A member: only while they own the project.
-    IfOwner(i64),
-    /// A super admin acting in an organisation that isn't theirs.
+    /// A member, or a super admin acting in an organisation that isn't theirs.
     No,
-}
-
-impl OwnerRights {
-    #[must_use]
-    pub fn allows(self, owners: &[i64]) -> bool {
-        match self {
-            Self::Any => true,
-            Self::IfOwner(user_id) => owners.contains(&user_id),
-            Self::No => false,
-        }
-    }
 }
 
 /// What an edit saved, with the owners before and after, for the notices.
@@ -570,7 +558,7 @@ impl Model {
             project.sort_order = ActiveValue::Set(n);
         }
         let project = project.update(&txn).await?;
-        let owners = if rights.allows(&owners_before) {
+        let owners = if rights == OwnerRights::Any {
             let posted = params.owners(&txn, org_id).await?;
             project_owners::Model::replace(&txn, org_id, project.id, &posted).await?;
             project_owners::Model::for_project(&txn, org_id, project.id).await?
@@ -1151,17 +1139,5 @@ mod tests {
         assert!(Model::closable_by(false, 8, &[7, 8, 9]), "one of several");
         assert!(!Model::closable_by(false, 3, &[7, 8]), "another member");
         assert!(!Model::closable_by(false, 3, &[]), "no owners");
-    }
-
-    #[test]
-    fn owner_rights() {
-        assert!(OwnerRights::Any.allows(&[]));
-        assert!(OwnerRights::IfOwner(7).allows(&[3, 7]));
-        assert!(!OwnerRights::IfOwner(7).allows(&[3]));
-        assert!(
-            !OwnerRights::IfOwner(7).allows(&[]),
-            "no owners: managers only"
-        );
-        assert!(!OwnerRights::No.allows(&[7]));
     }
 }

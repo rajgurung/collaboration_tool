@@ -132,11 +132,11 @@ async fn repeated_ids_save_once_and_one_outsider_refuses_the_list() {
     .await;
 }
 
-/// S1: only admins and the project's owners change its owners. Anyone else
-/// can't edit the project at all.
+/// S1: only admins change a project's owners. Its owners can edit it but
+/// their posted owners are ignored; anyone else can't edit it at all.
 #[tokio::test]
 #[serial]
-async fn only_admins_and_owners_change_owners() {
+async fn only_admins_change_owners() {
     request::<App, _, _>(|request, ctx| async move {
         let t = juniper(&request, &ctx).await;
         let website = juniper_project(&ctx, "Website").await;
@@ -165,18 +165,30 @@ async fn only_admins_and_owners_change_owners() {
             .text()
             .contains("Only admins and this project's owners can change it."));
 
-        // Leo, an owner, can.
+        // Leo, an owner, can save, but his owners are ignored.
         assert_eq!(
             save(&request, &t.leo, &website, &[t.leo_id, t.tom_id]).await,
             200
         );
-        assert_eq!(owners(&ctx, &website).await, vec![t.leo_id, t.tom_id]);
+        assert_eq!(owners(&ctx, &website).await, vec![t.ana_id, t.leo_id]);
+        assert!(inbox(&ctx, t.tom_id).await.is_empty());
         let sheet = request
             .get(&t.leo.at(&format!("/roadmap/projects/{}/edit", website.id)))
             .as_member(&t.leo)
             .await
             .text();
-        assert!(!sheet.contains("Only this project's owners and admins can change owners."));
+        assert!(sheet.contains(r#"<fieldset class="field m-0 border-0 p-0" disabled>"#));
+        assert!(sheet.contains("Only admins can change owners."));
+
+        // Maya, an admin, can.
+        save(&request, &t.maya, &website, &[t.leo_id, t.tom_id]).await;
+        assert_eq!(owners(&ctx, &website).await, vec![t.leo_id, t.tom_id]);
+        let sheet = request
+            .get(&t.maya.at(&format!("/roadmap/projects/{}/edit", website.id)))
+            .as_member(&t.maya)
+            .await
+            .text();
+        assert!(!sheet.contains("Only admins can change owners."));
 
         // A project with no owners: a member can't set them, an admin can.
         let shop = juniper_project(&ctx, "Instagram shop").await;
@@ -664,6 +676,12 @@ async fn a_member_owner_edits_and_closes_but_does_not_plan() {
             let (status, text) = post(&request, leo, &path, &body).await;
             assert_eq!(status, 403, "{path}");
             if path.ends_with("/move") {
+                assert!(
+                    text.contains("Only admins can reorder the roadmap."),
+                    "{text}"
+                );
+            }
+            if path.ends_with("/lane") {
                 assert!(
                     text.contains("Only admins can move projects between lanes."),
                     "{text}"

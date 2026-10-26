@@ -335,7 +335,8 @@ commits after the close guard:
 - **Refusals.** 403 through `forbidden`, which the frontend shows as a
   toast: "Only admins can add projects.", "Only admins and this project's
   owners can change it.", "Only admins can move projects between lanes."
-  Delete keeps `require_manager`.
+  (lane), "Only admins can reorder the roadmap." (move). Delete keeps
+  `require_manager`.
 - **UI.** "+ Project" and both Reorder buttons, and `draggable` on lane
   cards, only for managers; `?reorder=1` only turns on Reorder for them. The
   edit pencil only for managers and the project's owners.
@@ -344,3 +345,6 @@ commits after the close guard:
   move, lane. Member owner: edits and closes their own project; a posted
   lane is ignored; 403 on move, lane, delete. Manager unchanged. MCP
   `create_project` refused for a member. Roadmap page hides the controls.
+- **Owners, managers only (follow-up).** `OwnerRights` is `Any` for managers
+  not acting and `No` for everyone else, so an owner's posted owners are
+  ignored and the owner pills show disabled: "Only admins can change owners."

@@ -645,7 +645,7 @@ impl CollabServer {
     }
 
     #[tool(
-        description = "Delete a project this connection created in the last 24 hours, with its tasks, to undo a mistake. Refused if anyone else has added tasks or notes to it.",
+        description = "Delete a project this connection created in the last 24 hours, with its tasks, to undo a mistake. Refused if anyone else has added tasks or notes to it. Organisation owners and admins only.",
         annotations(destructive_hint = true, open_world_hint = false)
     )]
     async fn delete_project(
