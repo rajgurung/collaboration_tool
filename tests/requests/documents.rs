@@ -54,6 +54,11 @@ async fn acme(
     (alice, bob, carol, company)
 }
 
+/// The organisation's built-in Shared folder.
+pub async fn shared_folder(ctx: &AppContext, org_id: i64) -> folders::Model {
+    folders::Model::shared(&ctx.db, org_id).await.unwrap()
+}
+
 async fn upload(
     request: &TestServer,
     cookie: &TestMember,
@@ -78,7 +83,7 @@ async fn only_file(ctx: &AppContext) -> documents::Model {
 
 #[tokio::test]
 #[serial]
-async fn new_organisations_start_with_company_and_logins_folders() {
+async fn new_organisations_start_with_company_logins_and_shared_folders() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob, _, company) = acme(&request, &ctx).await;
         let folder = request
@@ -100,6 +105,11 @@ async fn new_organisations_start_with_company_and_logins_folders() {
         let body = page.text();
         assert!(body.contains("Company"));
         assert!(body.contains("Logins"));
+        assert!(body.contains("Shared"));
+        assert!(
+            !body.contains("Shared with you"),
+            "owners see logins in their folders"
+        );
         assert!(body.contains("New folder"), "owners can add folders");
         assert_eq!(page.headers()["x-frame-options"], "DENY");
         assert_eq!(
@@ -113,29 +123,36 @@ async fn new_organisations_start_with_company_and_logins_folders() {
             .await
             .text();
         assert!(!body.contains("New folder"), "members cannot");
-        assert!(body.contains("Owners and admins look after folders."));
+        assert!(body.contains("Owners and admins look after the other folders."));
+        assert!(body.contains("Shared with you"));
+        assert!(
+            !body.contains("Company") && !body.contains("Logins"),
+            "{body}"
+        );
     })
     .await;
 }
 
 #[tokio::test]
 #[serial]
-async fn a_member_adds_a_photo_and_everyone_can_open_it() {
+async fn a_member_adds_a_photo_to_shared_and_everyone_can_open_it() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob, _, company) = acme(&request, &ctx).await;
-        let res = upload(&request, &bob, company.id, "Share certificate.PNG", PNG).await;
+        let shared = shared_folder(&ctx, company.organisation_id).await;
+        let res = upload(&request, &bob, shared.id, "Share certificate.PNG", PNG).await;
         assert_eq!(res.status_code(), 200);
         assert!(res.headers()["hx-trigger"].to_str().unwrap().contains("Added Share certificate.png"));
         assert!(res.text().contains("Share certificate.png"));
         assert!(res.text().contains("Drag files here to add them."));
 
         let page = request
-            .get(&bob.at(&format!("/documents/folders/{}", company.id)))
+            .get(&bob.at(&format!("/documents/folders/{}", shared.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(page.contains("data-drop-overlay hidden"), "members can drop files too");
-        assert!(page.contains("Drop to add to Company"));
+        assert!(page.contains("Drop to add to Shared"));
+        assert!(page.contains("Everyone in Acme can open what you add."));
         let input = page.split(r#"<input type="file""#).nth(1).unwrap();
         let input = &input[..input.find('>').unwrap()];
         assert!(input.split_whitespace().any(|attr| attr == "multiple"), "{input}");
@@ -297,8 +314,9 @@ async fn files_over_25_mb_are_refused_but_the_route_allows_more_than_the_global_
 #[serial]
 async fn renaming_changes_the_name_but_never_the_extension() {
     request::<App, _, _>(|request, ctx| async move {
-        let (alice, bob, _, company) = acme(&request, &ctx).await;
-        upload(&request, &alice, company.id, "IMG_0001.png", PNG).await;
+        let (_, bob, _, company) = acme(&request, &ctx).await;
+        let shared = shared_folder(&ctx, company.organisation_id).await;
+        upload(&request, &bob, shared.id, "IMG_0001.png", PNG).await;
         let file = only_file(&ctx).await;
         let rename = |name: &'static str| {
             request
@@ -323,9 +341,10 @@ async fn renaming_changes_the_name_but_never_the_extension() {
 
 #[tokio::test]
 #[serial]
-async fn only_the_uploader_owners_and_admins_delete_files() {
+async fn only_the_uploader_owners_and_admins_change_files_in_shared() {
     request::<App, _, _>(|request, ctx| async move {
         let (alice, bob, carol, company) = acme(&request, &ctx).await;
+        let company = shared_folder(&ctx, company.organisation_id).await;
         upload(&request, &alice, company.id, "alices.pdf", PDF).await;
         let alices = only_file(&ctx).await;
         let delete = |cookie: &TestMember, id: i64| {
@@ -333,14 +352,41 @@ async fn only_the_uploader_owners_and_admins_delete_files() {
                 .post(&cookie.at(&format!("/documents/files/{id}/delete")))
                 .as_member(cookie)
         };
-        // A member cannot delete someone else's file, and is not offered it.
-        assert_eq!(delete(&bob, alices.id).await.status_code(), 403);
+        // A member cannot rename or delete someone else's file, and is not
+        // offered either. The refusal is a toast that doesn't name the file.
+        let res = delete(&bob, alices.id)
+            .add_header("hx-request", "true")
+            .await;
+        assert_eq!(res.status_code(), 403);
+        let toast = res.headers()["hx-trigger"].to_str().unwrap().to_string();
+        assert!(
+            toast.contains("Only the person who added a file, owners and admins can change it.")
+        );
+        assert!(!toast.contains("alices"), "{toast}");
+        let res = request
+            .post(&bob.at(&format!("/documents/files/{}/rename", alices.id)))
+            .as_member(&bob)
+            .form(&serde_json::json!({ "name": "mine" }))
+            .await;
+        assert_eq!(res.status_code(), 403);
+        assert_eq!(only_file(&ctx).await.name, "alices.pdf");
         let page = request
             .get(&bob.at(&format!("/documents/folders/{}", company.id)))
             .add_header(bob.0.clone(), bob.1.clone())
             .await
             .text();
         assert!(!page.contains(&format!("/documents/files/{}/delete", alices.id)));
+        assert!(!page.contains(&format!("/documents/files/{}/rename", alices.id)));
+        assert!(page.contains(
+            "Only the person who added a file, owners and admins can rename or delete it."
+        ));
+        // An admin renames anyone's file there.
+        let res = request
+            .post(&carol.at(&format!("/documents/files/{}/rename", alices.id)))
+            .as_member(&carol)
+            .form(&serde_json::json!({ "name": "Lease" }))
+            .await;
+        assert_eq!(res.status_code(), 200);
 
         // The uploader can.
         documents::Entity::delete_many()
@@ -431,7 +477,7 @@ async fn owners_and_admins_manage_folders_and_only_empty_ones_go() {
         assert_eq!(renamed.name, "Insurance policies");
         assert_eq!(renamed.note, None);
 
-        upload(&request, &bob, company.id, "a.pdf", PDF).await;
+        upload(&request, &alice, company.id, "a.pdf", PDF).await;
         let delete = |cookie: &TestMember, id: i64| {
             request
                 .post(&cookie.at(&format!("/documents/folders/{id}/delete")))

@@ -54,7 +54,10 @@
     <select class="input" name="folder_id">
       {% for f in form.folders %}<option value="{{ f.id }}" {% if f.id == form.values.folder_id %}selected{% endif %}>{{ f.name }}</option>{% endfor %}
     </select>
+    {% if form.errors.folder_id %}<span class="field-error">{{ form.errors.folder_id }}</span>{% endif %}
   </label>
+  {% elif form.errors.folder_id %}
+  <p class="field-error m-0">{{ form.errors.folder_id }}</p>
   {% endif %}
   <div class="sheet-sticky-foot"><button type="submit" class="btn btn-primary btn-lg w-full">{{ form.submit }}</button></div>
 </form>

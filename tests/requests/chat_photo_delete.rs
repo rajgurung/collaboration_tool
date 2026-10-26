@@ -656,8 +656,8 @@ async fn a_documents_delete_tells_chat() {
         let file_id = photo.document_id.unwrap();
         let mut events = hub_events(&ctx);
         let res = request
-            .post(&team.tom.at(&format!("/documents/files/{file_id}/delete")))
-            .as_member(&team.tom)
+            .post(&team.maya.at(&format!("/documents/files/{file_id}/delete")))
+            .as_member(&team.maya)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);
@@ -685,8 +685,12 @@ async fn a_documents_delete_tells_chat() {
         .await
         .unwrap();
         let res = request
-            .post(&team.tom.at(&format!("/documents/files/{}/delete", menu.id)))
-            .as_member(&team.tom)
+            .post(
+                &team
+                    .maya
+                    .at(&format!("/documents/files/{}/delete", menu.id)),
+            )
+            .as_member(&team.maya)
             .add_header("HX-Request", "true")
             .await;
         assert_eq!(res.status_code(), 200);

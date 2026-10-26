@@ -1,0 +1,12 @@
+{% extends "layouts/app.html" %}
+{# A 403 page load in Documents (controllers/documents.rs, no_entry). The message never names what was refused. #}
+{% block title %}Can't open this · {{ org.name }}{% endblock title %}
+{% block heading %}Can't open this{% endblock heading %}
+{% block content %}
+<div class="card flex max-w-[560px] flex-col items-start gap-3 p-6">
+  <span class="meta font-semibold">403</span>
+  <h2 class="m-0 text-[22px] font-bold tracking-tight">You can't open this</h2>
+  <p class="m-0 text-[15px] leading-6 text-muted">{{ message }}</p>
+  <a href="{{ org_url(path="/documents") }}" class="btn btn-primary btn-tall mt-2">Back to Documents</a>
+</div>
+{% endblock content %}

@@ -43,10 +43,11 @@
           <div class="list" data-pane="menu">
             {% if f.opens_inline %}<a class="list-row" href="{{ org_url(path="/documents/files/" ~ (f.id)) }}" target="_blank" rel="noopener">{{<icon name="external-link" class="h-5 w-5"/>}}<span class="flex-1">Open</span></a>{% endif %}
             <a class="list-row" href="{{ org_url(path="/documents/files/" ~ (f.id) ~ "?download=1") }}">{{<icon name="download" class="h-5 w-5"/>}}<span class="flex-1">Download</span></a>
-            <button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit" data-show-pane="rename">{{<icon name="pencil" class="h-5 w-5"/>}}<span class="flex-1">Rename</span></button>
-            {% if f.can_delete %}<button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-danger" data-show-pane="delete">{{<icon name="trash" class="h-5 w-5"/>}}<span class="flex-1">Delete</span></button>{% endif %}
+            {% if f.can_delete %}<button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-inherit" data-show-pane="rename">{{<icon name="pencil" class="h-5 w-5"/>}}<span class="flex-1">Rename</span></button>
+            <button type="button" class="list-row w-full border-0 bg-transparent text-left text-base text-danger" data-show-pane="delete">{{<icon name="trash" class="h-5 w-5"/>}}<span class="flex-1">Delete</span></button>{% endif %}
           </div>
-          {% if not f.can_delete %}<p class="meta m-0" data-pane="menu">Only the person who added a file, owners and admins can delete it.</p>{% endif %}
+          {% if not f.can_delete %}<p class="meta m-0" data-pane="menu">Only the person who added a file, owners and admins can rename or delete it.</p>{% endif %}
+          {% if f.can_delete %}
           <form data-pane="rename" hidden method="post" action="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/rename") }}" hx-post="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/rename") }}"
                 hx-target="#files" hx-swap="innerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="grid gap-3">
             <label class="field">
@@ -55,7 +56,6 @@
             </label>
             <button type="submit" class="btn btn-primary btn-lg w-full">Save name</button>
           </form>
-          {% if f.can_delete %}
           <form data-pane="delete" hidden method="post" action="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/delete") }}" hx-post="{{ org_url(path="/documents/files/" ~ (f.id) ~ "/delete") }}"
                 hx-target="#files" hx-swap="innerHTML" hx-on::after-request="this.closest('dialog')?.close()" class="flex flex-col gap-3">
             <p class="m-0 text-[19px] font-bold">Delete “{{ f.name }}”?</p>
@@ -71,25 +71,27 @@
     {% endfor %}
   </div>
 </div>
+{% elif folder.shared_with_you %}
+<div class="card empty-state">
+  <span class="tile tile-key">{{<icon name="key" class="h-[22px] w-[22px]"/>}}</span>
+  <h2>No logins shared with you</h2>
+  <p>When an owner or admin names you on a login, it shows here.</p>
+</div>
 {% elif folder.is_logins %}
 <div class="card empty-state">
   <span class="tile tile-key">{{<icon name="key" class="h-[22px] w-[22px]"/>}}</span>
   <h2>No logins yet</h2>
-  {% if me.can_manage %}
   <p>Keep shared accounts here, like Companies House or the office mailbox. Passwords stay locked until someone enters their app password.</p>
   <button type="button" class="btn btn-primary btn-lg" data-dialog-open="new-login-title">{{<icon name="key" class="h-4 w-4"/>}}Add a login</button>
-  {% else %}
-  <p>Owners and admins add shared logins here. Photos and files go in the other folders.</p>
-  {% endif %}
 </div>
 {% else %}
 <div class="card empty-state">
   <span class="tile">{{<icon name="folder" class="h-[22px] w-[22px]"/>}}</span>
   <h2>Nothing in {{ folder.name }} yet</h2>
-  <p>Take a photo of a paper, or add a PDF or Office file. Everyone in {{ org.name }} can open it.</p>
+  {% if folder.is_shared %}<p>Add receipts, photos and papers for the whole team. Everyone in {{ org.name }} can open them.</p>{% else %}<p>Take a photo of a paper, or add a PDF or Office file.</p>{% endif %}
   <button type="button" class="btn btn-primary btn-lg" data-pick="photo">{{<icon name="camera" class="h-4 w-4"/>}}Add a photo</button>
   <button type="button" class="text-link min-h-11" data-pick="file">Add a file instead</button>
   <p class="drop-hint">Drag files here to add them.</p>
 </div>
-{% if me.can_manage %}<p class="meta mx-1 my-0">Only empty folders can be deleted. Use “...” above to rename or delete this one.</p>{% endif %}
+{% if me.can_manage and not folder.is_built_in %}<p class="meta mx-1 my-0">Only empty folders can be deleted. Use “...” above to rename or delete this one.</p>{% endif %}
 {% endif %}

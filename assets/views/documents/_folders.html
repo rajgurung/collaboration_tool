@@ -1,6 +1,6 @@
 <div class="list">
   {% for f in folders %}
-  <a href="{{ org_url(path="/documents/folders/" ~ (f.id)) }}" class="list-row folder-link" {% if f.selected %}aria-current="page"{% endif %}>
+  <a href="{{ f.href }}" class="list-row folder-link" {% if f.selected %}aria-current="page"{% endif %}>
     <span class="tile">{{<icon name="folder" class="h-5 w-5"/>}}</span>
     <span class="min-w-0 flex-1"><span class="name truncate-1 block">{{ f.name }}</span><span class="meta truncate-1 block">{{ f.summary }}</span></span>
     {{<icon name="chevron-right" class="h-[18px] w-[18px] text-muted"/>}}

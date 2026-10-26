@@ -588,8 +588,8 @@ async fn documents_and_removal_need_your_own_active_membership() {
             .unwrap();
         assert_eq!(
             globex_folders.len(),
-            3,
-            "Company, Logins and the secret one"
+            4,
+            "Company, Logins, Shared and the secret one"
         );
         let pending = memberships::Entity::find_by_id(globex.pending.id)
             .one(&ctx.db)

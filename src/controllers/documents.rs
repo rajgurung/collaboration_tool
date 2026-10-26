@@ -1,7 +1,9 @@
-//! The Documents space: folders of files every member can open. Every route
-//! goes through `CurrentMember` and refuses a super admin acting inside
-//! someone else's organisation. Files are streamed through the app after a
-//! membership check; storage is never exposed and nothing is presigned.
+//! The Documents space: folders of files. Owners and admins open every
+//! folder; members open only Shared, and their "Shared with you" logins.
+//! Every folder and file route checks [`folders::Model::open_to`]. Every
+//! route goes through `CurrentMember` and refuses a super admin acting inside
+//! someone else's organisation. Files are streamed through the app after
+//! those checks; storage is never exposed and nothing is presigned.
 use std::collections::HashMap;
 
 use axum::{
@@ -22,7 +24,7 @@ use crate::{
     models::{
         documents::{self, MAX_BYTES},
         folders::{self, FolderParams},
-        logins, memberships, messages,
+        login_accesses, logins, memberships, messages,
     },
     views::{
         forms::{field_errors, invalid_form, toast},
@@ -34,15 +36,31 @@ use crate::{
 const LOGINS_ONLY: &str =
     "The Logins folder holds logins only. Add photos and files to another folder.";
 
+/// The refusal for a folder, or a file in one, a member can't open. It never
+/// names the folder or file.
+pub const FOLDER_CLOSED: &str = "Only owners and admins can see this folder.";
+
+const ADD_CLOSED: &str = "Only owners and admins can add to this folder.";
+
+const NOT_YOURS: &str = "Only the person who added a file, owners and admins can change it.";
+
 /// The upload route's body limit: the 25 MB file plus room for the form.
 pub const UPLOAD_BODY_LIMIT: usize = 26 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct FolderRow {
-    id: i64,
+    href: String,
     name: String,
     summary: String,
     selected: bool,
+}
+
+/// Which row of the folder list is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Selected {
+    None,
+    Folder(i64),
+    SharedWithYou,
 }
 
 /// A login in a folder's list. Only plain fields: never a secret.
@@ -114,18 +132,25 @@ fn item_count(files: u64, logins: u64) -> String {
     }
 }
 
-/// The folder list, with counts and when each last changed.
+/// The folder list, with counts and when each last changed. Owners and
+/// admins get every folder. Members get Shared, then "Shared with you".
 ///
 /// # Errors
 /// On database errors.
 pub async fn folder_rows(
     ctx: &AppContext,
     member: &CurrentMember,
-    selected: Option<i64>,
+    selected: Selected,
 ) -> Result<Vec<FolderRow>> {
-    Ok(folders::Model::list_for_org(&ctx.db, member.org.id)
+    // Made by the migration; this only covers a missing one. Documents still
+    // opens without it.
+    if let Err(err) = folders::Model::shared(&ctx.db, member.org.id).await {
+        tracing::error!(error = %err, org_id = member.org.id, "could not find or make the Shared folder");
+    }
+    let mut rows: Vec<FolderRow> = folders::Model::list_for_org(&ctx.db, member.org.id)
         .await?
         .into_iter()
+        .filter(|s| s.folder.open_to(member.can_manage()))
         .map(|s| {
             let updated = s.updated_at.map(|at| {
                 format!(
@@ -134,17 +159,70 @@ pub async fn folder_rows(
                 )
             });
             FolderRow {
-                id: s.folder.id,
+                href: member.url(&format!("/documents/folders/{}", s.folder.id)),
                 summary: format!(
                     "{}{}",
                     item_count(s.files, s.logins),
                     updated.unwrap_or_default()
                 ),
                 name: s.folder.name,
-                selected: selected == Some(s.folder.id),
+                selected: selected == Selected::Folder(s.folder.id),
             }
         })
+        .collect();
+    if !member.can_manage() {
+        let named = login_accesses::Model::logins_for(&ctx.db, member.org.id, member.user.id)
+            .await?
+            .len() as u64;
+        rows.push(FolderRow {
+            href: member.url("/documents/shared-with-you"),
+            name: SHARED_WITH_YOU.to_string(),
+            summary: if named == 0 {
+                "None yet".to_string()
+            } else {
+                item_count(0, named)
+            },
+            selected: selected == Selected::SharedWithYou,
+        });
+    }
+    Ok(rows)
+}
+
+/// The name of a member's list of logins they are named on.
+pub const SHARED_WITH_YOU: &str = "Shared with you";
+
+/// Everyone who ever joined, by user id, so files and logins keep their
+/// adder's name.
+async fn names(ctx: &AppContext, member: &CurrentMember) -> Result<HashMap<i64, String>> {
+    Ok(memberships::Model::list_for_org(&ctx.db, member.org.id)
+        .await?
+        .into_iter()
+        .map(|(m, _)| (m.user_id, m.username))
         .collect())
+}
+
+fn name_of(names: &HashMap<i64, String>, id: Option<i64>) -> String {
+    id.and_then(|id| names.get(&id).cloned())
+        .unwrap_or_else(|| "Former member".to_string())
+}
+
+fn login_item(
+    l: logins::Model,
+    names: &HashMap<i64, String>,
+    tz: chrono_tz::Tz,
+) -> (DateTime<FixedOffset>, Item) {
+    let added_by = name_of(names, l.created_by_id);
+    (
+        l.created_at,
+        Item::Login(LoginRow {
+            id: l.id,
+            title: l.title,
+            username: l.username,
+            color: avatar_color(&added_by),
+            added_by,
+            added: added(l.created_at, tz),
+        }),
+    )
 }
 
 /// What `documents/_files.html` needs for one folder.
@@ -153,23 +231,15 @@ async fn files_data(
     member: &CurrentMember,
     folder: &folders::Model,
 ) -> Result<serde_json::Value> {
-    // Everyone who ever joined, so files keep their uploader's name.
-    let names: HashMap<i64, String> = memberships::Model::list_for_org(&ctx.db, member.org.id)
-        .await?
-        .into_iter()
-        .map(|(m, _)| (m.user_id, m.username))
-        .collect();
-    let name_of = |id: Option<i64>| {
-        id.and_then(|id| names.get(&id).cloned())
-            .unwrap_or_else(|| "Former member".to_string())
-    };
+    let names = names(ctx, member).await?;
+    let open = folder.open_to(member.can_manage());
     let files = documents::Model::for_folder(&ctx.db, member.org.id, folder.id).await?;
     let logins = logins::Model::for_folder(&ctx.db, member.org.id, folder.id).await?;
     let count = item_count(files.len() as u64, logins.len() as u64);
     let mut items: Vec<(DateTime<FixedOffset>, Item)> = files
         .into_iter()
         .map(|f| {
-            let uploader = name_of(f.uploaded_by_id);
+            let uploader = name_of(&names, f.uploaded_by_id);
             (
                 f.created_at,
                 Item::File(FileRow {
@@ -183,26 +253,17 @@ async fn files_data(
                     uploader,
                     added: added(f.created_at, member.tz()),
                     size: documents::human_size(f.size_bytes),
-                    can_delete: f.can_delete(member.user.id, member.can_manage()),
+                    can_delete: open && f.can_delete(member.user.id, member.can_manage()),
                     name: f.name,
                 }),
             )
         })
         .collect();
-    items.extend(logins.into_iter().map(|l| {
-        let added_by = name_of(l.created_by_id);
-        (
-            l.created_at,
-            Item::Login(LoginRow {
-                id: l.id,
-                title: l.title,
-                username: l.username,
-                color: avatar_color(&added_by),
-                added_by,
-                added: added(l.created_at, member.tz()),
-            }),
-        )
-    }));
+    items.extend(
+        logins
+            .into_iter()
+            .map(|l| login_item(l, &names, member.tz())),
+    );
     items.sort_by_key(|item| std::cmp::Reverse(item.0));
     let items: Vec<Item> = items.into_iter().map(|(_, item)| item).collect();
     Ok(data!({
@@ -211,6 +272,8 @@ async fn files_data(
             "name": folder.name,
             "note": folder.note,
             "is_logins": folder.is_logins(),
+            "is_shared": folder.is_shared(),
+            "is_built_in": folder.is_built_in(),
         },
         "count": count,
         "empty": items.is_empty(),
@@ -235,6 +298,32 @@ async fn files_partial(
         )
 }
 
+/// A 403 for something this person may not open. An HTMX request gets an
+/// error toast and leaves the page as it is; a page load gets the 403 page.
+/// `message` must not name what was refused.
+///
+/// # Errors
+/// When the page can't be rendered.
+pub fn no_entry(
+    v: &TeraView,
+    member: &CurrentMember,
+    headers: &HeaderMap,
+    message: &str,
+) -> Result<Response> {
+    if headers.contains_key("hx-request") {
+        return format::render()
+            .status(403)
+            .header("HX-Reswap", "none")
+            .header("HX-Trigger", toast("error", message))
+            .text(message);
+    }
+    format::render().status(403).view(
+        v,
+        "errors/forbidden.html",
+        member.page("documents", data!({ "message": message })),
+    )
+}
+
 /// A refusal shown as an error toast, leaving the page as it is.
 fn refuse(message: &str) -> Result<Response> {
     format::render()
@@ -256,7 +345,7 @@ async fn index(
         "documents/index.html",
         member.page(
             "documents",
-            data!({ "folders": folder_rows(&ctx, &member, None).await? }),
+            data!({ "folders": folder_rows(&ctx, &member, Selected::None).await? }),
         ),
     )
 }
@@ -266,15 +355,50 @@ async fn show_folder(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_own_membership()?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    if !folder.open_to(member.can_manage()) {
+        return no_entry(&v, &member, &headers, FOLDER_CLOSED);
+    }
     let mut page = files_data(&ctx, &member, &folder).await?;
-    page["folders"] = serde_json::to_value(folder_rows(&ctx, &member, Some(folder.id)).await?)?;
-    if member.can_manage() {
+    page["folders"] =
+        serde_json::to_value(folder_rows(&ctx, &member, Selected::Folder(folder.id)).await?)?;
+    if member.can_manage() && !folder.is_shared() {
         page["login_form"] = super::logins::new_login_form(&ctx, &member, &folder).await?;
     }
+    format::render().view(&v, "documents/folder.html", member.page("documents", page))
+}
+
+/// A member's logins they are named on, as a folder of its own. Owners and
+/// admins see every login in its real folder, so they go to Documents.
+#[debug_handler]
+async fn shared_with_you(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    member.require_own_membership()?;
+    if member.can_manage() {
+        return Ok(redirect_response(&headers, &member.url("/documents")));
+    }
+    let names = names(&ctx, &member).await?;
+    let logins = login_accesses::Model::logins_for(&ctx.db, member.org.id, member.user.id).await?;
+    let count = item_count(0, logins.len() as u64);
+    let items: Vec<Item> = logins
+        .into_iter()
+        .map(|l| login_item(l, &names, member.tz()).1)
+        .collect();
+    let page = data!({
+        "folder": { "name": SHARED_WITH_YOU, "is_logins": true, "shared_with_you": true },
+        "count": count,
+        "empty": items.is_empty(),
+        "items": items,
+        "folders": folder_rows(&ctx, &member, Selected::SharedWithYou).await?,
+    });
     format::render().view(&v, "documents/folder.html", member.page("documents", page))
 }
 
@@ -311,23 +435,28 @@ async fn edit_folder(
     member.require_own_membership()?;
     member.require_manager()?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    match folder.edit(&ctx.db, &params).await {
+    match folder.clone().edit(&ctx.db, &params).await {
         Ok(folder) => Ok(redirect_response(
             &headers,
             &member.url(&format!("/documents/folders/{}", folder.id)),
         )),
-        Err(err) => folder_form_error(&v, &member, Some(id), &params, err),
+        Err(err) => folder_form_error(&v, &member, Some(&folder), &params, err),
     }
 }
 
 fn folder_form_error(
     v: &TeraView,
     member: &CurrentMember,
-    id: Option<i64>,
+    folder: Option<&folders::Model>,
     params: &FolderParams,
     err: ModelError,
 ) -> Result<Response> {
     let errors = field_errors(&err).ok_or(err)?;
+    let id = folder.map(|f| f.id);
+    // A built-in folder's name can't change, so it shows the saved one.
+    let name = folder
+        .filter(|f| f.is_built_in())
+        .map_or(params.name.as_str(), |f| f.name.as_str());
     let form_id = id.map_or_else(
         || "new-folder-form".to_string(),
         |id| format!("folder-{id}-form"),
@@ -345,9 +474,11 @@ fn folder_form_error(
             data!({
                 "form_id": form_id,
                 "action": action,
-                "values": { "name": params.name, "note": params.note },
+                "values": { "name": name, "note": params.note },
                 "errors": errors,
                 "submit": if id.is_some() { "Save" } else { "Create folder" },
+                "built_in": folder.is_some_and(folders::Model::is_built_in),
+                "shared": folder.is_some_and(folders::Model::is_shared),
             }),
         ),
     )
@@ -430,7 +561,7 @@ pub async fn read_upload(
     Ok((name, bytes, text))
 }
 
-/// Any member adds one file to a folder. Success refreshes the file list;
+/// Anyone who can open a folder adds one file to it. Success refreshes the file list;
 /// a refusal adds an error row above it, saying what to do next.
 #[debug_handler]
 async fn upload(
@@ -442,6 +573,10 @@ async fn upload(
 ) -> Result<Response> {
     member.require_own_membership()?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    // Before the body is read. The page's script shows the reason.
+    if !folder.open_to(member.can_manage()) {
+        return Err(forbidden(ADD_CLOSED));
+    }
     if folder.is_logins() {
         return refuse(LOGINS_ONLY);
     }
@@ -474,17 +609,23 @@ struct OpenQuery {
     download: Option<String>,
 }
 
-/// Streams a file to a member of its organisation. Photos and PDFs open in
+/// Streams a file to someone who can open its folder. Photos and PDFs open in
 /// the browser, everything else downloads (see [`send_stored`]).
 #[debug_handler]
 async fn open_file(
     member: CurrentMember,
     State(ctx): State<AppContext>,
+    ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Query(query): Query<OpenQuery>,
 ) -> Result<Response> {
     member.require_own_membership()?;
     let file = documents::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    let folder = folders::Model::find_in_org(&ctx.db, member.org.id, file.folder_id).await?;
+    if !folder.open_to(member.can_manage()) {
+        return no_entry(&v, &member, &headers, FOLDER_CLOSED);
+    }
     send_stored(
         &ctx,
         &file.storage_key,
@@ -555,18 +696,25 @@ struct RenameForm {
     name: String,
 }
 
-/// Any member renames a file. The extension stays.
+/// The uploader, owners and admins rename a file. The extension stays.
 #[debug_handler]
 async fn rename_file(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Form(form): Form<RenameForm>,
 ) -> Result<Response> {
     member.require_own_membership()?;
     let file = documents::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, file.folder_id).await?;
+    if !folder.open_to(member.can_manage()) {
+        return no_entry(&v, &member, &headers, FOLDER_CLOSED);
+    }
+    if !file.can_delete(member.user.id, member.can_manage()) {
+        return no_entry(&v, &member, &headers, NOT_YOURS);
+    }
     match file.rename(&ctx.db, &form.name).await {
         Ok(file) => {
             let message = format!("Renamed to {}", file.name);
@@ -583,16 +731,19 @@ async fn delete_file(
     member: CurrentMember,
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response> {
     member.require_own_membership()?;
     let file = documents::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    if !file.can_delete(member.user.id, member.can_manage()) {
-        return Err(forbidden(
-            "Only the person who added a file, owners and admins can delete it.",
-        ));
-    }
     let folder = folders::Model::find_in_org(&ctx.db, member.org.id, file.folder_id).await?;
+    // A member deletes their own chat photos through chat, not here.
+    if !folder.open_to(member.can_manage()) {
+        return no_entry(&v, &member, &headers, FOLDER_CLOSED);
+    }
+    if !file.can_delete(member.user.id, member.can_manage()) {
+        return no_entry(&v, &member, &headers, NOT_YOURS);
+    }
     let name = file.name.clone();
     // A #general photo: open chats swap it for "Photo removed".
     let chat_photo = messages::Model::for_document(&ctx.db, member.org.id, file.id).await?;
@@ -631,6 +782,7 @@ pub fn routes() -> Routes {
     Routes::new()
         .prefix("/documents")
         .add("/", get(index))
+        .add("/shared-with-you", get(shared_with_you))
         .add("/folders", post(create_folder))
         .add("/folders/{id}", get(show_folder))
         .add("/folders/{id}", post(edit_folder))
