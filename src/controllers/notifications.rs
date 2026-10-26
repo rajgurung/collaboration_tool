@@ -18,7 +18,7 @@ use crate::{
     models::{
         conversations, memberships, messages,
         notifications::{self, kind, Notice},
-        projects, task_assignees, task_notes, tasks, users,
+        project_owners, projects, task_assignees, task_notes, tasks, users,
     },
     views::{layout::avatar_color, time},
 };
@@ -95,7 +95,7 @@ pub struct TaskBefore {
 }
 
 /// After a task is created or changed: tells people newly assigned, and the
-/// project owner about a new task or one that just became blocked.
+/// project's owners about a new task or one that just became blocked.
 ///
 /// # Errors
 /// On database errors.
@@ -131,7 +131,7 @@ pub async fn task_saved(
     )
     .await?;
 
-    // Chores have no project, so no owner to tell.
+    // Chores have no project, so no owners to tell.
     let Some(project_id) = task.project_id else {
         return Ok(());
     };
@@ -144,26 +144,42 @@ pub async fn task_saved(
         )),
         Some(_) => None,
     };
-    if let (Some(body), Some(owner)) = (event, project.owner_id) {
-        if !told.contains(&owner) {
-            told.extend(
-                send(
-                    ctx,
-                    org_id,
-                    actor,
-                    &[owner],
-                    &Notice {
-                        kind: kind::PROJECT,
-                        body,
-                        link,
-                        message_id: None,
-                    },
-                )
-                .await?,
-            );
-        }
-    }
+    let Some(body) = event else {
+        return Ok(());
+    };
+    let owners: Vec<i64> = owners_on_team(ctx, org_id, project.id)
+        .await?
+        .into_iter()
+        .filter(|id| !told.contains(id))
+        .collect();
+    told.extend(
+        send(
+            ctx,
+            org_id,
+            actor,
+            &owners,
+            &Notice {
+                kind: kind::PROJECT,
+                body,
+                link,
+                message_id: None,
+            },
+        )
+        .await?,
+    );
     Ok(())
+}
+
+/// A project's owners who are approved members now, in the order added. A
+/// removed member's row can be left behind; they are never told.
+async fn owners_on_team(ctx: &AppContext, org_id: i64, project_id: i64) -> Result<Vec<i64>> {
+    let owners = project_owners::Model::for_project(&ctx.db, org_id, project_id).await?;
+    let team: Vec<i64> = memberships::Model::team_among(&ctx.db, org_id, owners.iter().copied())
+        .await?
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    Ok(owners.into_iter().filter(|id| team.contains(id)).collect())
 }
 
 /// After a note is posted: tells everyone mentioned, then the whole team for
@@ -241,24 +257,56 @@ pub async fn note_added(
     Ok(())
 }
 
-/// After a project is saved: tells a new owner.
+/// After a project is saved: tells each owner added (`owners` not in
+/// `before`) who is on the team, in one go, and logs the change. People
+/// taken off hear nothing.
 ///
 /// # Errors
 /// On database errors.
 pub async fn project_saved(
     ctx: &AppContext,
     member: &CurrentMember,
-    owner_before: Option<i64>,
+    before: &[i64],
     project: &projects::Model,
+    owners: &[i64],
 ) -> Result<()> {
-    let Some(owner) = project.owner_id.filter(|o| Some(*o) != owner_before) else {
+    let added: Vec<i64> = owners
+        .iter()
+        .filter(|id| !before.contains(id))
+        .copied()
+        .collect();
+    let removed: Vec<i64> = before
+        .iter()
+        .filter(|id| !owners.contains(id))
+        .copied()
+        .collect();
+    if added.is_empty() && removed.is_empty() {
         return Ok(());
-    };
+    }
+    tracing::info!(
+        org_id = member.org.id,
+        project_id = project.id,
+        user_id = member.user.id,
+        acting = member.acting,
+        ?added,
+        ?removed,
+        "changed project owners"
+    );
+    let on_team: Vec<i64> =
+        memberships::Model::team_among(&ctx.db, member.org.id, added.iter().copied())
+            .await?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+    let told: Vec<i64> = added
+        .into_iter()
+        .filter(|id| on_team.contains(id))
+        .collect();
     send(
         ctx,
         member.org.id,
         member.user.id,
-        &[owner],
+        &told,
         &Notice {
             kind: kind::OWNER,
             body: format!("made you owner of {}", project.name),
@@ -272,7 +320,7 @@ pub async fn project_saved(
 
 /// After a project is marked done: one notice per person, not one per task.
 /// Each assignee of a task the close changed hears how many of theirs it
-/// closed; the project's owner, if not told already, hears the total. Only
+/// closed; the project's owners, if not told already, hear the total. Only
 /// people on the team. Never `task_saved`, which would send one per task.
 ///
 /// # Errors
@@ -322,7 +370,8 @@ struct Change {
 }
 
 /// One notice per assignee of the changed tasks, saying how many of theirs
-/// changed, then one to the project's owner with the total if not told yet.
+/// changed, then one to each of the project's owners with the total if not
+/// told yet.
 async fn tell_per_person(
     ctx: &AppContext,
     member: &CurrentMember,
@@ -366,10 +415,12 @@ async fn tell_per_person(
         };
         told.extend(send(ctx, org_id, member.user.id, &[user], &notice).await?);
     }
-    let owner = project
-        .owner_id
-        .filter(|id| team.contains(id) && !told.contains(id));
-    if let Some(owner) = owner {
+    let owners: Vec<i64> = project_owners::Model::for_project(&ctx.db, org_id, project.id)
+        .await?
+        .into_iter()
+        .filter(|id| team.contains(id) && !told.contains(id))
+        .collect();
+    if !owners.is_empty() {
         let body = match changed.len() {
             0 => headline,
             1 => format!("{headline}\n1 task {verb}"),
@@ -381,7 +432,7 @@ async fn tell_per_person(
             link,
             message_id: None,
         };
-        send(ctx, org_id, member.user.id, &[owner], &notice).await?;
+        send(ctx, org_id, member.user.id, &owners, &notice).await?;
     }
     Ok(())
 }

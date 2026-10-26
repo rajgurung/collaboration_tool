@@ -58,7 +58,8 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
             lane: "now".to_string(),
             status: "Active".to_string(),
             accent: "#ffb454".to_string(),
-            owner_id: owner.id.to_string(),
+            owner_ids: vec![owner.id],
+            owner_id: String::new(),
             summary: SECRET.to_string(),
         },
         None,
@@ -188,6 +189,7 @@ async fn org_a_cannot_reach_org_b() {
                 lane: "now".to_string(),
                 status: "Active".to_string(),
                 accent: "#ffb454".to_string(),
+                owner_ids: vec![],
                 owner_id: String::new(),
                 summary: String::new(),
             },
@@ -356,6 +358,8 @@ async fn org_a_cannot_reach_org_b() {
         let refs = [
             ("/tasks", format!("title=t&priority=high&project_id={}", globex.project.id)),
             ("/tasks", format!("title=t&priority=high&project_id={}&assignee_ids={b_user}", acme_project.id)),
+            ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_ids={b_user}")),
+            // An edit sheet from before several owners posts the old field.
             ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_id={b_user}")),
             ("/meetings", format!("title=m&held_on=2026-10-01&summary=s&attendee_ids={b_user}")),
             ("/chat/groups", format!("name=g&member_ids={b_user}")),

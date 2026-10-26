@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 pub use super::_entities::projects::{ActiveModel, Column, Entity, Model};
 use super::{
-    field_error, memberships,
+    field_error, memberships, project_owners,
     tasks::{self, Refusal, Removed},
 };
 
@@ -179,7 +179,7 @@ static LANE_RE: LazyLock<regex::Regex> =
 static ACCENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^#[0-9a-fA-F]{6}$").expect("accent regex is valid"));
 
-/// The project form. `owner_id` arrives as text so "Unassigned" can be an empty string.
+/// The project form. `owner_ids` comes from repeated checkbox fields.
 #[derive(Debug, Deserialize, Validate)]
 pub struct ProjectParams {
     #[validate(length(
@@ -199,6 +199,11 @@ pub struct ProjectParams {
     #[validate(regex(path = *ACCENT_RE, message = "Choose a colour."))]
     pub accent: String,
     #[serde(default)]
+    pub owner_ids: Vec<i64>,
+    /// The single owner an edit sheet opened before several owners were
+    /// possible posts, as text. Read only when `owner_ids` is empty, so
+    /// saving that sheet keeps its owner. Goes with the `owner_id` column.
+    #[serde(default)]
     pub owner_id: String,
     #[serde(default)]
     #[validate(length(max = 500, message = "Keep the summary under 500 characters."))]
@@ -206,21 +211,74 @@ pub struct ProjectParams {
 }
 
 impl ProjectParams {
-    /// The chosen owner, which must be an approved member of the organisation.
-    async fn owner<C: ConnectionTrait>(&self, db: &C, org_id: i64) -> ModelResult<Option<i64>> {
-        let raw = self.owner_id.trim();
-        if raw.is_empty() {
-            return Ok(None);
-        }
-        let id: i64 = raw
-            .parse()
-            .map_err(|_| field_error("owner_id", "Choose someone from the team."))?;
-        if memberships::Model::is_active_member(db, org_id, id).await? {
-            Ok(Some(id))
+    /// The owner ids as posted: `owner_ids`, or the legacy single
+    /// `owner_id` when that is all there is. `None` when the legacy field
+    /// isn't a number.
+    #[must_use]
+    pub fn posted_owners(&self) -> Option<Vec<i64>> {
+        let legacy = self.owner_id.trim();
+        if self.owner_ids.is_empty() && !legacy.is_empty() {
+            legacy.parse().ok().map(|id| vec![id])
         } else {
-            Err(field_error("owner_id", "Choose someone from the team."))
+            Some(self.owner_ids.clone())
         }
     }
+
+    /// The chosen owners, without repeats, in the order given. Each must be
+    /// an approved member of the organisation; one that isn't refuses the
+    /// whole list.
+    ///
+    /// # Errors
+    /// An `owner_ids` field error, or database errors.
+    pub async fn owners<C: ConnectionTrait>(&self, db: &C, org_id: i64) -> ModelResult<Vec<i64>> {
+        let refused = || field_error("owner_ids", "Choose people from the team.");
+        let mut ids: Vec<i64> = Vec::new();
+        for id in self.posted_owners().ok_or_else(refused)? {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        if ids.is_empty() {
+            return Ok(ids);
+        }
+        let found = memberships::Model::team_among(db, org_id, ids.iter().copied()).await?;
+        if found.len() == ids.len() {
+            Ok(ids)
+        } else {
+            Err(refused())
+        }
+    }
+}
+
+/// Who may change a project's owners in an edit. Anyone can edit a project;
+/// owners decide who can close it, so only some people can change them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnerRights {
+    /// An organisation owner or admin, through their own membership.
+    Any,
+    /// A member: only while they own the project.
+    IfOwner(i64),
+    /// A super admin acting in an organisation that isn't theirs.
+    No,
+}
+
+impl OwnerRights {
+    #[must_use]
+    pub fn allows(self, owners: &[i64]) -> bool {
+        match self {
+            Self::Any => true,
+            Self::IfOwner(user_id) => owners.contains(&user_id),
+            Self::No => false,
+        }
+    }
+}
+
+/// What an edit saved, with the owners before and after, for the notices.
+#[derive(Debug)]
+pub struct Saved {
+    pub project: Model,
+    pub owners_before: Vec<i64>,
+    pub owners: Vec<i64>,
 }
 
 #[async_trait::async_trait]
@@ -288,14 +346,14 @@ impl Model {
     ///
     /// # Errors
     /// Validation errors, or database errors.
-    pub async fn create<C: ConnectionTrait>(
-        db: &C,
+    pub async fn create(
+        db: &DatabaseConnection,
         org_id: i64,
         params: &ProjectParams,
         claude_grant: Option<Uuid>,
     ) -> ModelResult<Self> {
         ValidatorTrait::validate(params)?;
-        let owner_id = params.owner(db, org_id).await?;
+        let owners = params.owners(db, org_id).await?;
         let last = Entity::find()
             .in_tenant(org_id)
             .order_by_desc(Column::SortOrder)
@@ -305,11 +363,17 @@ impl Model {
         let mut project = ActiveModel {
             sort_order: ActiveValue::Set(last + 1),
             claude_grant_id: ActiveValue::Set(claude_grant),
+            // The mirror of the first owner; see `set_owners`.
+            owner_id: ActiveValue::Set(owners.first().copied()),
             ..Default::default()
         }
         .set_tenant(org_id)?;
-        apply(&mut project, params, owner_id);
-        Ok(project.insert(db).await?)
+        apply(&mut project, params);
+        let txn = db.begin().await?;
+        let project = project.insert(&txn).await?;
+        project_owners::Model::replace(&txn, org_id, project.id, &owners).await?;
+        txn.commit().await?;
+        Ok(project)
     }
 
     /// Deletes a project with its tasks, their notes, assignees and
@@ -359,18 +423,46 @@ impl Model {
         Ok(Ok(removed))
     }
 
+    /// Saves an edit and, when `rights` allow it, the owners, together. The
+    /// project row is locked first, so the owners read here are the ones
+    /// the rule is checked against. Without the right, the posted owners
+    /// are ignored, not checked.
+    ///
     /// # Errors
-    /// Validation errors, or database errors.
-    pub async fn update_from<C: ConnectionTrait>(
+    /// Validation errors, `EntityNotFound` when it is gone, or database
+    /// errors.
+    pub async fn update_from(
         self,
-        db: &C,
+        db: &DatabaseConnection,
         params: &ProjectParams,
-    ) -> ModelResult<Self> {
+        rights: OwnerRights,
+    ) -> ModelResult<Saved> {
         ValidatorTrait::validate(params)?;
-        let owner_id = params.owner(db, self.organisation_id).await?;
-        let mut project = self.into_active_model();
-        apply(&mut project, params, owner_id);
-        Ok(project.update(db).await?)
+        let org_id = self.organisation_id;
+        let txn = db.begin().await?;
+        let current = Entity::find_by_id(self.id)
+            .in_tenant(org_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await?
+            .ok_or(ModelError::EntityNotFound)?;
+        let owners_before = project_owners::Model::for_project(&txn, org_id, current.id).await?;
+        let mut project = current.into_active_model();
+        apply(&mut project, params);
+        let project = project.update(&txn).await?;
+        let owners = if rights.allows(&owners_before) {
+            let posted = params.owners(&txn, org_id).await?;
+            set_owners(&txn, org_id, project.id, &posted).await?;
+            project_owners::Model::for_project(&txn, org_id, project.id).await?
+        } else {
+            owners_before.clone()
+        };
+        txn.commit().await?;
+        Ok(Saved {
+            project,
+            owners_before,
+            owners,
+        })
     }
 
     /// Moves the project to another lane, from a drag on the roadmap. The
@@ -400,11 +492,12 @@ impl Model {
         !self.is_closed() && self.lane == lane
     }
 
-    /// Who can close and reopen it: owners, admins and the project's owner.
-    /// A close changes other people's tasks, so it is a step above editing.
+    /// Who can close and reopen it: organisation owners, admins and its
+    /// owners (`owners`, from `project_owners`). A close changes other
+    /// people's tasks, so it is a step above editing.
     #[must_use]
-    pub fn closable_by(&self, can_manage: bool, user_id: i64) -> bool {
-        can_manage || self.owner_id == Some(user_id)
+    pub fn closable_by(can_manage: bool, user_id: i64, owners: &[i64]) -> bool {
+        can_manage || owners.contains(&user_id)
     }
 
     /// Marks the project done, and every task in it that isn't done yet, in
@@ -602,12 +695,30 @@ async fn delete_locked<C: ConnectionTrait>(
     Ok(removed)
 }
 
-fn apply(project: &mut ActiveModel, params: &ProjectParams, owner_id: Option<i64>) {
+/// Sets a project's owners, and the `owner_id` column to the first of them (or
+/// NULL). That mirror is never read; it keeps an older build, after a
+/// code-only revert, showing the right single owner.
+async fn set_owners<C: ConnectionTrait>(
+    db: &C,
+    org_id: i64,
+    project_id: i64,
+    ids: &[i64],
+) -> ModelResult<()> {
+    project_owners::Model::replace(db, org_id, project_id, ids).await?;
+    Entity::update_many()
+        .col_expr(Column::OwnerId, Expr::value(ids.first().copied()))
+        .filter(Column::Id.eq(project_id))
+        .filter(Column::OrganisationId.eq(org_id))
+        .exec(db)
+        .await?;
+    Ok(())
+}
+
+fn apply(project: &mut ActiveModel, params: &ProjectParams) {
     project.name = ActiveValue::Set(params.name.trim().to_string());
     project.lane = ActiveValue::Set(params.lane.clone());
     project.status = ActiveValue::Set(params.status.trim().to_string());
     project.accent = ActiveValue::Set(params.accent.to_lowercase());
-    project.owner_id = ActiveValue::Set(owner_id);
     project.summary = ActiveValue::Set(params.summary.trim().to_string());
 }
 
@@ -632,7 +743,7 @@ mod tests {
         }
     }
 
-    fn project(lane: &str, closed: bool, owner_id: Option<i64>) -> Model {
+    fn project(lane: &str, closed: bool) -> Model {
         let now: DateTimeWithTimeZone = chrono::Utc::now().into();
         Model {
             created_at: now,
@@ -645,7 +756,7 @@ mod tests {
             summary: String::new(),
             sort_order: 1,
             organisation_id: 1,
-            owner_id,
+            owner_id: None,
             claude_grant_id: None,
             closed_at: closed.then_some(now),
             closed_by_id: None,
@@ -710,17 +821,31 @@ mod tests {
 
     #[test]
     fn in_lane_skips_closed() {
-        assert!(project("now", false, None).in_lane("now"));
-        assert!(!project("now", false, None).in_lane("next"));
-        assert!(!project("now", true, None).in_lane("now"));
-        assert!(project("now", true, None).is_closed());
+        assert!(project("now", false).in_lane("now"));
+        assert!(!project("now", false).in_lane("next"));
+        assert!(!project("now", true).in_lane("now"));
+        assert!(project("now", true).is_closed());
     }
 
     #[test]
     fn closable_by() {
-        let p = project("now", false, Some(7));
-        assert!(p.closable_by(true, 3), "an owner or admin");
-        assert!(p.closable_by(false, 7), "the project's owner");
-        assert!(!p.closable_by(false, 3), "another member");
+        assert!(Model::closable_by(true, 3, &[]), "an admin, no owners");
+        assert!(Model::closable_by(true, 3, &[7]), "an admin");
+        assert!(Model::closable_by(false, 7, &[7]), "the one owner");
+        assert!(Model::closable_by(false, 8, &[7, 8, 9]), "one of several");
+        assert!(!Model::closable_by(false, 3, &[7, 8]), "another member");
+        assert!(!Model::closable_by(false, 3, &[]), "no owners");
+    }
+
+    #[test]
+    fn owner_rights() {
+        assert!(OwnerRights::Any.allows(&[]));
+        assert!(OwnerRights::IfOwner(7).allows(&[3, 7]));
+        assert!(!OwnerRights::IfOwner(7).allows(&[3]));
+        assert!(
+            !OwnerRights::IfOwner(7).allows(&[]),
+            "no owners: managers only"
+        );
+        assert!(!OwnerRights::No.allows(&[7]));
     }
 }

@@ -69,6 +69,7 @@ fn params(name: &str) -> ProjectParams {
         lane: "now".to_string(),
         status: "Active".to_string(),
         accent: "#6cb6ff".to_string(),
+        owner_ids: vec![],
         owner_id: String::new(),
         summary: String::new(),
     }

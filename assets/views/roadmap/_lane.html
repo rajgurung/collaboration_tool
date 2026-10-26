@@ -17,14 +17,14 @@
         <article class="roadmap-card is-closed" style="--accent-bar: {{ card.accent }}">
           <div class="flex items-center gap-2.5">
             <h3 class="truncate-1 m-0 flex-1 text-base font-bold">{{ card.name }}</h3>
-            {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} size="sm"/>}}{% endif %}
           </div>
           {% if card.summary %}<p class="truncate-1 m-0 text-sm text-muted">{{ card.summary }}</p>{% endif %}
-          <div class="flex flex-wrap gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <span class="closed-badge">{{<icon name="status-done" class="h-[15px] w-[15px]"/>}}Done {{ card.closed_on }}</span>
             {% if card.done_count == 0 and card.open_count == 0 %}<span class="pill font-medium text-muted">No tasks</span>
             {% elif card.done_count > 0 %}<span class="pill font-medium text-muted">{{ card.done_count }} {% if card.done_count == 1 %}task{% else %}tasks{% endif %} done</span>{% endif %}
             {% if card.open_count > 0 %}<span class="status-pill" style="--dot: var(--progress)"><span class="dot"></span>{{ card.open_count }} open {% if card.open_count == 1 %}task{% else %}tasks{% endif %}</span>{% endif %}
+            {% include "roadmap/_owners.html" %}
           </div>
           {% if card.closed_by or card.can_reopen %}
           <div class="closed-foot">
@@ -50,7 +50,6 @@
                  data-project-id="{{ card.id }}" data-card-lane="{{ l.key }}" data-name="{{ card.name }}"{% if card.can_close %} data-can-close{% endif %}>
           <div class="flex items-center gap-2.5">
             <h3 class="truncate-1 m-0 flex-1 text-base font-bold">{{ card.name }}</h3>
-            {% if card.owner %}{{<avatar name={card.owner} color={card.owner_color} size="sm"/>}}{% endif %}
             <button type="button" class="icon-btn -my-2 -mr-2 h-9 w-9 text-muted" aria-label="Edit {{ card.name }}"
                     hx-get="{{ org_url(path="/roadmap/projects/" ~ (card.id) ~ "/edit") }}" hx-target="#project-dialog-body"
                     hx-on::after-request="if (event.detail.successful) document.getElementById('project-dialog').showModal()">{{<icon name="pencil" class="h-4 w-4"/>}}</button>
@@ -60,10 +59,11 @@
             <span class="bar flex-1" style="--bar: {{ card.accent }}" role="progressbar" aria-label="Tasks done" aria-valuenow="{{ card.progress.percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ card.progress.percent }}%"></span></span>
             <span class="w-9 text-right text-[13px] font-semibold tabular-nums">{{ card.progress.percent }}%</span>
           </div>
-          <div class="flex flex-wrap gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <span class="pill">{{ card.status }}</span>
             <span class="pill font-medium text-muted">{% if card.progress.total > 0 %}{{ card.progress.done }} of {{ card.progress.total }} tasks done{% else %}No tasks yet{% endif %}</span>
             {% if card.blocked > 0 %}<span class="pill pill-blocked">{{ card.blocked }} blocked</span>{% endif %}
+            {% include "roadmap/_owners.html" %}
           </div>
         </article>
         {% else %}

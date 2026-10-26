@@ -190,6 +190,9 @@
   .avatar-stack { display: inline-flex; }
   .avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
   .avatar-stack > .avatar + .avatar { margin-left: -6px; }
+  /* "+N" after three owners, in the same circle. */
+  .avatar-more { background: var(--chip); color: var(--muted); font-size: 11px; font-weight: 700; }
+  .owner-stack { margin-left: auto; }
   .avatar-md { width: 36px; height: 36px; font-size: 14px; }
   .avatar-lg { width: 44px; height: 44px; font-size: 16px; }
   .badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
@@ -222,6 +225,7 @@
   .person-toggle > span .avatar { opacity: 0.5; }
   .person-toggle input:checked + span { border-color: var(--progress); color: var(--text); font-weight: 700; background: color-mix(in srgb, var(--progress) 8%, var(--surface)); }
   .person-toggle input:checked + span .avatar { opacity: 1; }
+  fieldset:disabled .person-toggle { cursor: default; }
   .option input:focus-visible + span, .person-toggle input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Status colours */

@@ -1082,6 +1082,7 @@ async fn made_with_claude_shows_and_the_grant_never_does() {
                 lane: "now".to_string(),
                 status: "Active".to_string(),
                 accent: "#ffb454".to_string(),
+                owner_ids: vec![],
                 owner_id: String::new(),
                 summary: String::new(),
             },

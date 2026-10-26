@@ -20,7 +20,7 @@ use super::{
     admin::super_admin_cookie,
     mcp::{rpc, token_for, tool},
     prepare_data::{approve_as_owner, join, sign_up_member, AsMember, TestMember},
-    tasks::{project_in, task_form},
+    tasks::{own, project_in, task_form},
 };
 
 const REFUSAL: &str = "Website is done. Reopen the project first.";
@@ -52,11 +52,10 @@ async fn teammate(
     (member, user.id)
 }
 
-/// Makes `user_id` the project's owner.
+/// Makes `user_id` the project's one owner.
 async fn owned_by(ctx: &AppContext, project: &projects::Model, user_id: i64) -> projects::Model {
-    let mut p = project.clone().into_active_model();
-    p.owner_id = ActiveValue::Set(Some(user_id));
-    p.update(&ctx.db).await.unwrap()
+    own(ctx, project, &[user_id]).await;
+    project.clone()
 }
 
 async fn find(ctx: &AppContext, project: &projects::Model) -> projects::Model {
@@ -1215,6 +1214,7 @@ async fn home_shows_the_donut_for_now_projects() {
                 lane: "next".to_string(),
                 status: "Idea".to_string(),
                 accent: "#c9d76a".to_string(),
+                owner_ids: vec![],
                 owner_id: String::new(),
                 summary: String::new(),
             },
