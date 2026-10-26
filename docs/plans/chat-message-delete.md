@@ -1,6 +1,14 @@
 # Delete a chat message
 
-Status: Draft, for staff and security review · One PR · Owner: Raj · 25 October 2026
+Status: Approved with changes (staff and security), built · One PR · Owner: Raj · 25 October 2026
+
+**Review changes, applied in the build:** a failed delete that already took
+the photo still publishes `PhotoRemoved`; the client regroups only the two
+neighbours of a removed message; the mention-email claim and
+`due_mention_emails` skip chat notices with no `message_id`; the migration's
+`UPDATE` only touches unsent chat mentions; the deadlock note below is
+corrected; step 6's guard is dropped (`replies_never_carry_photos` pins it);
+the handler is `destroy`, and `_thread_gone.html` links "Back to chat".
 
 Brief: `docs/briefs/chat-message-delete.md`. Mockup:
 `docs/designs/chat-message-delete.html` (sections §1 to §5 below are the
@@ -139,10 +147,11 @@ ALTER TABLE notifications
   REFERENCES messages (id) ON DELETE CASCADE ON UPDATE CASCADE;
 CREATE INDEX "idx-notifications-message"
   ON notifications (message_id) WHERE message_id IS NOT NULL;
--- Mentions saved before this column existed can't be found by a delete,
--- so none of them is emailed after deploy.
+-- Chat mentions saved before this column existed can't be found by a
+-- delete, so none of them is emailed after deploy. Task-note mentions link
+-- to /tasks?open=... and are left alone.
 UPDATE notifications SET emailed_at = now()
- WHERE kind = 'mention' AND emailed_at IS NULL;
+ WHERE kind = 'mention' AND emailed_at IS NULL AND link LIKE '/chat/%';
 ```
 
 **`message_id`, `ON DELETE CASCADE`.** The notice exists to point at a
@@ -170,9 +179,9 @@ bell (the brief accepts this). Their emails are stopped instead: the
 less than 15 minutes old at deploy are never emailed. The people tagged
 still see them in the bell. The PR says so. Railway runs migrations as the
 new app boots, so the old instance can still make notices in the seconds
-before it stops. Those have NULL too and could still be emailed if their
-message is deleted within 15 minutes. That leaves a window of seconds,
-accepted.
+before it stops. Those have NULL too. The window is closed in code:
+`due_mention_emails` and the claim skip rows with `message_id IS NULL AND
+link LIKE '/chat/%'`, so those are never emailed either.
 
 **Reversible.** `down`:
 
@@ -263,8 +272,10 @@ In order:
    - On a storage or database error, return it. Nothing else has changed.
    - On `EntityNotFound`, carry on. That comes from the non-photo Documents
      branch: the #general file is no longer a photo type, so this chat must
-     not delete it. A code comment says so (T). The file stays in
-     Documents; the row's `document_id` goes with the row.
+     not delete it. The code comment says this can't happen today: a file's
+     `content_type` is set only at upload, and chat uploads are sniffed to
+     photo types. The file stays in Documents; the row's `document_id` goes
+     with the row.
 3. `let txn = ctx.db.begin().await?` and `SET LOCAL lock_timeout = '5s'`, so
    a stuck lock fails the delete rather than hanging it.
 4. Re-read the row with `FOR UPDATE` (`lock_exclusive`), by id, organisation
@@ -274,10 +285,8 @@ In order:
    more than 0, roll back and return `Message(HAS_REPLIES)`. A reply that
    committed between step 1 and here is seen. One still in flight holds
    `FOR SHARE` on this row, so step 4 waited for it.
-6. **Guard.** No reply may carry a photo:
-   `reply_count where has_photo` must be 0, else return an error. That can't
-   happen today, but a cascade must never orphan bytes if a future change
-   allows it.
+6. (Dropped in review: a reply can never carry a photo, and
+   `replies_never_carry_photos` pins that.)
 7. Collect `user_id`s of notices for this message and its replies, for the
    badge refresh after commit.
 8. `Entity::delete_by_id(id)` with the organisation filter. Postgres
@@ -293,7 +302,10 @@ deleted and the message refused. They were allowed to delete the photo
 anyway; the bubble shows "Photo removed" and the alert says why.
 
 **The transaction failing after the photo went (S5).** The handler returns
-the error (500). The client shows the retry alert. The bubble shows "Photo
+the error (500), or 403 when a reply landed after the photo went. In both
+cases it first re-reads the row and, if `photo_removed()`, publishes
+`PhotoRemoved`, so open pages drop the thumbnail. The client shows the
+retry alert. The bubble shows "Photo
 removed" with its caption, the same state as after photo delete, and safe.
 A retry skips step 2 (no photo left) and finishes. A test forces this
 (below).
@@ -303,11 +315,13 @@ With `on = true` it runs begin, then `lock_live`, then `EntityNotFound` if
 `None`, then the insert, then commit, so the lock is held inside a real
 transaction (S1). With `on = false` it is a plain delete, no lock needed.
 
-**Deadlocks (S4).** Every path takes the message row first, then writes
-children, so the paths in this plan can't deadlock each other. If Postgres
-ever reports one, it aborts one transaction. The delete answers 500 and
-the client shows the retry alert; a reaction or reply shows its existing
-error. Nothing is half-done.
+**Deadlocks (S4).** Reactions, replies and notices take the message row
+first, then write children. The mention-email claim is different: it locks
+notification rows directly, and the delete's cascade locks the same rows
+after the message. So the claim and a delete can deadlock. Both fail safe:
+Postgres aborts one transaction. A delete then answers 500 and the client
+shows the retry alert; a claim errors and the next minute's run tries
+again. A reaction or reply shows its existing error. Nothing is half-done.
 
 **Unit test:** `may_delete_message` for sender with and without replies,
 owner/admin with replies, and another member.
@@ -362,6 +376,8 @@ those only.
 
 - If a delete's transaction holds a notice row (its cascade locks it), the
   claim waits, then finds the row gone, and skips it.
+- Chat notices with no `message_id` (made by the old code during a deploy)
+  are never claimed.
 - If the claim wins, the email was in effect sent before the delete, which
   is the brief's "already gone out" case.
 - `kind` and `read_at` in the `WHERE` mean a notice read since it was
@@ -577,11 +593,12 @@ Tera-escaped and nothing comes from `data-*`:
 partial, `_thread_gone.html`, holds the "deleted while open" state:
 
 ```html
-<div class="center-state">{{<icon name="messages-square" class="h-9 w-9"/>}}<h2>This thread was deleted</h2><a href="{{ org_url(path="/chat/" ~ (conversation_id)) }}" class="btn btn-secondary">Back to {{ back }}</a></div>
+<div class="center-state" data-thread-gone>{{<icon name="messages-square" class="h-9 w-9"/>}}<h2>This thread was deleted</h2><a href="{{ org_url(path="/chat/" ~ (conversation_id)) }}" class="btn btn-secondary">Back to chat</a></div>
 ```
 
-`back` is `#general`, the group name or the DM's other person, as in the
-thread header. On a reload the page is the existing `thread_missing.html`.
+A plain "Back to chat", so the socket's `Session` needs no label. The
+server never closes the socket. On a reload the page is the existing
+`thread_missing.html`.
 
 **`last_line`, the chat list and Home:** no change. They read
 `latest_per_conversation`, which now returns the message before the deleted
@@ -695,10 +712,14 @@ router; the sheet no longer has that row. A click on `[data-message-delete]`:
    Check your connection and try again." Delete is the retry. Show a toast
    instead only if the confirm was already closed (S4, S5).
 
-**Regroup after a removal.** `regroupFeed()` runs on `htmx:wsAfterMessage`
-and after a feed reload. It walks the `.msg` elements of `#chat-feed` in
-order, treating any non-`.msg` element (the thread divider, the empty
-state) as a break, and does what `mark_runs` does on the server:
+**Regroup after a removal.** Only around a removal, never on every socket
+message. `htmx:oobBeforeSwap` on a `#chat-feed > .msg` (only the
+`hx-swap-oob="delete"` swap targets a whole message) records its two
+neighbours; `htmx:wsAfterMessage` regroups just those two. A feed reload
+is drawn by the server and needs nothing. A message that came over the
+socket carries `data-live` and always keeps its run start, as the CSS
+straddle rule expects. Any non-`.msg` element (the thread divider, the
+empty state) is a break. It does what `mark_runs` does on the server:
 
 - `msg-start` when the previous `.msg`'s `data-author-id` differs.
 - The avatar `.msg-av` is `visible` when the next one's differs, else
@@ -928,9 +949,11 @@ In `chat_message_delete.rs`, in the shape of
 whitespace stripped from each file's text, so formatting can't hide a call:
 
 - `messages_are_only_deleted_by_the_model`:
-  - Outside `src/models/messages.rs`, no file contains `messages::Entity::delete`
-    or `Messages::delete`, nor a `.delete(` on a messages model.
-  - Inside it, `Entity::delete` appears exactly once, in `delete_message`.
+  - Outside `src/models/messages.rs`, no file contains `messages::Entity::delete`,
+    `Messages::delete` or `messages::ActiveModel::delete`. `app.rs`'s
+    `truncate_table(.., messages::Entity)` matches none of them.
+  - Inside it, `Entity::delete` (also a prefix of `Entity::delete_by_id`)
+    appears exactly once, in `delete_message`.
 - The existing photo check still holds unchanged.
 
 ### Not covered by `cargo test`
