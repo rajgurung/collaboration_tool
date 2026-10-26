@@ -15,8 +15,8 @@ use crate::{
     models::{
         memberships, project_owners,
         projects::{
-            self, CloseSummary, OwnerRights, Progress, ProjectParams, ACCENTS, DONE, DONE_SHOWN,
-            LANES,
+            self, CloseSummary, MoveRefusal, OwnerRights, Progress, ProjectParams, ACCENTS, DONE,
+            DONE_SHOWN, LANES,
         },
         task_assignees, tasks,
     },
@@ -464,6 +464,42 @@ async fn update(
     .await
 }
 
+/// A drop or an arrow on the roadmap: the lane, and the visible card it
+/// lands before (or after).
+#[derive(Debug, Deserialize)]
+struct MoveForm {
+    lane: String,
+    #[serde(default)]
+    before: Option<i64>,
+    #[serde(default)]
+    after: Option<i64>,
+}
+
+/// Puts a project at a spot in a lane. Any member can, as with a lane
+/// change. No toast and no notices: a lane change never sent any.
+#[debug_handler]
+async fn move_project(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(form): Form<MoveForm>,
+) -> Result<Response> {
+    let place = super::tasks::move_place(form.before, form.after)?;
+    let project =
+        match projects::Model::move_to(&ctx.db, member.org.id, id, &form.lane, place).await {
+            Ok(Ok(project)) => project,
+            Ok(Err(MoveRefusal::Stale)) => return super::tasks::move_refused(None),
+            Ok(Err(MoveRefusal::Closed(project))) => return closed_refused(&project),
+            Err(err) => return super::tasks::move_failed(err),
+        };
+    if !headers.contains_key("hx-request") {
+        let to = member.url(&format!("/roadmap?lane={}", project.lane));
+        return Ok(redirect_response(&headers, &to));
+    }
+    format::render().header("HX-Reswap", "none").empty()
+}
+
 #[derive(Debug, Deserialize)]
 struct LaneForm {
     #[serde(rename = "lane")]
@@ -731,6 +767,7 @@ pub fn routes() -> Routes {
         .add("/roadmap/projects/{id}", post(update))
         .add("/roadmap/projects/{id}/delete", post(destroy))
         .add("/roadmap/projects/{id}/lane", post(move_lane))
+        .add("/roadmap/projects/{id}/move", post(move_project))
         .add("/roadmap/projects/{id}/close", post(close))
         .add("/roadmap/projects/{id}/reopen", post(reopen))
 }

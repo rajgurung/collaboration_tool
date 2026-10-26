@@ -265,6 +265,8 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/roadmap/projects/{}/close", globex.project.id), serde_json::json!({})),
             (format!("/roadmap/projects/{}/reopen", globex.project.id), serde_json::json!({})),
             (format!("/tasks/{}/status", globex.task.id), serde_json::json!({ "status": "done" })),
+            (format!("/tasks/{}/move", globex.task.id), serde_json::json!({ "status": "todo" })),
+            (format!("/roadmap/projects/{}/move", globex.project.id), serde_json::json!({ "lane": "next" })),
             (format!("/tasks/{}", globex.task.id), serde_json::json!({ "title": "hijacked", "project_id": "1", "priority": "high" })),
             (format!("/tasks/{}/delete", globex.task.id), serde_json::json!({})),
             (format!("/tasks/{}/notes", globex.task.id), serde_json::json!({ "body": "hijacked" })),
@@ -314,6 +316,22 @@ async fn org_a_cannot_reach_org_b() {
             .await;
         assert_eq!(res.status_code(), 404, "own task, Globex note");
         assert!(!res.text().contains(SECRET), "own task, Globex note");
+
+        // Alice's own task and project placed against Globex's: the same
+        // answer as a card that moved away, and nothing written anywhere.
+        let globex_before = tasks::Entity::find_by_id(globex.task.id).one(&ctx.db).await.unwrap().unwrap();
+        for (path, form) in [
+            (format!("/tasks/{}/move", acme_task.id), serde_json::json!({ "status": globex_before.status, "before": globex.task.id })),
+            (format!("/roadmap/projects/{}/move", acme_project.id), serde_json::json!({ "lane": "now", "after": globex.project.id })),
+        ] {
+            let res = request.post(&a.at(&path)).as_member(&a).add_header("HX-Request", "true").form(&form).await;
+            assert_eq!(res.status_code(), 409, "{path}");
+            assert!(res.text().is_empty() && !res.text().contains(SECRET));
+        }
+        let acme_after = tasks::Entity::find_by_id(acme_task.id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!((acme_after.status.as_str(), acme_after.sort_order), (acme_task.status.as_str(), acme_task.sort_order));
+        let globex_after = tasks::Entity::find_by_id(globex.task.id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(globex_after.sort_order, globex_before.sort_order);
 
         // Alice's own conversations with Globex's photo messages.
         let alice_id = users::Model::find_by_email(&ctx.db, "alice@example.com").await.unwrap().id;
