@@ -1,3 +1,4 @@
+mod locks;
 mod models;
 mod requests;
 mod tasks;

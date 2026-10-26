@@ -212,7 +212,7 @@ mod mention_claims {
         });
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(!claim.is_finished(), "the claim waits for the delete");
-        assert!(super::super::waiting_locks(&deleting).await > 0);
+        assert!(crate::locks::waiting_locks(&deleting).await > 0);
         txn.commit().await.unwrap();
         assert!(claim.await.unwrap().unwrap().is_empty());
     }

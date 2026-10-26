@@ -62,6 +62,7 @@ impl Model {
                 .await?
                 .is_none()
             {
+                // Dropping `txn` rolls it back.
                 return Err(ModelError::EntityNotFound);
             }
             // `on_conflict_do_nothing_on` treats a conflict as success; a plain

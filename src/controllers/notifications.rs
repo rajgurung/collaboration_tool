@@ -423,6 +423,7 @@ pub async fn message_sent(
         .await?
         .is_none()
     {
+        // Already deleted. Dropping `txn` rolls it back; nothing was saved.
         return Ok(());
     }
     let mut told = notifications::Model::notify(
@@ -519,6 +520,7 @@ pub async fn reply_sent(
         .await?
         .is_none()
     {
+        // Already deleted. Dropping `txn` rolls it back; nothing was saved.
         return Ok(());
     }
     let mut told = notifications::Model::notify(

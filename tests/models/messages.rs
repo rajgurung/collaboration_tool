@@ -816,12 +816,11 @@ mod deleting {
     use loco_rs::{app::AppContext, prelude::ModelError, testing::prelude::*};
     use sea_orm::{
         ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
-        DatabaseTransaction, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-        TransactionTrait,
+        EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     };
     use serial_test::serial;
 
-    use super::super::waiting_locks;
+    use crate::locks::{hold, waiting_locks};
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
 
@@ -956,29 +955,6 @@ mod deleting {
             .count(&ctx.db)
             .await
             .unwrap()
-    }
-
-    /// A transaction on its own connection holding `lock` on the message,
-    /// which never waits more than a few seconds itself.
-    async fn hold(
-        ctx: &AppContext,
-        message: &messages::Model,
-        lock: &str,
-    ) -> (DatabaseConnection, DatabaseTransaction) {
-        let conn = sea_orm::Database::connect(&ctx.config.database.uri)
-            .await
-            .unwrap();
-        let txn = conn.begin().await.unwrap();
-        txn.execute_unprepared("SET LOCAL lock_timeout = '10s'")
-            .await
-            .unwrap();
-        txn.execute_unprepared(&format!(
-            "SELECT id FROM messages WHERE id = {} {lock}",
-            message.id
-        ))
-        .await
-        .unwrap();
-        (conn, txn)
     }
 
     /// The spawned side has not finished, and Postgres says it is waiting.
@@ -1187,7 +1163,7 @@ mod deleting {
         let key = message.photo_key.clone().unwrap();
         // KEY SHARE lets the photo's update through and stops the delete's
         // FOR UPDATE, as a reaction's foreign key check would.
-        let (_conn, txn) = hold(ctx, &message, "FOR KEY SHARE").await;
+        let (_conn, txn) = hold(ctx, message.id, "FOR KEY SHARE").await;
 
         let err = message
             .clone()
@@ -1216,7 +1192,7 @@ mod deleting {
         let ctx = &boot.app_context;
         let acme = acme(ctx).await;
         let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
-        let (conn, txn) = hold(ctx, &parent, "FOR UPDATE").await;
+        let (conn, txn) = hold(ctx, parent.id, "FOR UPDATE").await;
         txn.execute_unprepared(&format!("DELETE FROM messages WHERE id = {}", parent.id))
             .await
             .unwrap();
@@ -1249,7 +1225,7 @@ mod deleting {
         let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
         // What create_reply does, held open: the parent locked FOR SHARE and
         // the reply inserted but not committed.
-        let (conn, txn) = hold(ctx, &parent, "FOR SHARE").await;
+        let (conn, txn) = hold(ctx, parent.id, "FOR SHARE").await;
         messages::ActiveModel {
             body: ActiveValue::Set("I can".to_string()),
             conversation_id: ActiveValue::Set(acme.general.id),
@@ -1281,7 +1257,7 @@ mod deleting {
         let ctx = &boot.app_context;
         let acme = acme(ctx).await;
         let message = say(ctx, &acme.general, acme.bob.id, "Leeds £4.20").await;
-        let (conn, txn) = hold(ctx, &message, "FOR UPDATE").await;
+        let (conn, txn) = hold(ctx, message.id, "FOR UPDATE").await;
         txn.execute_unprepared(&format!("DELETE FROM messages WHERE id = {}", message.id))
             .await
             .unwrap();
@@ -1307,7 +1283,7 @@ mod deleting {
         let ctx = &boot.app_context;
         let acme = acme(ctx).await;
         let message = say(ctx, &acme.general, acme.bob.id, "@alice Leeds £4.20").await;
-        let (conn, txn) = hold(ctx, &message, "FOR UPDATE").await;
+        let (conn, txn) = hold(ctx, message.id, "FOR UPDATE").await;
         txn.execute_unprepared(&format!("DELETE FROM messages WHERE id = {}", message.id))
             .await
             .unwrap();
@@ -1327,6 +1303,90 @@ mod deleting {
             notifications::Entity::find().count(&ctx.db).await.unwrap(),
             0
         );
+    }
+
+    /// A notice and a reaction saving on a reply hold FOR SHARE on that
+    /// reply. Its parent's delete waits for them, then takes them with it,
+    /// and counts the notice's reader among the badges to refresh.
+    #[tokio::test]
+    #[serial]
+    async fn saves_on_a_reply_during_its_parents_delete_go_with_it() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
+        let reply = answer(&ctx.db, &acme.general, &parent, acme.alice.id, "I can")
+            .await
+            .unwrap();
+        // What reply_sent and reactions::set do, held open.
+        let (conn, txn) = hold(ctx, reply.id, "FOR SHARE").await;
+        notifications::Model::notify(
+            &txn,
+            acme.org_id,
+            acme.alice.id,
+            &[acme.bob.id],
+            &notifications::Notice {
+                kind: notifications::kind::REPLY,
+                body: "replied to your message\nI can".to_string(),
+                link: format!("/chat/{}/threads/{}", acme.general.id, parent.id),
+                message_id: Some(reply.id),
+            },
+        )
+        .await
+        .unwrap();
+        reactions::ActiveModel {
+            emoji: ActiveValue::Set("👍".to_string()),
+            message_id: ActiveValue::Set(reply.id),
+            user_id: ActiveValue::Set(acme.bob.id),
+            organisation_id: ActiveValue::Set(acme.org_id),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .unwrap();
+
+        let (task_ctx, deleting) = (ctx.clone(), parent.clone());
+        let delete = tokio::spawn(async move { deleting.delete_message(&task_ctx, true).await });
+        assert_waiting(&delete, &conn).await;
+        txn.commit().await.unwrap();
+        let deleted = delete.await.unwrap().unwrap();
+        assert_eq!(deleted.replies, 1);
+        assert_eq!(deleted.notified, vec![acme.bob.id], "the badge to refresh");
+        assert_eq!(find(ctx, reply.id).await, None);
+        assert_eq!(notices_about(ctx, &[reply.id]).await, 0);
+        assert_eq!(reactions_on(ctx, &[reply.id]).await, 0);
+        assert_eq!(
+            notifications::Entity::find().count(&ctx.db).await.unwrap(),
+            0
+        );
+    }
+
+    /// If a reply ever carried a photo, the cascade would delete its row
+    /// and leave its stored bytes behind, so the delete refuses.
+    #[tokio::test]
+    #[serial]
+    async fn a_reply_with_a_photo_stops_the_delete() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
+        let reply = answer(&ctx.db, &acme.general, &parent, acme.alice.id, "I can")
+            .await
+            .unwrap();
+        ctx.db
+            .execute_unprepared(&format!(
+                "UPDATE messages SET has_photo = true WHERE id = {}",
+                reply.id
+            ))
+            .await
+            .unwrap();
+        let err = parent.clone().delete_message(ctx, true).await.unwrap_err();
+        assert!(
+            matches!(&err, ModelError::Message(text) if text == messages::REPLY_HAS_PHOTO),
+            "{err:?}"
+        );
+        assert!(find(ctx, parent.id).await.is_some());
+        assert!(find(ctx, reply.id).await.is_some());
     }
 
     /// The cascade deletes replies without looking for photos: only a

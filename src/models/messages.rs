@@ -61,6 +61,10 @@ pub fn may_delete(sender_id: i64, user_id: i64, can_manage: bool) -> bool {
 /// message that has replies.
 pub const HAS_REPLIES: &str = "This has replies. Ask an owner or admin to delete it.";
 
+/// Never expected: replies can't carry photos. A delete refuses rather than
+/// let the cascade leave a reply's stored photo behind.
+pub const REPLY_HAS_PHOTO: &str = "A reply in this thread has a photo. Delete that reply first.";
+
 /// Whether this person may delete a message with `replies` replies: owners
 /// and admins any, the sender only one with none. The caller must already
 /// know the person is in the conversation.
@@ -283,6 +287,7 @@ impl Model {
                 && p.organisation_id == conversation.organisation_id
                 && p.parent_id.is_none()
         }) else {
+            // Dropping `txn` rolls it back.
             return Err(ModelError::EntityNotFound);
         };
         let reply = Self::insert(&txn, conversation, Some(parent.id), user_id, params).await?;
@@ -587,27 +592,36 @@ impl Model {
         // still saving holds FOR SHARE on this row, so the lock above waited.
         let replies = message.reply_count(&txn).await?;
         if !by_manager && replies > 0 {
+            // Dropping `txn` rolls it back.
             return Err(ModelError::msg(HAS_REPLIES));
         }
-        let reply_ids = Entity::find()
+        // The replies are locked too: a notice or reaction still saving on
+        // one holds FOR SHARE on it, so this waits for it, and no new one
+        // can start.
+        let locked = Entity::find()
             .in_tenant(message.organisation_id)
             .filter(Column::ParentId.eq(message.id))
-            .select_only()
-            .column(Column::Id)
-            .into_tuple::<i64>()
+            .lock_exclusive()
             .all(&txn)
             .await?;
-        let mut notified: Vec<i64> = notifications::Entity::find()
+        // The cascade deletes reply rows, never stored bytes. Replies can't
+        // have photos today; if one ever does, refuse rather than orphan it.
+        if locked.iter().any(|r| r.has_photo) {
+            return Err(ModelError::msg(REPLY_HAS_PHOTO));
+        }
+        // Deleted here rather than by the cascade, to learn whose bell
+        // badges change. Nothing new can point at these rows now.
+        let mut notified: Vec<i64> = notifications::Entity::delete_many()
             .filter(notifications::Column::OrganisationId.eq(message.organisation_id))
             .filter(
                 notifications::Column::MessageId
-                    .is_in(std::iter::once(message.id).chain(reply_ids)),
+                    .is_in(std::iter::once(message.id).chain(locked.iter().map(|r| r.id))),
             )
-            .select_only()
-            .column(notifications::Column::UserId)
-            .into_tuple::<i64>()
-            .all(&txn)
-            .await?;
+            .exec_with_returning(&txn)
+            .await?
+            .into_iter()
+            .map(|n| n.user_id)
+            .collect();
         notified.sort_unstable();
         notified.dedup();
         Entity::delete_by_id(message.id)

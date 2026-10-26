@@ -7,7 +7,9 @@ the photo still publishes `PhotoRemoved`; the client regroups only the two
 neighbours of a removed message; the mention-email claim and
 `due_mention_emails` skip chat notices with no `message_id`; the migration's
 `UPDATE` only touches unsent chat mentions; the deadlock note below is
-corrected; step 6's guard is dropped (`replies_never_carry_photos` pins it);
+corrected; step 6 is a one-query guard on the locked replies (and
+`replies_never_carry_photos` still pins the assumption); the replies are
+locked and their notices deleted with `RETURNING`, so badges are exact;
 the handler is `destroy`, and `_thread_gone.html` links "Back to chat".
 
 Brief: `docs/briefs/chat-message-delete.md`. Mockup:
@@ -285,12 +287,15 @@ In order:
    more than 0, roll back and return `Message(HAS_REPLIES)`. A reply that
    committed between step 1 and here is seen. One still in flight holds
    `FOR SHARE` on this row, so step 4 waited for it.
-6. (Dropped in review: a reply can never carry a photo, and
-   `replies_never_carry_photos` pins that.)
-7. Collect `user_id`s of notices for this message and its replies, for the
-   badge refresh after commit.
+6. Lock the replies `FOR UPDATE`, which waits for any notice or reaction
+   still saving on one. If any locked reply has `has_photo`, refuse
+   (`REPLY_HAS_PHOTO`): the cascade would orphan its bytes. Replies can't
+   have photos today.
+7. Delete the notices for the message and its replies with `RETURNING
+   user_id`, for the badge refresh after commit.
 8. `Entity::delete_by_id(id)` with the organisation filter. Postgres
-   cascades replies, the reactions on both, and the notices on both.
+   cascades replies and the reactions on both; the cascade on notices is
+   the backstop.
 9. Commit. Return the reply count.
 
 **Why this order.** The photo first, for the reason the photo plan gives:
@@ -1003,11 +1008,21 @@ recalling a sent email; long-press menus; the Claude connector. Also:
 - **Permanent, and wider than one message.** An admin deleting a parent
   takes everyone's replies. The confirm says how many. The info log is the
   only record (S7); the PR says so.
-- **Text that outlives the delete.** Emails already sent, quotes in notices
-  made before deploy, and Railway database backups. Assumption from the
-  brief: backups age out; Raj to confirm Railway's retention before merge.
-  R2 versioning must be off, as for photo delete. The PR says "if it was a
-  password, change it" (S8).
+- **Text that outlives the delete.**
+  - Backups: the Railway Postgres volume has no backups or schedules today,
+    so no backup holds deleted text. That also means there is no disaster
+    recovery.
+  - Raj will enable a daily backup, kept 6 days
+    (https://docs.railway.com/volumes/backups). From then on, deleted text
+    can sit in a backup for up to 6 days. A weekly or monthly schedule would
+    make that 1 or 3 months, and locked or manual backups never expire.
+  - Mention emails already sent stay in Resend for about 30 days, and in
+    inboxes.
+  - Old row versions stay in the database files until vacuum.
+  - Chat mention notices from before the deploy keep their quote in the
+    bell. They are no longer emailed.
+  - R2 has no versioning, lifecycle or lock rules, as for photo delete.
+  - The PR says "if it was a password, change it" (S8).
 - **Mention emails skipped at deploy.** Up to 15 minutes' worth, by design
   (S4). Their bell notices stay.
 - **Lock waits.** A reaction, reply or notice save can wait on a delete for

@@ -2116,9 +2116,17 @@ let deletingMessage = "";
 
 const messageOnPage = (id: string) => !!id && !!document.getElementById(`message-${id}`);
 
+// The quote of a message that is gone, in a sheet or the confirm.
+function quoteGone(quote: HTMLElement | null) {
+  if (!quote) return;
+  quote.textContent = "Message deleted";
+  quote.classList.add("excerpt-deleted");
+}
+
 // Someone else got there first: say so, and offer only Close.
 function showMessageGone(dialog: HTMLDialogElement) {
   const p = confirmParts(dialog, "message-delete");
+  quoteGone(dialog.querySelector<HTMLElement>(".quote p"));
   if (p.error) p.error.textContent = "This message was already deleted.";
   if (p.alert) p.alert.hidden = false;
   const buttons = dialog.querySelector<HTMLElement>("[data-message-delete-buttons]");
@@ -2132,13 +2140,11 @@ function showSheetGone(sheet: HTMLDialogElement) {
   const actions = sheet.querySelector<HTMLElement>(".msg-actions");
   if (!actions || actions.hasAttribute("data-gone")) return;
   actions.setAttribute("data-gone", "");
-  const quote = actions.querySelector<HTMLElement>(".quote p");
-  if (quote) {
-    quote.textContent = "Message deleted";
-    quote.classList.add("excerpt-deleted");
-  }
+  quoteGone(actions.querySelector<HTMLElement>(".quote p"));
+  // Its confirm, with the message's text, can no longer open.
+  actions.querySelector("template[data-message-delete-body]")?.remove();
   for (const el of Array.from(actions.children)) {
-    if (el instanceof HTMLElement && !el.matches(".quote, .sr-only, template")) el.hidden = !el.hasAttribute("data-sheet-gone");
+    if (el instanceof HTMLElement && !el.matches(".quote, .sr-only")) el.hidden = !el.hasAttribute("data-sheet-gone");
   }
 }
 
@@ -2209,6 +2215,11 @@ document.addEventListener("click", (event) => {
   if (photoConfirm) return void deletePhoto(photoConfirm);
   const messageConfirm = target?.closest("[data-message-delete-confirm]")?.closest("dialog");
   if (messageConfirm) void deleteMessage(messageConfirm);
+});
+
+// A closed confirm keeps none of the message's text in the page.
+document.querySelector<HTMLDialogElement>("#message-delete")?.addEventListener("close", (event) => {
+  (event.currentTarget as HTMLElement).querySelector("[data-message-delete-slot]")?.replaceChildren();
 });
 
 // Escape does nothing while deleting.

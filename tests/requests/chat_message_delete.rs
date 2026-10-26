@@ -16,13 +16,12 @@ use collab::{
 };
 use futures_util::{SinkExt, StreamExt};
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    PaginatorTrait, QueryFilter, Statement, TransactionTrait,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, Statement};
 use serial_test::serial;
 use tokio::sync::broadcast::Receiver;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+use crate::locks::{hold, waiting_locks};
 
 use super::{
     chat_photos::{group_of, latest_message, leaks, open_photo, page, secret_png, send_photo},
@@ -222,41 +221,6 @@ fn photo_removals(events: &mut Receiver<ChatEvent>) -> Vec<(i64, i64)> {
         }
     }
     found
-}
-
-/// A transaction on its own connection holding `FOR KEY SHARE` on the
-/// message, as an insert's foreign key check does. A photo update gets
-/// past it; the delete's `FOR UPDATE` does not.
-async fn hold_key_share(
-    ctx: &AppContext,
-    message: &messages::Model,
-) -> (DatabaseConnection, DatabaseTransaction) {
-    let conn = sea_orm::Database::connect(&ctx.config.database.uri)
-        .await
-        .unwrap();
-    let txn = conn.begin().await.unwrap();
-    txn.execute_unprepared("SET LOCAL lock_timeout = '10s'")
-        .await
-        .unwrap();
-    txn.execute_unprepared(&format!(
-        "SELECT id FROM messages WHERE id = {} FOR KEY SHARE",
-        message.id
-    ))
-    .await
-    .unwrap();
-    (conn, txn)
-}
-
-async fn waiting_locks(db: &DatabaseConnection) -> i64 {
-    db.query_one_raw(Statement::from_string(
-        db.get_database_backend(),
-        "SELECT count(*) AS n FROM pg_locks WHERE NOT granted",
-    ))
-    .await
-    .unwrap()
-    .unwrap()
-    .try_get::<i64>("", "n")
-    .unwrap()
 }
 
 #[tokio::test]
@@ -868,7 +832,7 @@ async fn a_failed_delete_answers_500_and_a_retry_works() {
         .await;
         assert_eq!(res.status_code(), 200);
         let photo = latest_message(&ctx).await;
-        let (_conn, txn) = hold_key_share(&ctx, &photo).await;
+        let (_conn, txn) = hold(&ctx, photo.id, "FOR KEY SHARE").await;
         let mut events = hub_events(&ctx);
 
         let res = delete(&request, &team.tom, &photo).await;
@@ -899,7 +863,7 @@ async fn a_reply_that_lands_after_the_photo_refuses_the_rest() {
         let res = send_photo(&request, &team.tom, finance, Some(INVOICE), "invoice.png", &secret_png()).await;
         assert_eq!(res.status_code(), 200);
         let photo = latest_message(&ctx).await;
-        let (conn, txn) = hold_key_share(&ctx, &photo).await;
+        let (conn, txn) = hold(&ctx, photo.id, "FOR KEY SHARE").await;
         txn.execute_unprepared(&format!(
             "INSERT INTO messages (created_at, updated_at, body, organisation_id, conversation_id, user_id, parent_id) \
              VALUES (now(), now(), 'Paid it', {}, {finance}, {}, {})",
@@ -1125,8 +1089,9 @@ async fn the_socket_payload_carries_no_text() {
 
 /// Messages are deleted in one place, so the photo-first order and the
 /// thread rule can't be skipped. `Entity::delete` is also part of
-/// `Entity::delete_by_id`; `truncate_table(.., messages::Entity)` in app.rs
-/// doesn't match either pattern.
+/// `Entity::delete_by_id`; the model's `notifications::Entity::delete_many`
+/// is not counted. `truncate_table(.., messages::Entity)` in app.rs matches
+/// no pattern.
 #[test]
 fn messages_are_only_deleted_by_the_model() {
     let mut offenders = Vec::new();
@@ -1149,7 +1114,8 @@ fn messages_are_only_deleted_by_the_model() {
                 .split_whitespace()
                 .collect();
             if name == "src/models/messages.rs" {
-                in_model = text.matches("Entity::delete").count();
+                in_model = text.matches("Entity::delete").count()
+                    - text.matches("notifications::Entity::delete").count();
                 continue;
             }
             for pattern in [
