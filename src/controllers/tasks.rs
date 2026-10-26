@@ -10,6 +10,7 @@ use crate::{
     models::{
         field_error, memberships, note_reactions,
         notifications::{mention_parts, Part, EVERYONE},
+        order::{self, Place},
         projects,
         saved_views::{self, Setup},
         task_assignees,
@@ -78,6 +79,53 @@ struct NewQuery {
 #[derive(Debug, Deserialize)]
 struct StatusForm {
     status: String,
+}
+
+/// A drop or an arrow: the column, and the visible card it lands before
+/// (or after). Neither puts it at the end.
+#[derive(Debug, Deserialize)]
+struct MoveForm {
+    status: String,
+    #[serde(default)]
+    before: Option<i64>,
+    #[serde(default)]
+    after: Option<i64>,
+}
+
+/// Where a move lands, from its `before` and `after` fields.
+pub(super) fn move_place(before: Option<i64>, after: Option<i64>) -> Result<Place> {
+    match (before, after) {
+        (Some(_), Some(_)) => Err(Error::BadRequest(
+            "Choose before or after, not both.".to_string(),
+        )),
+        (Some(id), None) => Ok(Place::Before(id)),
+        (None, Some(id)) => Ok(Place::After(id)),
+        (None, None) => Ok(Place::End),
+    }
+}
+
+/// A move that changed nothing, as 409 with no `HX-Redirect` (that would
+/// read as a stale tab). `message` is a toast: the busy one, or a closed
+/// project's refusal. Without one the page says the move failed itself.
+pub(super) fn move_refused(message: Option<&str>) -> Result<Response> {
+    let response = format::render().status(409).header("HX-Reswap", "none");
+    match message {
+        Some(text) => response.header("HX-Trigger", toast("error", text)).empty(),
+        None => response.empty(),
+    }
+}
+
+/// A move's errors that aren't a stale anchor: a busy lock is 409 with a
+/// toast, a refused value 400, anything else as it is.
+pub(super) fn move_failed(err: ModelError) -> Result<Response> {
+    if order::is_busy(&err) {
+        tracing::warn!(error = %err, "a card move waited too long for another");
+        return move_refused(Some(order::BUSY));
+    }
+    match err {
+        ModelError::Message(text) => Err(Error::BadRequest(text)),
+        err => Err(err.into()),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1119,6 +1167,38 @@ async fn set_status(
         .view(&v, "tasks/_sheet.html", member.fragment(data))
 }
 
+/// Puts a card at a spot in a column, from a drag or the Reorder arrows. Any
+/// member can, as with a status change. A move inside a column tells no one
+/// and shows no toast; one into another column tells people as a status
+/// change does (a drop on Blocked tells the owners).
+#[debug_handler]
+async fn move_card(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(form): Form<MoveForm>,
+) -> Result<Response> {
+    let place = move_place(form.before, form.after)?;
+    let task = tasks::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    let before = TaskBefore {
+        assignees: task_assignees::Model::for_task(&ctx.db, member.org.id, task.id).await?,
+        status: task.status.clone(),
+    };
+    let moved = match tasks::Model::move_to(&ctx.db, member.org.id, id, &form.status, place).await {
+        Ok(Ok(moved)) => moved,
+        Ok(Err(tasks::Stale)) => return move_refused(None),
+        Err(err) => return move_failed(err),
+    };
+    if moved.changed_status {
+        notifications::task_saved(&ctx, &member, Some(before), &moved.task).await?;
+    }
+    if !headers.contains_key("hx-request") {
+        return Ok(redirect_response(&headers, &member.url("/tasks")));
+    }
+    format::render().header("HX-Reswap", "none").empty()
+}
+
 #[debug_handler]
 async fn add_note(
     member: CurrentMember,
@@ -1228,6 +1308,7 @@ pub fn routes() -> Routes {
         .add("/tasks/{id}/edit", get(edit))
         .add("/tasks/{id}/delete", post(destroy))
         .add("/tasks/{id}/status", post(set_status))
+        .add("/tasks/{id}/move", post(move_card))
         .add("/tasks/{id}/notes", post(add_note))
         .add("/tasks/{id}/notes/{note_id}/reactions", post(react_note))
 }

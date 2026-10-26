@@ -1,6 +1,9 @@
 use collab::{
     app::App,
-    models::{memberships, organisations, projects, task_assignees, task_notes, tasks, users},
+    models::{
+        memberships, organisations, project_owners, projects, task_assignees, task_notes, tasks,
+        users,
+    },
 };
 use loco_rs::{app::AppContext, testing::prelude::*};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
@@ -20,6 +23,7 @@ pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> proj
             lane: "now".to_string(),
             status: "Active".to_string(),
             accent: "#ffb454".to_string(),
+            owner_ids: vec![],
             owner_id: String::new(),
             summary: String::new(),
         },
@@ -27,6 +31,13 @@ pub(super) async fn project_in(ctx: &AppContext, slug: &str, name: &str) -> proj
     )
     .await
     .unwrap()
+}
+
+/// Makes `user_ids` the project's owners, in that order.
+pub(super) async fn own(ctx: &AppContext, project: &projects::Model, user_ids: &[i64]) {
+    project_owners::Model::replace(&ctx.db, project.organisation_id, project.id, user_ids)
+        .await
+        .unwrap();
 }
 
 /// A task form; an empty `assignee` leaves the field out, as an unticked form does.

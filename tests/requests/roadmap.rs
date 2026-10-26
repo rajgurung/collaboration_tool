@@ -1,7 +1,8 @@
 use collab::{
     app::App,
     models::{
-        memberships, note_reactions, notifications, organisations, projects, task_assignees,
+        memberships, note_reactions, notifications, organisations, project_owners, projects,
+        task_assignees,
         task_notes::{self, NoteParams},
         tasks, users,
     },
@@ -15,14 +16,25 @@ use serial_test::serial;
 use super::{
     admin::super_admin_cookie,
     prepare_data::{join, sign_up_member, AsMember, TestMember},
-    tasks::{approved_member, project_in, task_form},
+    tasks::{approved_member, own, project_in, task_form},
 };
 
-fn project_form(name: &str, lane: &str, owner_id: &str) -> serde_json::Value {
-    serde_json::json!({
+/// A project form with one owner ticked, or none for an empty `owner`.
+fn project_form(name: &str, lane: &str, owner: &str) -> serde_json::Value {
+    let mut form = serde_json::json!({
         "name": name, "lane": lane, "status": "In progress",
-        "accent": "#72e5b4", "owner_id": owner_id, "summary": "Ship the first version.",
-    })
+        "accent": "#72e5b4", "summary": "Ship the first version.",
+    });
+    if !owner.is_empty() {
+        form["owner_ids"] = owner.into();
+    }
+    form
+}
+
+async fn owners_of(ctx: &loco_rs::app::AppContext, project: &projects::Model) -> Vec<i64> {
+    project_owners::Model::for_project(&ctx.db, project.organisation_id, project.id)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -65,7 +77,7 @@ async fn creating_a_project_shows_it_in_its_lane() {
             .unwrap()
             .unwrap();
         assert_eq!(saved.lane, "next");
-        assert_eq!(saved.owner_id, Some(alice.id));
+        assert_eq!(owners_of(&ctx, &saved).await, vec![alice.id]);
 
         // Every lane is on the page (side by side on desktop). Phones see the
         // current lane, "Now" by default, and the switcher counts it under "Next".
@@ -137,7 +149,7 @@ async fn owner_must_be_an_approved_member_of_the_same_org() {
                 .form(&project_form("Launch", "now", &outsider.to_string()))
                 .await;
             assert_eq!(res.status_code(), 422);
-            assert!(res.text().contains("Choose someone from the team."));
+            assert!(res.text().contains("Choose people from the team."));
         }
         assert_eq!(projects::Entity::find().count(&ctx.db).await.unwrap(), 0);
     })
@@ -180,7 +192,7 @@ async fn editing_updates_the_project_and_the_form_is_prefilled() {
             .unwrap();
         assert_eq!(saved.name, "Pricing model");
         assert_eq!(saved.lane, "later");
-        assert_eq!(saved.owner_id, None);
+        assert!(owners_of(&ctx, &saved).await.is_empty());
     })
     .await;
 }
@@ -288,9 +300,7 @@ async fn project_with_work(
 ) -> (i64, Vec<i64>) {
     let project = project_in(ctx, "acme", "Spring range").await;
     // The assignee owns it, so a new task also sends a `project` notice.
-    let mut owned: projects::ActiveModel = project.clone().into();
-    owned.owner_id = ActiveValue::Set(Some(assignee));
-    owned.update(&ctx.db).await.unwrap();
+    own(ctx, &project, &[assignee]).await;
     for (title, who) in [
         ("Order incense", assignee.to_string()),
         ("Shoot photos", String::new()),

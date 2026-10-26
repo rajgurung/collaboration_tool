@@ -14,12 +14,17 @@ use crate::{
     },
     models::{
         memberships,
-        projects::{self, CloseSummary, Progress, ProjectParams, ACCENTS, DONE, DONE_SHOWN, LANES},
+        order::{self, BUSY},
+        project_owners,
+        projects::{
+            self, CloseSummary, MoveRefusal, OwnerRights, Progress, ProjectParams, ACCENTS, DONE,
+            DONE_SHOWN, LANES,
+        },
         task_assignees, tasks,
     },
     views::{
         forms::{field_errors, invalid_form},
-        layout::{avatar_color, Person},
+        layout::Person,
         time,
     },
 };
@@ -33,6 +38,8 @@ struct LaneQuery {
     lane: Option<String>,
     /// Any value shows every done project, not just the newest few.
     all: Option<String>,
+    /// Any value opens the page in Reorder mode, after a phone lane switch.
+    reorder: Option<String>,
 }
 
 /// A closed project's card in the Done column.
@@ -42,8 +49,7 @@ struct DoneCard {
     name: String,
     accent: String,
     summary: String,
-    owner: Option<String>,
-    owner_color: &'static str,
+    owners: Owners,
     /// "25 Oct" this year, "12 Dec 2025" before.
     closed_on: String,
     /// Who marked it done, while they are on the team.
@@ -62,11 +68,50 @@ struct Card {
     progress: Progress,
     accent: String,
     summary: String,
-    owner: Option<String>,
-    owner_color: &'static str,
+    owners: Owners,
     blocked: usize,
     /// Dropping it on Done opens the close confirm only for those allowed.
     can_close: bool,
+}
+
+/// A card's owner stack: up to three avatars, then "+N".
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct Owners {
+    shown: Vec<Person>,
+    more: usize,
+    /// "Owners: Tom, Ana, Leo and Maya", "Owner: Leo", or empty.
+    label: String,
+}
+
+/// The owners on the team, in the order they were added. A removed member
+/// left in the list is skipped.
+fn owners_of(ids: &[i64], team: &[Person]) -> Owners {
+    let people: Vec<&Person> = ids
+        .iter()
+        .filter_map(|id| team.iter().find(|p| p.id == *id))
+        .collect();
+    let names: Vec<&str> = people.iter().map(|p| p.username.as_str()).collect();
+    let label = match names.as_slice() {
+        [] => String::new(),
+        [one] => format!("Owner: {one}"),
+        [init @ .., last] => format!("Owners: {} and {last}", init.join(", ")),
+    };
+    Owners {
+        shown: people.iter().take(3).map(|p| (*p).clone()).collect(),
+        more: people.len().saturating_sub(3),
+        label,
+    }
+}
+
+/// Who may change a project's owners in an edit; see [`OwnerRights`].
+fn owner_rights(member: &CurrentMember) -> OwnerRights {
+    if member.acting {
+        OwnerRights::No
+    } else if member.can_manage() {
+        OwnerRights::Any
+    } else {
+        OwnerRights::IfOwner(member.user.id)
+    }
 }
 
 fn lane_or_default(lane: Option<&str>) -> &str {
@@ -76,11 +121,11 @@ fn lane_or_default(lane: Option<&str>) -> &str {
     }
 }
 
-/// Owners, admins and the project's owner, through their own membership. A
-/// close changes other people's tasks and notifies them in this person's
-/// name, so a super admin acting here can't.
-fn can_close(member: &CurrentMember, project: &projects::Model) -> bool {
-    !member.acting && project.closable_by(member.can_manage(), member.user.id)
+/// Owners, admins and the project's owners (`owners`), through their own
+/// membership. A close changes other people's tasks and notifies them in
+/// this person's name, so a super admin acting here can't.
+fn can_close(member: &CurrentMember, owners: &[i64]) -> bool {
+    !member.acting && projects::Model::closable_by(member.can_manage(), member.user.id, owners)
 }
 
 /// Approved members, for owner pickers and names on cards.
@@ -100,11 +145,10 @@ async fn lane_data(
     show_all: bool,
 ) -> Result<serde_json::Value> {
     let org_id = member.org.id;
-    let names: HashMap<i64, String> = team(ctx, org_id)
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p.username))
-        .collect();
+    let people = team(ctx, org_id).await?;
+    let names: HashMap<i64, String> = people.iter().map(|p| (p.id, p.username.clone())).collect();
+    let owners = project_owners::Model::by_project(&ctx.db, org_id).await?;
+    let owners_for = |id: i64| owners.get(&id).map_or(&[][..], Vec::as_slice);
     let projects = projects::Model::list_for_org(&ctx.db, org_id).await?;
     let all_tasks = tasks::Model::list_for_org(&ctx.db, org_id).await?;
     let mut lanes: Vec<serde_json::Value> = LANES
@@ -114,7 +158,6 @@ async fn lane_data(
                 .iter()
                 .filter(|p| p.in_lane(key))
                 .map(|p| {
-                    let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
                     let own_tasks = all_tasks.iter().filter(|t| t.project_id == Some(p.id));
                     Card {
                         id: p.id,
@@ -123,10 +166,9 @@ async fn lane_data(
                         progress: Progress::of(p.id, &all_tasks),
                         accent: p.accent.clone(),
                         summary: p.summary.clone(),
-                        owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
-                        owner,
+                        owners: owners_of(owners_for(p.id), &people),
                         blocked: own_tasks.filter(|t| t.status == "blocked").count(),
-                        can_close: can_close(member, p),
+                        can_close: can_close(member, owners_for(p.id)),
                     }
                 })
                 .collect();
@@ -159,7 +201,6 @@ async fn lane_data(
     let cards: Vec<DoneCard> = closed[..shown]
         .iter()
         .map(|p| {
-            let owner = p.owner_id.and_then(|id| names.get(&id).cloned());
             let summary = CloseSummary::of(p.id, &all_tasks);
             let closed_on = p.closed_at.map_or_else(String::new, |at| {
                 let at = time::local(at, tz);
@@ -175,13 +216,12 @@ async fn lane_data(
                 name: p.name.clone(),
                 accent: p.accent.clone(),
                 summary: p.summary.clone(),
-                owner_color: owner.as_deref().map_or("#e8dfce", avatar_color),
-                owner,
+                owners: owners_of(owners_for(p.id), &people),
                 closed_on,
                 closed_by: p.closed_by_id.and_then(|id| names.get(&id).cloned()),
                 done_count: summary.done,
                 open_count: summary.open(),
-                can_reopen: can_close(member, p),
+                can_reopen: can_close(member, owners_for(p.id)),
             }
         })
         .collect();
@@ -207,7 +247,8 @@ async fn index(
     Query(query): Query<LaneQuery>,
 ) -> Result<Response> {
     let lane = lane_or_default(query.lane.as_deref());
-    let data = lane_data(&ctx, &member, lane, query.all.is_some()).await?;
+    let mut data = lane_data(&ctx, &member, lane, query.all.is_some()).await?;
+    data["reordering"] = serde_json::json!(query.reorder.is_some());
     format::render().view(&v, "roadmap/index.html", member.page("roadmap", data))
 }
 
@@ -225,34 +266,36 @@ async fn list_partial(
 }
 
 /// The values a form starts with, or shows back after a failed submit.
+/// `owners` are the project's, for an edit.
 fn form_values(
     params: Option<&ProjectParams>,
-    project: Option<&projects::Model>,
+    project: Option<(&projects::Model, &[i64])>,
 ) -> serde_json::Value {
     match (params, project) {
         (Some(p), _) => serde_json::json!({
             "name": p.name, "lane": p.lane, "status": p.status,
-            "accent": p.accent, "owner_id": p.owner_id, "summary": p.summary,
-        }),
-        (None, Some(p)) => serde_json::json!({
-            "name": p.name, "lane": p.lane, "status": p.status,
-            "accent": p.accent, "owner_id": p.owner_id.map(|id| id.to_string()).unwrap_or_default(),
+            "accent": p.accent, "owner_ids": p.posted_owners().unwrap_or_default(),
             "summary": p.summary,
+        }),
+        (None, Some((p, owners))) => serde_json::json!({
+            "name": p.name, "lane": p.lane, "status": p.status,
+            "accent": p.accent, "owner_ids": owners, "summary": p.summary,
         }),
         (None, None) => serde_json::json!({
             "name": "", "lane": "now", "status": "Planned",
-            "accent": ACCENTS[0], "owner_id": "", "summary": "",
+            "accent": ACCENTS[0], "owner_ids": [], "summary": "",
         }),
     }
 }
 
 /// What the "Mark project done" box and its confirm step say: the counts,
 /// and who would get a notice (the open tasks' assignees and the project's
-/// owner, on the team, not the viewer).
+/// owners, on the team, not the viewer).
 async fn close_data(
     ctx: &AppContext,
     member: &CurrentMember,
     project: &projects::Model,
+    owners: &[i64],
 ) -> Result<serde_json::Value> {
     let org_id = member.org.id;
     let all_tasks = tasks::Model::list_for_org(&ctx.db, org_id).await?;
@@ -265,7 +308,7 @@ async fn close_data(
         .flatten()
         .copied()
         .collect();
-    told.extend(project.owner_id);
+    told.extend(owners);
     let names: Vec<String> = memberships::Model::team(&ctx.db, org_id)
         .await?
         .into_iter()
@@ -287,13 +330,17 @@ async fn form_data(
     values: serde_json::Value,
     errors: &crate::views::forms::FieldErrors,
 ) -> Result<serde_json::Value> {
+    // A new project's maker picks its owners, unless a super admin acting.
+    let mut owners_locked = member.acting;
     // For the edit form's delete confirm and "Made with Claude" line. Only a
     // bool about Claude reaches the template, never the grant.
     let project = match project_id {
         Some(id) => {
             let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-            let close = if can_close(member, &project) {
-                Some(close_data(ctx, member, &project).await?)
+            let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+            owners_locked = !owner_rights(member).allows(&owners);
+            let close = if can_close(member, &owners) {
+                Some(close_data(ctx, member, &project, &owners).await?)
             } else {
                 None
             };
@@ -314,6 +361,7 @@ async fn form_data(
             "project": project,
             "form": values,
             "errors": errors,
+            "owners_locked": owners_locked,
             "team": team(ctx, member.org.id).await?,
             "lanes": LANES,
             "accents": ACCENTS,
@@ -349,7 +397,8 @@ async fn edit(
     if project.is_closed() {
         return closed_refused(&project);
     }
-    let values = form_values(None, Some(&project));
+    let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+    let values = form_values(None, Some((&project, &owners)));
     let data = form_data(&ctx, &member, Some(id), values, &Default::default()).await?;
     format::render().view(&v, "roadmap/_form.html", member.fragment(data))
 }
@@ -360,11 +409,21 @@ async fn create(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
     headers: HeaderMap,
-    Form(params): Form<ProjectParams>,
+    axum_extra::extract::Form(mut params): axum_extra::extract::Form<ProjectParams>,
 ) -> Result<Response> {
+    // A super admin acting here makes the project, but not its owners, as
+    // with an edit.
+    if member.acting {
+        params = ProjectParams {
+            owner_ids: Vec::new(),
+            owner_id: String::new(),
+            ..params
+        };
+    }
     let result = projects::Model::create(&ctx.db, member.org.id, &params, None).await;
     if let Ok(project) = &result {
-        super::notifications::project_saved(&ctx, &member, None, project).await?;
+        let owners = project_owners::Model::for_project(&ctx.db, member.org.id, project.id).await?;
+        super::notifications::project_saved(&ctx, &member, &[], project, &owners).await?;
     }
     saved(
         &ctx,
@@ -386,7 +445,7 @@ async fn update(
     ViewEngine(v): ViewEngine<TeraView>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Form(params): Form<ProjectParams>,
+    axum_extra::extract::Form(params): axum_extra::extract::Form<ProjectParams>,
 ) -> Result<Response> {
     let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
     // Only a sheet opened before a close gets here. A close that commits
@@ -395,11 +454,20 @@ async fn update(
     if project.is_closed() {
         return closed_refused(&project);
     }
-    let owner_before = project.owner_id;
-    let result = project.update_from(&ctx.db, &params).await;
-    if let Ok(project) = &result {
-        super::notifications::project_saved(&ctx, &member, owner_before, project).await?;
+    let result = project
+        .update_from(&ctx.db, &params, owner_rights(&member))
+        .await;
+    if let Ok(saved) = &result {
+        super::notifications::project_saved(
+            &ctx,
+            &member,
+            &saved.owners_before,
+            &saved.project,
+            &saved.owners,
+        )
+        .await?;
     }
+    let result = result.map(|saved| saved.project);
     saved(
         &ctx,
         &v,
@@ -411,6 +479,42 @@ async fn update(
         "Project saved",
     )
     .await
+}
+
+/// A drop or an arrow on the roadmap: the lane, and the visible card it
+/// lands before (or after).
+#[derive(Debug, Deserialize)]
+struct MoveForm {
+    lane: String,
+    #[serde(default)]
+    before: Option<i64>,
+    #[serde(default)]
+    after: Option<i64>,
+}
+
+/// Puts a project at a spot in a lane. Any member can, as with a lane
+/// change. No toast and no notices: a lane change never sent any.
+#[debug_handler]
+async fn move_project(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Form(form): Form<MoveForm>,
+) -> Result<Response> {
+    let place = super::tasks::move_place(form.before, form.after)?;
+    let project =
+        match projects::Model::move_to(&ctx.db, member.org.id, id, &form.lane, place).await {
+            Ok(Ok(project)) => project,
+            Ok(Err(MoveRefusal::Stale)) => return super::tasks::move_refused(None),
+            Ok(Err(MoveRefusal::Closed(project))) => return closed_refused(&project),
+            Err(err) => return super::tasks::move_failed(err),
+        };
+    if !headers.contains_key("hx-request") {
+        let to = member.url(&format!("/roadmap?lane={}", project.lane));
+        return Ok(redirect_response(&headers, &to));
+    }
+    format::render().header("HX-Reswap", "none").empty()
 }
 
 #[derive(Debug, Deserialize)]
@@ -473,7 +577,10 @@ async fn destroy(
 ) -> Result<Response> {
     member.require_manager()?;
     member.require_own_membership()?;
-    let removed = projects::Model::remove(&ctx.db, member.org.id, id).await?;
+    let removed = match projects::Model::remove(&ctx.db, member.org.id, id).await {
+        Ok(removed) => removed,
+        Err(err) => return busy_refused(err, "delete"),
+    };
     tracing::info!(
         user_id = member.user.id,
         org_id = member.org.id,
@@ -499,21 +606,35 @@ async fn destroy(
         .empty()
 }
 
-/// The project for a close or reopen: in this organisation (else 404), for
-/// someone allowed (else 403).
-async fn closable(ctx: &AppContext, member: &CurrentMember, id: i64) -> Result<projects::Model> {
+/// The check before a close or reopen: in this organisation (else 404), for
+/// someone allowed (else 403). The model checks the owners again once the
+/// project is locked.
+async fn closable(ctx: &AppContext, member: &CurrentMember, id: i64) -> Result<()> {
     member.require_own_membership()?;
-    let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
-    if !can_close(member, &project) {
-        return Err(forbidden(
-            "Only owners, admins and the project's owner can do that.",
-        ));
+    projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
+    let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+    if !can_close(member, &owners) {
+        return Err(not_closable());
     }
-    Ok(project)
+    Ok(())
+}
+
+fn not_closable() -> Error {
+    forbidden("Only this project's owners and admins can do that.")
+}
+
+/// A close, reopen or delete that waited too long behind a card move: 409
+/// with a "try again" toast, as a move gets. Other errors pass through.
+fn busy_refused(err: ModelError, what: &str) -> Result<Response> {
+    if order::is_busy(&err) {
+        tracing::warn!(error = %err, "a project {what} waited too long for a card move");
+        return super::tasks::move_refused(Some(BUSY));
+    }
+    Err(err.into())
 }
 
 /// Marks a project done with its open tasks. Owners, admins and the
-/// project's owner. A second close is a no-op.
+/// project's owners. A second close is a no-op.
 #[debug_handler]
 async fn close(
     member: CurrentMember,
@@ -522,7 +643,19 @@ async fn close(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     closable(&ctx, &member, id).await?;
-    let closed = projects::Model::close(&ctx.db, member.org.id, id, member.user.id).await?;
+    let closed = match projects::Model::close(
+        &ctx.db,
+        member.org.id,
+        id,
+        member.user.id,
+        member.can_manage(),
+    )
+    .await
+    {
+        Ok(Some(closed)) => closed,
+        Ok(None) => return Err(not_closable()),
+        Err(err) => return busy_refused(err, "close"),
+    };
     if !closed.already {
         // The close is already committed, so a failed notice must not turn
         // the reply into "nothing was changed".
@@ -563,7 +696,19 @@ async fn reopen(
     Path(id): Path<i64>,
 ) -> Result<Response> {
     closable(&ctx, &member, id).await?;
-    let reopened = projects::Model::reopen(&ctx.db, member.org.id, id).await?;
+    let reopened = match projects::Model::reopen(
+        &ctx.db,
+        member.org.id,
+        id,
+        member.user.id,
+        member.can_manage(),
+    )
+    .await
+    {
+        Ok(Some(reopened)) => reopened,
+        Ok(None) => return Err(not_closable()),
+        Err(err) => return busy_refused(err, "reopen"),
+    };
     let project = &reopened.project;
     if !reopened.already {
         // The reopen is already committed, as with a close.
@@ -656,14 +801,15 @@ async fn saved(
         }
         Err(err) => {
             let errors = field_errors(&err).ok_or(err)?;
-            let data = form_data(
-                ctx,
-                member,
-                project_id,
-                form_values(Some(params), None),
-                &errors,
-            )
-            .await?;
+            let mut values = form_values(Some(params), None);
+            // The owners were ignored, not saved: show the project's own.
+            if let Some(id) = project_id {
+                let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+                if !owner_rights(member).allows(&owners) {
+                    values["owner_ids"] = serde_json::json!(owners);
+                }
+            }
+            let data = form_data(ctx, member, project_id, values, &errors).await?;
             invalid_form(v, "roadmap/_form.html", FORM_ID, member.fragment(data))
         }
     }
@@ -679,6 +825,53 @@ pub fn routes() -> Routes {
         .add("/roadmap/projects/{id}", post(update))
         .add("/roadmap/projects/{id}/delete", post(destroy))
         .add("/roadmap/projects/{id}/lane", post(move_lane))
+        .add("/roadmap/projects/{id}/move", post(move_project))
         .add("/roadmap/projects/{id}/close", post(close))
         .add("/roadmap/projects/{id}/reopen", post(reopen))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn team() -> Vec<Person> {
+        Person::from_team(
+            [(1, "tom"), (2, "ana"), (3, "leo"), (4, "maya")]
+                .iter()
+                .map(|(id, name)| (*id, (*name).to_string()))
+                .collect(),
+        )
+    }
+
+    fn names(owners: &Owners) -> Vec<&str> {
+        owners.shown.iter().map(|p| p.username.as_str()).collect()
+    }
+
+    #[test]
+    fn owners_of_shows_three_then_a_count() {
+        let team = team();
+        let none = owners_of(&[], &team);
+        assert!(none.shown.is_empty());
+        assert_eq!((none.more, none.label.as_str()), (0, ""));
+
+        let one = owners_of(&[3], &team);
+        assert_eq!(names(&one), ["leo"]);
+        assert_eq!(one.label, "Owner: leo");
+
+        let two = owners_of(&[2, 3], &team);
+        assert_eq!(two.label, "Owners: ana and leo");
+
+        let three = owners_of(&[1, 2, 3], &team);
+        assert_eq!((names(&three).len(), three.more), (3, 0));
+
+        let four = owners_of(&[1, 2, 3, 4], &team);
+        assert_eq!(names(&four), ["tom", "ana", "leo"]);
+        assert_eq!(four.more, 1);
+        assert_eq!(four.label, "Owners: tom, ana, leo and maya");
+
+        // 9 was removed from the team: skipped everywhere.
+        let removed = owners_of(&[9, 3], &team);
+        assert_eq!(names(&removed), ["leo"]);
+        assert_eq!(removed.label, "Owner: leo");
+    }
 }

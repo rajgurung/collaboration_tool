@@ -1017,6 +1017,28 @@ async fn delete_tools_stay_in_their_org() {
 
 #[tokio::test]
 #[serial]
+async fn more_than_fifty_owners_are_refused() {
+    request::<App, _, _>(|request, ctx| async move {
+        setup(&request, &ctx).await;
+        let token = token_in(&ctx, "raj@example.com", HIMALAYAN).await;
+        let many: Vec<String> = (0..51).map(|n| format!("person{n}")).collect();
+        let before = counts(&ctx).await;
+        let (error, message) = tool(
+            &request,
+            &token,
+            "create_project",
+            json!({ "organisation": HIMALAYAN, "name": "Crowd", "lane": "now", "status": "Active", "owners": many }),
+        )
+        .await;
+        assert!(error);
+        assert_eq!(message, "owners: Choose up to 50 owners.");
+        assert_eq!(counts(&ctx).await, before);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn the_brake_stops_the_sixth_project_and_sixty_first_task() {
     request::<App, _, _>(|request, ctx| async move {
         setup(&request, &ctx).await;
@@ -1082,6 +1104,7 @@ async fn made_with_claude_shows_and_the_grant_never_does() {
                 lane: "now".to_string(),
                 status: "Active".to_string(),
                 accent: "#ffb454".to_string(),
+                owner_ids: vec![],
                 owner_id: String::new(),
                 summary: String::new(),
             },

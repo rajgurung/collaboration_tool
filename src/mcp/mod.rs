@@ -31,8 +31,8 @@ use crate::{
     data::notify_hub::NotifyHub,
     extractors::{bearer::McpConnection, current_member::CurrentMember},
     models::{
-        claude_update_notices, memberships,
-        projects::{self, Progress, ProjectParams, ACCENTS},
+        claude_update_notices, memberships, order, project_owners,
+        projects::{self, Progress, ProjectParams, ACCENTS, MAX_OWNERS},
         task_assignees,
         task_notes::{self, NoteParams},
         tasks::{self, Refusal, Removed, TaskParams},
@@ -107,7 +107,9 @@ pub struct CreateProject {
     pub status: String,
     #[schemars(description = "Optional summary, up to 500 characters.")]
     pub summary: Option<String>,
-    #[schemars(description = "Username of the project owner. Leave out for no owner.")]
+    #[schemars(description = "Usernames of the project's owners. Leave out for none.")]
+    pub owners: Option<Vec<String>>,
+    #[schemars(description = "One owner's username. Kept for older clients; merged with owners.")]
     pub owner: Option<String>,
 }
 
@@ -236,6 +238,9 @@ impl From<ModelError> for Fail {
                 .join(" ");
             return Self::Refused(message);
         }
+        if order::is_busy(&err) {
+            return Self::Refused(order::BUSY.into());
+        }
         match err {
             ModelError::EntityNotFound => Self::NotFound,
             other => Self::Broken(other.to_string()),
@@ -253,7 +258,7 @@ impl From<loco_rs::Error> for Fail {
 fn tool_field(field: &str) -> &str {
     match field {
         "assignee_ids" => "assignees",
-        "owner_id" => "owner",
+        "owner_ids" | "owner_id" => "owners",
         other => other,
     }
 }
@@ -516,7 +521,7 @@ async fn project_names(
 #[tool_router]
 impl CollabServer {
     #[tool(
-        description = "List every project with its lane, status, owner, progress (done/total tasks), and whether it is closed (marked done).",
+        description = "List every project with its lane, status, owners, progress (done/total tasks), and whether it is closed (marked done).",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_projects(
@@ -527,7 +532,7 @@ impl CollabServer {
     }
 
     #[tool(
-        description = "Create a project in a roadmap lane. The owner, if any, is notified.",
+        description = "Create a project in a roadmap lane. The owners, if any, are notified.",
         annotations(destructive_hint = false, open_world_hint = false)
     )]
     async fn create_project(
@@ -575,7 +580,7 @@ impl CollabServer {
     }
 
     #[tool(
-        description = "Create a task. Assignees and the project owner are notified.",
+        description = "Create a task. Assignees and the project's owners are notified.",
         annotations(destructive_hint = false, open_world_hint = false)
     )]
     async fn create_task(
@@ -680,6 +685,7 @@ impl CollabServer {
         let db = &self.ctx.db;
         let names = Team::load(&self.ctx, &member).await?.names();
         let all_tasks = tasks::Model::list_for_org(db, member.org.id).await?;
+        let owners = project_owners::Model::by_project(db, member.org.id).await?;
         let projects: Vec<Value> = projects::Model::list_for_org(db, member.org.id)
             .await?
             .into_iter()
@@ -690,7 +696,12 @@ impl CollabServer {
                     "lane": p.lane,
                     "status": p.status,
                     "summary": p.summary,
-                    "owner": p.owner_id.and_then(|id| names.get(&id)),
+                    "owners": owners
+                        .get(&p.id)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| names.get(id))
+                        .collect::<Vec<_>>(),
                     "progress": Progress::of(p.id, &all_tasks),
                     "closed": p.is_closed(),
                     "closed_at": p.closed_at.map(|at| time::local(at, member.tz()).to_rfc3339()),
@@ -702,6 +713,17 @@ impl CollabServer {
 
     async fn create_project_for(&self, parts: &Parts, input: CreateProject) -> Outcome {
         let (member, connection) = Self::writer(parts, input.organisation.as_deref())?;
+        // Both shapes, merged. `owners()` drops repeats.
+        let names: Vec<String> = input
+            .owners
+            .unwrap_or_default()
+            .into_iter()
+            .chain(input.owner)
+            .filter(|name| !name.trim().is_empty())
+            .collect();
+        if names.len() as u64 > MAX_OWNERS {
+            return Err(Fail::Refused("owners: Choose up to 50 owners.".into()));
+        }
         let db = &self.ctx.db;
         let recent =
             projects::Model::count_made_by(db, connection.grant_id, a_minute_ago()).await?;
@@ -709,10 +731,7 @@ impl CollabServer {
             return Err(paused(&member, PROJECTS_PER_MINUTE, "projects"));
         }
         let team = Team::load(&self.ctx, &member).await?;
-        let owner_id = match input.owner.as_deref().filter(|o| !o.trim().is_empty()) {
-            Some(name) => team.id(&member, name)?.to_string(),
-            None => String::new(),
-        };
+        let owner_ids = team.ids(&member, &names)?;
         let count = projects::Model::list_for_org(db, member.org.id)
             .await?
             .len();
@@ -721,19 +740,22 @@ impl CollabServer {
             lane: input.lane.trim().to_lowercase(),
             status: input.status,
             accent: ACCENTS[count % ACCENTS.len()].to_string(),
-            owner_id,
+            owner_ids,
+            owner_id: String::new(),
             summary: input.summary.unwrap_or_default(),
         };
         let project =
             projects::Model::create(db, member.org.id, &params, Some(connection.grant_id)).await?;
-        notifications::project_saved(&self.ctx, &member, None, &project).await?;
+        let owners = project_owners::Model::for_project(db, member.org.id, project.id).await?;
+        notifications::project_saved(&self.ctx, &member, &[], &project, &owners).await?;
+        let names = team.names();
         Ok(json!({
             "id": project.id,
             "name": project.name,
             "lane": project.lane,
             "status": project.status,
             "summary": project.summary,
-            "owner": project.owner_id.and_then(|id| team.names().remove(&id)),
+            "owners": owners.iter().filter_map(|id| names.get(id)).collect::<Vec<_>>(),
         }))
     }
 

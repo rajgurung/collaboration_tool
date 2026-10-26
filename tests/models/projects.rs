@@ -69,6 +69,7 @@ fn params(name: &str) -> ProjectParams {
         lane: "now".to_string(),
         status: "Active".to_string(),
         accent: "#6cb6ff".to_string(),
+        owner_ids: vec![],
         owner_id: String::new(),
         summary: String::new(),
     }
@@ -160,8 +161,9 @@ async fn close_marks_every_open_task_done() {
     let ctx = &boot.app_context;
     let w = website(ctx).await;
 
-    let closed = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    let closed = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
+        .unwrap()
         .unwrap();
     assert!(!closed.already);
     assert_eq!(closed.tasks.len(), 3);
@@ -184,18 +186,52 @@ async fn close_marks_every_open_task_done() {
     assert_eq!(done.status_before_close, None);
 }
 
+/// The rights are checked against the owners read once the project is
+/// locked: someone no longer an owner, and not an admin, changes nothing.
+#[tokio::test]
+#[serial]
+async fn only_an_owner_or_admin_closes_or_reopens() {
+    let boot = boot_test::<App>().await.unwrap();
+    let ctx = &boot.app_context;
+    let w = website(ctx).await;
+    let id = w.project.id;
+    let close = project_model::Model::close(&ctx.db, w.org_id, id, w.user_id, false)
+        .await
+        .unwrap();
+    assert!(close.is_none());
+    assert_eq!(reload(ctx, &w.todo).await.status, "todo");
+
+    collab::models::project_owners::Model::replace(&ctx.db, w.org_id, id, &[w.user_id])
+        .await
+        .unwrap();
+    project_model::Model::close(&ctx.db, w.org_id, id, w.user_id, false)
+        .await
+        .unwrap()
+        .expect("an owner closes it");
+    collab::models::project_owners::Model::replace(&ctx.db, w.org_id, id, &[])
+        .await
+        .unwrap();
+    let reopen = project_model::Model::reopen(&ctx.db, w.org_id, id, w.user_id, false)
+        .await
+        .unwrap();
+    assert!(reopen.is_none());
+    assert_eq!(reload(ctx, &w.todo).await.status, "done");
+}
+
 #[tokio::test]
 #[serial]
 async fn close_twice_is_a_no_op() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    let first = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    let first = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
+        .unwrap()
         .unwrap();
 
-    let second = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    let second = project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
+        .unwrap()
         .unwrap();
     assert!(second.already);
     assert!(second.tasks.is_empty());
@@ -215,11 +251,11 @@ async fn close_of_another_orgs_project_changes_nothing() {
     let w = website(ctx).await;
     let (globex, gina) = org(ctx, "Globex", "gina").await;
 
-    let err = project_model::Model::close(&ctx.db, globex, w.project.id, gina)
+    let err = project_model::Model::close(&ctx.db, globex, w.project.id, gina, true)
         .await
         .unwrap_err();
     assert!(matches!(err, loco_rs::model::ModelError::EntityNotFound));
-    let err = project_model::Model::reopen(&ctx.db, globex, w.project.id)
+    let err = project_model::Model::reopen(&ctx.db, globex, w.project.id, 0, true)
         .await
         .unwrap_err();
     assert!(matches!(err, loco_rs::model::ModelError::EntityNotFound));
@@ -239,12 +275,13 @@ async fn reopen_puts_each_task_back() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
         .unwrap();
 
-    let reopened = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id)
+    let reopened = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id, 0, true)
         .await
+        .unwrap()
         .unwrap();
     assert!(!reopened.already);
     assert_eq!(reopened.tasks.len(), 3);
@@ -261,8 +298,9 @@ async fn reopen_puts_each_task_back() {
     assert_eq!(done.status, "done");
     assert_eq!(done.done_at, w.done.done_at);
 
-    let again = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id)
+    let again = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id, 0, true)
         .await
+        .unwrap()
         .unwrap();
     assert!(again.already);
 }
@@ -273,7 +311,7 @@ async fn a_task_changed_since_is_left_alone() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
         .unwrap();
     // Set back to in progress, as a board drag does.
@@ -291,8 +329,9 @@ async fn a_task_changed_since_is_left_alone() {
     assert_eq!(blocked.status_before_close, None);
     blocked.set_status(&ctx.db, "done").await.unwrap();
 
-    let reopened = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id)
+    let reopened = project_model::Model::reopen(&ctx.db, w.org_id, w.project.id, 0, true)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(reopened.tasks.len(), 1, "only the untouched task");
     assert_eq!(reload(ctx, &w.todo).await.status, "progress");
@@ -306,7 +345,7 @@ async fn a_title_edit_does_not_count_as_a_change() {
     let boot = boot_test::<App>().await.unwrap();
     let ctx = &boot.app_context;
     let w = website(ctx).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
         .unwrap();
 
@@ -326,7 +365,7 @@ async fn a_title_edit_does_not_count_as_a_change() {
         .await
         .unwrap();
 
-    project_model::Model::reopen(&ctx.db, w.org_id, w.project.id)
+    project_model::Model::reopen(&ctx.db, w.org_id, w.project.id, 0, true)
         .await
         .unwrap();
     let blocked = reload(ctx, &w.blocked).await;
@@ -342,7 +381,7 @@ async fn a_task_moved_out_keeps_no_saved_status() {
     let ctx = &boot.app_context;
     let w = website(ctx).await;
     let shop = project(ctx, w.org_id, "Shop").await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
         .unwrap();
 
@@ -353,10 +392,10 @@ async fn a_task_moved_out_keeps_no_saved_status() {
         .unwrap();
     assert_eq!(moved.status_before_close, None);
 
-    project_model::Model::close(&ctx.db, w.org_id, shop.id, w.user_id)
+    project_model::Model::close(&ctx.db, w.org_id, shop.id, w.user_id, true)
         .await
         .unwrap();
-    project_model::Model::reopen(&ctx.db, w.org_id, shop.id)
+    project_model::Model::reopen(&ctx.db, w.org_id, shop.id, 0, true)
         .await
         .unwrap();
     assert_eq!(
@@ -374,7 +413,7 @@ async fn a_closed_project_takes_no_new_or_moved_tasks() {
     let w = website(ctx).await;
     let shop = project(ctx, w.org_id, "Shop").await;
     let elsewhere = task(ctx, w.org_id, shop.id, "Shelf labels", "todo", None).await;
-    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id)
+    project_model::Model::close(&ctx.db, w.org_id, w.project.id, w.user_id, true)
         .await
         .unwrap();
     let refusal = "Website is done. Reopen the project first.";
@@ -432,7 +471,7 @@ async fn a_task_added_during_a_close_is_closed_too() {
         .unwrap();
     let (org_id, project_id, user_id) = (w.org_id, w.project.id, w.user_id);
     let close = tokio::spawn(async move {
-        project_model::Model::close(&closing, org_id, project_id, user_id).await
+        project_model::Model::close(&closing, org_id, project_id, user_id, true).await
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!close.is_finished(), "the close waits for the insert");
@@ -452,7 +491,7 @@ async fn a_task_added_during_a_close_is_closed_too() {
     .unwrap();
     txn.commit().await.unwrap();
 
-    let closed = close.await.unwrap().unwrap();
+    let closed = close.await.unwrap().unwrap().unwrap();
     assert!(closed.tasks.iter().any(|t| t.id == added.id));
     assert_eq!(closed.tasks.len(), 4);
     assert_eq!(reload(ctx, &added).await.status, "done");

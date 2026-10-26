@@ -170,7 +170,7 @@
   .list { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-1); }
   .list-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; box-sizing: border-box; }
   .list > * + * { border-top: 1px solid var(--line-soft); }
-  a.list-row:hover, button.list-row:hover { background: var(--chip); }
+  a.list-row:hover, button.list-row:hover, .list-task:has(> .list-row-link:hover) { background: var(--chip); }
   .section-label { margin: 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
   .section-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
@@ -190,6 +190,9 @@
   .avatar-stack { display: inline-flex; }
   .avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
   .avatar-stack > .avatar + .avatar { margin-left: -6px; }
+  /* "+N" after three owners, in the same circle. */
+  .avatar-more { background: var(--chip); color: var(--muted); font-size: 11px; font-weight: 700; }
+  .owner-stack { margin-left: auto; }
   .avatar-md { width: 36px; height: 36px; font-size: 14px; }
   .avatar-lg { width: 44px; height: 44px; font-size: 16px; }
   .badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
@@ -222,6 +225,7 @@
   .person-toggle > span .avatar { opacity: 0.5; }
   .person-toggle input:checked + span { border-color: var(--progress); color: var(--text); font-weight: 700; background: color-mix(in srgb, var(--progress) 8%, var(--surface)); }
   .person-toggle input:checked + span .avatar { opacity: 1; }
+  fieldset:disabled .person-toggle { cursor: default; }
   .option input:focus-visible + span, .person-toggle input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Status colours */
@@ -433,19 +437,82 @@
   .cell { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 72px; padding: 6px; margin: -6px; border-radius: 12px; transition: background 0.12s; }
   .roadmap-card[draggable] { cursor: grab; }
   .roadmap-card.is-dragging { opacity: 0.45; }
-  .roadmap-cards.is-drop-target { border-radius: 14px; background: color-mix(in srgb, var(--progress) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--progress) 45%, transparent); outline-offset: 4px; }
-  .cell.is-drop-target { background: color-mix(in srgb, var(--progress) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--progress) 45%, transparent); }
+  /* Done takes a drop as a whole (it lands at the top). Amber, since blue means in progress. */
+  .roadmap-cards.is-drop-target { border-radius: 14px; background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 4px; }
+  .cell.is-drop-target { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent); }
+  .drop-note { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+  /* Where a dragged card will land: an amber line in the gap, with a ring at its start. */
+  .drop-line { position: relative; flex-shrink: 0; height: 3px; margin: -2px 2px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+  .drop-line::before { content: ""; position: absolute; left: -4px; top: -4px; width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; border: 3px solid var(--accent); background: var(--lane); }
+  .col-order { font-weight: 500; font-size: 12.5px; color: var(--muted); }
   .cell-more { padding: 2px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
   .cell-more:hover, .task-row-more:hover { color: var(--link); }
   .cell-add { display: grid; place-items: center; min-height: 32px; border: 1px dashed transparent; border-radius: 10px; background: transparent; color: var(--muted); opacity: 0; transition: opacity 0.12s; }
   .cell:hover .cell-add, .cell-add:focus-visible { opacity: 1; border-color: var(--line); }
   .cell:not(:has(.task-card)) .cell-add { opacity: 0.6; border-color: var(--line); }
-  .task-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-1); cursor: grab; transition: box-shadow 0.15s, transform 0.15s; }
+  .task-card { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-1); cursor: grab; transition: box-shadow 0.15s, transform 0.15s; }
+  .task-card-top { display: flex; align-items: flex-start; gap: 8px; }
+  /* The link covers the whole card, so a click anywhere opens it; the arrows sit above it. */
+  .task-card-link { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; color: inherit; }
+  .task-card-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+  .task-card-link:focus-visible { outline: none; }
+  .task-card:has(.task-card-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
   .task-card:hover { box-shadow: var(--shadow-lift); transform: translateY(-1px); }
   .task-card.is-dragging { opacity: 0.45; }
   .task-card-project { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
   .task-card-title { font-size: 14px; font-weight: 600; line-height: 1.35; }
   .task-card-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+
+  /* Phone task rows: the link fills the row; the arrows sit beside it. */
+  .list-row.list-task { padding: 0; gap: 0; }
+  .list-row-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; box-sizing: border-box; color: inherit; }
+
+  /* Reorder: a button in the toolbars, a bar while it is on, arrows on each card. */
+  .reorder-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px 0 11px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; position: relative; }
+  .reorder-btn::after { content: ""; position: absolute; inset: -4px 0; }
+  .chips-row { display: flex; align-items: center; gap: 8px; }
+  .chips-row .chips { flex: 1; min-width: 0; }
+  .lane-hint { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+  .reorder-bar { display: none; align-items: center; gap: 12px; min-height: 56px; padding: 6px 6px 6px 14px; border-radius: 14px; background: var(--active-bg); }
+  .reorder-bar > div { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+  .reorder-bar b { font-size: 15px; }
+  .reorder-bar .meta { color: var(--text); opacity: 0.75; }
+  .reorder-bar .btn { min-height: 44px; padding: 0 20px; }
+  @media (min-width: 900px) {
+    .reorder-bar { min-height: 48px; padding: 6px 6px 6px 16px; }
+    .reorder-bar > div { flex-direction: row; align-items: baseline; gap: 10px; }
+    .reorder-bar .btn { min-height: 36px; }
+  }
+  .move { display: none; gap: 4px; flex-shrink: 0; position: relative; z-index: 2; }
+  .move-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); }
+  .move-btn.is-none { visibility: hidden; }
+  .move-icon { width: 20px; height: 20px; }
+  .move-sm .move-btn { width: 32px; height: 32px; border-radius: 9px; }
+  .move-sm .move-icon { width: 16px; height: 16px; }
+  .is-moved { background: color-mix(in srgb, var(--accent) 14%, var(--surface)) !important; transition: background 0.6s; }
+  .rm-fold { display: none; align-items: center; gap: 10px; }
+  .rm-fold .rm-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .rm-fold b { font-size: 15px; line-height: 1.3; }
+
+  body[data-reordering] .reorder-bar { display: flex; }
+  body[data-reordering] .move { display: inline-flex; }
+  body[data-reordering] :is(.board-toolbar, .chips-row, #task-search, .lane-hint, .reorder-btn) { display: none !important; }
+  body[data-reordering] .task-card, body[data-reordering] .list-task { cursor: default; }
+  body[data-reordering] .task-card:hover { transform: none; box-shadow: var(--shadow-1); }
+  body[data-reordering] .list-task:has(> .list-row-link:hover) { background: transparent; }
+  /* Cards drop their extras so the arrows fit, and titles may wrap (390px: about 200px left). */
+  body[data-reordering] :is(.task-card-meta .avatar-stack, .task-card-meta .flex, .row-extra) { display: none; }
+  body[data-reordering] .list-task { padding-right: 8px; }
+  body[data-reordering] .list-task .row-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+  /* Roadmap cards fold to one line, so a lane fits on a phone screen. */
+  body[data-reordering] .roadmap-card[data-project-id] { gap: 0; padding: 14px 8px 10px 16px; cursor: default; }
+  /* !important: the card's children carry Tailwind display utilities, which sit in a later layer. */
+  body[data-reordering] .roadmap-card[data-project-id] > :not(.rm-fold) { display: none !important; }
+  body[data-reordering] .roadmap-card[data-project-id] > .rm-fold { display: flex; }
+  @media (min-width: 900px) {
+    .rm-fold .move-btn { width: 32px; height: 32px; border-radius: 9px; }
+    .rm-fold .move-icon { width: 16px; height: 16px; }
+  }
   .prio { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
   .prio i { width: 3px; border-radius: 1px; background: var(--line); }
   .prio i:nth-child(1) { height: 5px; }

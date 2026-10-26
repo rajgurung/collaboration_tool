@@ -20,7 +20,7 @@ use super::{
     admin::super_admin_cookie,
     mcp::{rpc, token_for, tool},
     prepare_data::{approve_as_owner, join, sign_up_member, AsMember, TestMember},
-    tasks::{project_in, task_form},
+    tasks::{own, project_in, task_form},
 };
 
 const REFUSAL: &str = "Website is done. Reopen the project first.";
@@ -52,11 +52,10 @@ async fn teammate(
     (member, user.id)
 }
 
-/// Makes `user_id` the project's owner.
+/// Makes `user_id` the project's one owner.
 async fn owned_by(ctx: &AppContext, project: &projects::Model, user_id: i64) -> projects::Model {
-    let mut p = project.clone().into_active_model();
-    p.owner_id = ActiveValue::Set(Some(user_id));
-    p.update(&ctx.db).await.unwrap()
+    own(ctx, project, &[user_id]).await;
+    project.clone()
 }
 
 async fn find(ctx: &AppContext, project: &projects::Model) -> projects::Model {
@@ -129,7 +128,7 @@ pub(super) async fn task_in(
 /// Closes a project through the model, as the owner.
 async fn close(ctx: &AppContext, owner: &TestMember, project: &projects::Model) {
     let user = owner_id(ctx, owner).await;
-    projects::Model::close(&ctx.db, owner.org_id, project.id, user)
+    projects::Model::close(&ctx.db, owner.org_id, project.id, user, true)
         .await
         .unwrap();
 }
@@ -310,11 +309,14 @@ fn no_lane_compare_outside_projects() {
         r#""lane": p.lane"#,
         r#""lane": project.lane"#,
         "/roadmap?lane={}\", project.lane",
-        // Input: Claude's create_project, and the roadmap's `?lane=`.
+        // Input: Claude's create_project, the roadmap's `?lane=`, and a move's lane.
         "lane: input.lane",
         "query.lane",
+        "&form.lane, place",
         // A reopen's toast names the lane the project is back in.
         "lane_label(&project.lane)",
+        // A renumber's SQL, which skips closed projects itself.
+        "t.lane = $4 AND t.closed_at IS NULL",
     ];
     // `..lane(` is struct update syntax, not a field read.
     let lane_read = regex::Regex::new(r"(^|[^.])\.lane\b|Column::Lane\b").unwrap();
@@ -1215,6 +1217,7 @@ async fn home_shows_the_donut_for_now_projects() {
                 lane: "next".to_string(),
                 status: "Idea".to_string(),
                 accent: "#c9d76a".to_string(),
+                owner_ids: vec![],
                 owner_id: String::new(),
                 summary: String::new(),
             },

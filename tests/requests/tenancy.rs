@@ -58,7 +58,8 @@ async fn build_globex(request: &TestServer, ctx: &AppContext) -> Globex {
             lane: "now".to_string(),
             status: "Active".to_string(),
             accent: "#ffb454".to_string(),
-            owner_id: owner.id.to_string(),
+            owner_ids: vec![owner.id],
+            owner_id: String::new(),
             summary: SECRET.to_string(),
         },
         None,
@@ -188,6 +189,7 @@ async fn org_a_cannot_reach_org_b() {
                 lane: "now".to_string(),
                 status: "Active".to_string(),
                 accent: "#ffb454".to_string(),
+                owner_ids: vec![],
                 owner_id: String::new(),
                 summary: String::new(),
             },
@@ -263,6 +265,8 @@ async fn org_a_cannot_reach_org_b() {
             (format!("/roadmap/projects/{}/close", globex.project.id), serde_json::json!({})),
             (format!("/roadmap/projects/{}/reopen", globex.project.id), serde_json::json!({})),
             (format!("/tasks/{}/status", globex.task.id), serde_json::json!({ "status": "done" })),
+            (format!("/tasks/{}/move", globex.task.id), serde_json::json!({ "status": "todo" })),
+            (format!("/roadmap/projects/{}/move", globex.project.id), serde_json::json!({ "lane": "next" })),
             (format!("/tasks/{}", globex.task.id), serde_json::json!({ "title": "hijacked", "project_id": "1", "priority": "high" })),
             (format!("/tasks/{}/delete", globex.task.id), serde_json::json!({})),
             (format!("/tasks/{}/notes", globex.task.id), serde_json::json!({ "body": "hijacked" })),
@@ -313,6 +317,22 @@ async fn org_a_cannot_reach_org_b() {
         assert_eq!(res.status_code(), 404, "own task, Globex note");
         assert!(!res.text().contains(SECRET), "own task, Globex note");
 
+        // Alice's own task and project placed against Globex's: the same
+        // answer as a card that moved away, and nothing written anywhere.
+        let globex_before = tasks::Entity::find_by_id(globex.task.id).one(&ctx.db).await.unwrap().unwrap();
+        for (path, form) in [
+            (format!("/tasks/{}/move", acme_task.id), serde_json::json!({ "status": globex_before.status, "before": globex.task.id })),
+            (format!("/roadmap/projects/{}/move", acme_project.id), serde_json::json!({ "lane": "now", "after": globex.project.id })),
+        ] {
+            let res = request.post(&a.at(&path)).as_member(&a).add_header("HX-Request", "true").form(&form).await;
+            assert_eq!(res.status_code(), 409, "{path}");
+            assert!(res.text().is_empty() && !res.text().contains(SECRET));
+        }
+        let acme_after = tasks::Entity::find_by_id(acme_task.id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!((acme_after.status.as_str(), acme_after.sort_order), (acme_task.status.as_str(), acme_task.sort_order));
+        let globex_after = tasks::Entity::find_by_id(globex.task.id).one(&ctx.db).await.unwrap().unwrap();
+        assert_eq!(globex_after.sort_order, globex_before.sort_order);
+
         // Alice's own conversations with Globex's photo messages.
         let alice_id = users::Model::find_by_email(&ctx.db, "alice@example.com").await.unwrap().id;
         let acme_general = conversations::Model::find_general(&ctx.db, acme.id).await.unwrap();
@@ -356,6 +376,8 @@ async fn org_a_cannot_reach_org_b() {
         let refs = [
             ("/tasks", format!("title=t&priority=high&project_id={}", globex.project.id)),
             ("/tasks", format!("title=t&priority=high&project_id={}&assignee_ids={b_user}", acme_project.id)),
+            ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_ids={b_user}")),
+            // An edit sheet from before several owners posts the old field.
             ("/roadmap/projects", format!("name=p&lane=now&status=s&accent=%23ffb454&owner_id={b_user}")),
             ("/meetings", format!("title=m&held_on=2026-10-01&summary=s&attendee_ids={b_user}")),
             ("/chat/groups", format!("name=g&member_ids={b_user}")),

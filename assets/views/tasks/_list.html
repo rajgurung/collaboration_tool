@@ -7,17 +7,20 @@
     <h2 class="section-label flex items-center gap-2">{{ group.label }} · {{ group.rows | length }}</h2>
     <div class="list">
       {% for row in group.rows %}
-      <a href="{{ org_url(path="/tasks/" ~ (row.id)) }}" class="list-row" id="task-{{ row.id }}"
+      <div class="list-row list-task" id="task-{{ row.id }}" data-task-id="{{ row.id }}" data-status="{{ row.status }}" data-name="{{ row.title }}">
+      <a href="{{ org_url(path="/tasks/" ~ (row.id)) }}" class="list-row-link" draggable="false"
          hx-get="{{ org_url(path="/tasks/" ~ (row.id)) }}" hx-target="#task-sheet-body"
          hx-on::after-request="document.getElementById('task-sheet').showModal()">
         {{<status_icon status={row.status}/>}}
         <span class="flex min-w-0 flex-1 flex-col">
-          <span class="truncate-1 text-[15px] font-medium {% if row.status == "done" %}text-muted{% endif %}">{{ row.title }}</span>
+          <span class="row-title truncate-1 text-[15px] font-medium {% if row.status == "done" %}text-muted{% endif %}">{{ row.title }}</span>
           <span class="meta truncate-1 flex items-center gap-1.5"><span class="dot" style="--dot: {{ row.accent }}"></span>{{ row.meta }}</span>
         </span>
-        {% if row.notes > 0 %}<span class="meta flex items-center gap-1">{{<icon name="message-circle" class="h-3.5 w-3.5"/>}}{{ row.notes }}</span>{% endif %}
-        {% if row.people %}<span class="avatar-stack">{% for p in row.people %}{{<avatar name={p.name} color={p.color} size="sm"/>}}{% endfor %}</span>{% endif %}
+        {% if row.notes > 0 %}<span class="row-extra meta flex items-center gap-1">{{<icon name="message-circle" class="h-3.5 w-3.5"/>}}{{ row.notes }}</span>{% endif %}
+        {% if row.people %}<span class="row-extra avatar-stack">{% for p in row.people %}{{<avatar name={p.name} color={p.color} size="sm"/>}}{% endfor %}</span>{% endif %}
       </a>
+      {% if filter != "done" %}{{<move_arrows name={row.title} first={loop.first} last={loop.last}/>}}{% endif %}
+      </div>
       {% endfor %}
     </div>
   </section>

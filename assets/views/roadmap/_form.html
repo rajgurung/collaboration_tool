@@ -7,11 +7,11 @@
       class="grid gap-4">
   <div>
     <h2 class="m-0 text-xl font-semibold">{% if project_id %}Edit project{% else %}New project{% endif %}</h2>
-    <p class="meta mt-1 mb-0 text-sm">A workstream on the roadmap, with one owner.</p>
+    <p class="meta mt-1 mb-0 text-sm">A workstream on the roadmap. Owners can mark it done.</p>
     {% if project and project.made_with_claude %}<p class="made-with-claude meta mt-1 mb-0 text-sm">{{<icon name="sparkles" class="h-3.5 w-3.5"/>}}Made with Claude</p>{% endif %}
   </div>
   {{<text_field name="name" label="Name" value={form.name} error={errors.name | default(value="")}/>}}
-  <div class="grid gap-4 sm:grid-cols-3">
+  <div class="grid gap-4 sm:grid-cols-2">
     <label class="field">
       <span class="field-label">Lane</span>
       <select name="lane" class="input">
@@ -20,15 +20,23 @@
       {% if errors.lane %}<span class="field-error">{{ errors.lane }}</span>{% endif %}
     </label>
     {{<text_field name="status" label="Status" value={form.status} error={errors.status | default(value="")}/>}}
-    <label class="field">
-      <span class="field-label">Owner</span>
-      <select name="owner_id" class="input">
-        <option value="">Unassigned</option>
-        {% for person in team %}<option value="{{ person.id }}" {% if form.owner_id == person.id | str %}selected{% endif %}>{{ person.username }}</option>{% endfor %}
-      </select>
-      {% if errors.owner_id %}<span class="field-error">{{ errors.owner_id }}</span>{% endif %}
-    </label>
   </div>
+  {# A new project's maker picks its owners; on an edit only admins and the
+     project's owners can change them (the server ignores anyone else's).
+     A super admin acting never can. #}
+  <fieldset class="field m-0 border-0 p-0" {% if owners_locked %}disabled{% endif %}>
+    <legend class="field-label mb-1.5">Owners{% if not owners_locked %} <span class="font-normal">· tap to add or remove</span>{% endif %}</legend>
+    <div class="flex flex-wrap gap-2">
+      {% for person in team %}
+      <label class="person-toggle">
+        <input type="checkbox" name="owner_ids" value="{{ person.id }}" {% if person.id in form.owner_ids %}checked{% endif %}>
+        <span>{{<avatar name={person.username} color={person.color} size="xs"/>}}{{ person.username }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    {% if owners_locked %}<span class="meta text-sm">Only this project's owners and admins can change owners.</span>{% endif %}
+    {% if errors.owner_ids %}<span class="field-error">{{ errors.owner_ids }}</span>{% endif %}
+  </fieldset>
   <fieldset class="field m-0 border-0 p-0">
     <legend class="field-label mb-2">Colour</legend>
     <div class="flex flex-wrap gap-3">

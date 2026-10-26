@@ -11,7 +11,7 @@ pub use super::_entities::memberships::{ActiveModel, Column, Entity, Model};
 use super::{
     access_tokens, conversation_members, conversations, field_error, login_accesses,
     login_events::{self, action, Client, Entry},
-    notifications, organisations,
+    notifications, organisations, project_owners,
     users::{self, RegisterParams},
 };
 
@@ -733,9 +733,9 @@ impl Model {
     /// owner removes an owner, and the last owner stays. Removal ends access
     /// to this organisation only: it revokes the person's Claude tokens here,
     /// ends an unlock of logins made here, takes them out of every
-    /// conversation here and stops mention emails from here, then closes
-    /// their chat sockets and notification streams for this organisation on
-    /// every device. Their sessions, and everything in their other
+    /// conversation here, takes them off every project they own here and
+    /// stops mention emails from here, then closes their chat sockets and
+    /// notification streams for this organisation on every device. Their sessions, and everything in their other
     /// organisations, are untouched; `CurrentMember` stops serving this one
     /// on the next request. Login activity records who removed whom.
     ///
@@ -799,6 +799,7 @@ impl Model {
         users::Model::end_unlock_in(&txn, user_id, org_id).await?;
         access_tokens::Model::revoke_all_for(&txn, org_id, user_id).await?;
         conversation_members::Model::remove_everywhere(&txn, org_id, user_id).await?;
+        project_owners::Model::remove_person(&txn, org_id, user_id).await?;
         notifications::Model::stop_emails(&txn, org_id, user_id).await?;
         login_events::Model::record(
             &txn,

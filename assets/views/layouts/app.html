@@ -85,4 +85,6 @@
   <a href="{{ org_url(path="/more") }}" class="tab" {% if tab == "more" %}aria-current="page"{% endif %}><span class="tab-icon">{{<icon name="ellipsis" class="h-[22px] w-[22px]"/>}}</span>More</a>
 </nav>
 {% endblock tabbar %}
+{# Reorder mode reads each move out here: "Order tins, 2 of 7 in To do". Outside every swap. #}
+<div id="reorder-status" class="sr-only" aria-live="polite"></div>
 {% endblock body %}

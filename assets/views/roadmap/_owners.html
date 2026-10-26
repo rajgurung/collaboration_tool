@@ -1,0 +1,2 @@
+{# A card's owner stack, at the end of its pill row: up to three avatars, then "+N". #}
+{% if card.owners.shown %}<span class="avatar-stack owner-stack" role="img" aria-label="{{ card.owners.label }}" title="{{ card.owners.label }}">{% for p in card.owners.shown %}{{<avatar name={p.username} color={p.color} size="sm" label={false}/>}}{% endfor %}{% if card.owners.more > 0 %}<span class="avatar avatar-sm avatar-more" aria-hidden="true">+{{ card.owners.more }}</span>{% endif %}</span>{% endif %}

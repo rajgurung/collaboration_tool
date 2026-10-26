@@ -13,7 +13,7 @@ use serial_test::serial;
 
 use super::{
     prepare_data::sign_up_member,
-    tasks::{approved_member, project_in},
+    tasks::{approved_member, own, project_in},
 };
 
 pub const RESOURCE: &str = "http://localhost:5150/mcp";
@@ -346,14 +346,20 @@ async fn create_project_fills_in_a_colour_and_tells_the_owner() {
         .await;
         assert!(!error, "{project}");
         assert_eq!(project["name"], "Collab Tool website");
-        assert_eq!(project["owner"], "bob");
+        assert_eq!(project["owners"], json!(["bob"]));
+        assert!(project.get("owner").is_none());
         let saved = collab::models::projects::Entity::find_by_id(project["id"].as_i64().unwrap())
             .one(&ctx.db)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(saved.accent, "#ffb454");
-        assert_eq!(saved.owner_id, Some(bob));
+        assert_eq!(
+            collab::models::project_owners::Model::for_project(&ctx.db, saved.organisation_id, saved.id)
+                .await
+                .unwrap(),
+            vec![bob]
+        );
         assert_eq!(notices(&ctx, bob, "owner").await.len(), 1);
 
         let (error, message) = tool(
@@ -371,6 +377,50 @@ async fn create_project_fills_in_a_colour_and_tells_the_owner() {
 
 #[tokio::test]
 #[serial]
+async fn create_project_takes_several_owners_and_lists_them() {
+    request::<App, _, _>(|request, ctx| async move {
+        let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
+        let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
+        let (_, carol) =
+            approved_member(&request, &ctx, &owner, "carol", "carol@example.com").await;
+        let token = token_for(&ctx, "alice@example.com").await;
+
+        // Both shapes, overlapping: merged, no repeats.
+        let (error, project) = tool(
+            &request,
+            &token,
+            "create_project",
+            json!({ "organisation": "acme", "name": "Website", "lane": "now", "status": "Active", "owners": ["Bob", "carol"], "owner": "bob" }),
+        )
+        .await;
+        assert!(!error, "{project}");
+        assert_eq!(project["owners"], json!(["bob", "carol"]));
+        assert_eq!(notices(&ctx, bob, "owner").await.len(), 1);
+        assert_eq!(notices(&ctx, carol, "owner").await.len(), 1);
+
+        let (error, message) = tool(
+            &request,
+            &token,
+            "create_project",
+            json!({ "organisation": "acme", "name": "Shop", "lane": "now", "status": "Active", "owners": ["bob", "Zed"] }),
+        )
+        .await;
+        assert!(error);
+        assert!(
+            message.as_str().unwrap().contains(r#"No one called "Zed" is on the team."#),
+            "{message}"
+        );
+
+        let (_, list) = tool(&request, &token, "list_projects", json!({})).await;
+        let website = &list["projects"][0];
+        assert_eq!(website["owners"], json!(["bob", "carol"]));
+        assert!(website.get("owner").is_none());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
 async fn create_task_assigns_by_username_and_notifies() {
     request::<App, _, _>(|request, ctx| async move {
         let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
@@ -378,9 +428,7 @@ async fn create_task_assigns_by_username_and_notifies() {
         let (_, carol) =
             approved_member(&request, &ctx, &owner, "carol", "carol@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
-        let mut owned: collab::models::projects::ActiveModel = project.clone().into();
-        owned.owner_id = ActiveValue::Set(Some(carol));
-        owned.update(&ctx.db).await.unwrap();
+        own(&ctx, &project, &[carol]).await;
         let token = token_for(&ctx, "alice@example.com").await;
 
         let (error, task) = tool(
@@ -420,9 +468,7 @@ async fn update_task_changes_only_what_it_is_given() {
         let owner = sign_up_member(&request, "Acme", "alice", "alice@example.com").await;
         let (_, bob) = approved_member(&request, &ctx, &owner, "bob", "bob@example.com").await;
         let project = project_in(&ctx, "acme", "Launch").await;
-        let mut owned: collab::models::projects::ActiveModel = project.clone().into();
-        owned.owner_id = ActiveValue::Set(Some(bob));
-        owned.update(&ctx.db).await.unwrap();
+        own(&ctx, &project, &[bob]).await;
         let token = token_for(&ctx, "alice@example.com").await;
         let (_, task) = tool(
             &request,

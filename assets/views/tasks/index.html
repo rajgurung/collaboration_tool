@@ -31,11 +31,16 @@
       <input type="search" name="q" value="{{ q }}" aria-label="Search tasks" placeholder="Search by task, project or person" class="min-w-0 flex-1 border-0 bg-transparent text-base text-text outline-none">
     </label>
   </form>
-  <nav class="chips mb-4" aria-label="Filter tasks">
-    {% for f in filters %}
-    <a href="{{ org_url(path="/tasks?filter=" ~ (f.key)) }}{% if view == "list" %}&view=list{% endif %}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{% if f.key == "blocked" %}<span class="dot" style="--dot: var(--blocked)"></span>{% endif %}{{ f.label }} {{ f.count }}</a>
-    {% endfor %}
-  </nav>
+  <div class="chips-row mb-4">
+    <nav class="chips" aria-label="Filter tasks">
+      {% for f in filters %}
+      <a href="{{ org_url(path="/tasks?filter=" ~ (f.key)) }}{% if view == "list" %}&view=list{% endif %}{% if q %}&q={{ q }}{% endif %}" class="chip" {% if f.current %}aria-current="true"{% endif %}>{% if f.key == "blocked" %}<span class="dot" style="--dot: var(--blocked)"></span>{% endif %}{{ f.label }} {{ f.count }}</a>
+      {% endfor %}
+    </nav>
+    {# Done keeps newest first, so it has nothing to reorder. #}
+    {% if filter != "done" %}<button type="button" class="reorder-btn" data-reorder-start="tasks">{{<icon name="arrow-up-down" class="h-4 w-4"/>}}Reorder</button>{% endif %}
+  </div>
+  {% if filter != "done" %}<div class="reorder-bar mb-4" role="region" aria-label="Reordering"><div><b>Reordering</b><span class="meta">Move tasks with the arrows.</span></div><button type="button" class="btn btn-primary" data-reorder-done>Done</button></div>{% endif %}
   {% include "tasks/_list.html" %}
 </div>
 <dialog id="task-dialog" class="sheet" aria-label="New task"><div class="sheet-handle"></div><div id="task-dialog-body" class="sheet-body"></div></dialog>
