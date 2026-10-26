@@ -25,6 +25,11 @@ async fn can_get_home_page() {
         assert!(body.contains(r#"href="/login""#), "{body}");
         // The full landing page, not the old card in the auth layout.
         assert!(!body.contains("auth-card"), "{body}");
+        // Search engines index APP_URL, not whichever address served the page.
+        assert!(
+            body.contains(r#"<link rel="canonical" href="http://localhost:5150/">"#),
+            "{body}"
+        );
     })
     .await;
 }

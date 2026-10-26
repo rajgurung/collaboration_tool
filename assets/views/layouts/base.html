@@ -16,6 +16,7 @@
   <script src="{{ asset_url(path="vendor/htmx.min.js") }}" defer></script>
   <script src="{{ asset_url(path="vendor/htmx-ext-ws.js") }}" defer></script>
   <script src="{{ asset_url(path="js/app.js") }}" defer></script>
+  {% block head %}{% endblock head %}
 </head>
 {# The org this page was drawn for. HTMX sends it as X-Org-Id and app.ts adds it to plain forms, so a page can't write into another org. data-org-base is where app.ts builds its own addresses (orgUrl); data-multi-org shows the phone and task-sheet org lines. #}
 <body {% if current_org_id %}data-org-id="{{ current_org_id }}" data-org-base="{{ org_base }}" data-org-name="{{ org.name }}" hx-headers='{"X-Org-Id": {{ current_org_id }}}' {% if multi_org %}data-multi-org {% endif %}{% endif %}{% block body_attrs %}{% endblock body_attrs %}>
