@@ -49,6 +49,7 @@ mod m20261025_120100_add_private_photos_to_messages;
 mod m20261025_140000_add_message_id_to_notifications;
 pub mod m20261026_120000_project_owners;
 mod m20261026_150000_drop_project_owner_id;
+pub mod m20261027_090000_add_kind_to_folders;
 pub struct Migrator;
 
 #[async_trait::async_trait]
@@ -102,6 +103,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261025_140000_add_message_id_to_notifications::Migration),
             Box::new(m20261026_120000_project_owners::Migration),
             Box::new(m20261026_150000_drop_project_owner_id::Migration),
+            Box::new(m20261027_090000_add_kind_to_folders::Migration),
             // inject-above (do not remove this comment)
         ]
     }

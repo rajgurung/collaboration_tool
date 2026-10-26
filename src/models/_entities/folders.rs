@@ -16,6 +16,8 @@ pub struct Model {
     #[sea_orm(unique)]
     pub organisation_id: i64,
     pub created_by_id: Option<i64>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub kind: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
