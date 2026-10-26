@@ -153,7 +153,8 @@ pub fn thread_url(conversation_id: i64, parent_id: i64) -> String {
     format!("/chat/{conversation_id}/threads/{parent_id}")
 }
 
-fn replies_label(count: i64) -> String {
+#[must_use]
+pub fn replies_label(count: i64) -> String {
     if count == 1 {
         "1 reply".to_string()
     } else {
@@ -238,9 +239,15 @@ pub struct MessageView {
     pub photo_removed: bool,
     /// When the photo was sent, for the viewer: "Today 09:40".
     pub photo_when: String,
-    /// The viewer may delete this photo: the sheet row, and the viewer's
-    /// Delete. Display only; the delete route checks again.
+    /// The viewer may delete this photo: the full-screen viewer's Delete.
+    /// Display only; the delete route checks again.
     pub can_delete_photo: bool,
+    /// The viewer may delete this message: the sheet's "Delete message" row.
+    /// Display only; the delete route checks again.
+    pub can_delete: bool,
+    /// The viewer sent it but it has replies: the sheet says to ask an owner
+    /// or admin instead of offering the row.
+    pub delete_blocked: bool,
 }
 
 impl MessageView {
@@ -292,13 +299,20 @@ impl MessageView {
                 String::new()
             },
             can_delete_photo: false,
+            can_delete: false,
+            delete_blocked: false,
         }
     }
 
-    /// Offers Delete on the photo to its sender, and to owners and admins.
-    pub fn allow_photo_delete(&mut self, viewer_id: i64, can_manage: bool) {
+    /// Offers Delete on the message, and on its photo, to its sender and to
+    /// owners and admins. A message with `replies` is the owners' and
+    /// admins' to delete; its sender is told to ask them.
+    pub fn allow_delete(&mut self, viewer_id: i64, can_manage: bool, replies: u64) {
+        self.can_delete =
+            messages::may_delete_message(self.author_id, viewer_id, can_manage, replies);
+        self.delete_blocked = !self.can_delete && self.author_id == viewer_id;
         self.can_delete_photo =
-            self.photo && messages::may_delete_photo(self.author_id, viewer_id, can_manage);
+            self.photo && messages::may_delete(self.author_id, viewer_id, can_manage);
     }
 
     /// Fills in the reactions as `viewer_id` sees them.
@@ -399,13 +413,14 @@ fn grouped(
         .iter()
         .map(|m| {
             let mut view = MessageView::new(m, names, viewer_id, tz);
-            view.allow_photo_delete(viewer_id, can_manage);
             if let Some(rows) = reactions.get(&m.id) {
                 view.set_reactions(rows, viewer_id);
             }
             if let Some(stats) = threads.get(&m.id) {
                 view.thread = thread_line(conversation.id, m.id, stats, names, tz);
             }
+            let replies = view.thread.as_ref().map_or(0, |t| t.count);
+            view.allow_delete(viewer_id, can_manage, replies.unsigned_abs());
             if shows_receipt(&conversation.kind, view.own) {
                 view.read_receipts = true;
                 view.receipt = receipt(&conversation.kind, m.user_id, m.created_at, marks, names);
@@ -753,7 +768,7 @@ async fn send(
             let names = names(&ctx, member.org.id).await?;
             let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
             view.read_receipts = true;
-            view.allow_photo_delete(member.user.id, member.can_manage());
+            view.allow_delete(member.user.id, member.can_manage(), 0);
             format::render().view(
                 &v,
                 "chat/_message.html",
@@ -808,7 +823,7 @@ async fn send_photo(
     let names = names(&ctx, member.org.id).await?;
     let mut view = MessageView::new(&message, &names, member.user.id, member.tz());
     view.read_receipts = true;
-    view.allow_photo_delete(member.user.id, member.can_manage());
+    view.allow_delete(member.user.id, member.can_manage(), 0);
     format::render().view(
         &v,
         "chat/_message.html",
@@ -884,18 +899,10 @@ async fn delete_photo(
     }
     let refused =
         || forbidden("Only the person who sent a photo, owners and admins can delete it.");
-    if !messages::may_delete_photo(message.user_id, member.user.id, member.can_manage()) {
+    if !messages::may_delete(message.user_id, member.user.id, member.can_manage())
+        || !photo_file_allows(&ctx, &member, &message).await?
+    {
         return Err(refused());
-    }
-    // A #general photo is a Documents file: its own rule must agree too.
-    if let Some(PhotoFile::Document(file_id)) = message.photo_file() {
-        match documents::Model::find_in_org(&ctx.db, member.org.id, file_id).await {
-            Ok(file) if !file.can_delete(member.user.id, member.can_manage()) => {
-                return Err(refused());
-            }
-            Ok(_) | Err(ModelError::EntityNotFound) => {}
-            Err(err) => return Err(err.into()),
-        }
     }
     let (message, changed) = message.delete_photo(&ctx).await?;
     if changed {
@@ -913,6 +920,111 @@ async fn delete_photo(
         }
     }
     format::render().empty()
+}
+
+/// A #general photo is a Documents file, so its own rule must agree to its
+/// deletion too. Any other message has nothing more to check.
+async fn photo_file_allows(
+    ctx: &AppContext,
+    member: &CurrentMember,
+    message: &messages::Model,
+) -> Result<bool> {
+    let Some(PhotoFile::Document(file_id)) = message.photo_file() else {
+        return Ok(true);
+    };
+    match documents::Model::find_in_org(&ctx.db, member.org.id, file_id).await {
+        Ok(file) => Ok(file.can_delete(member.user.id, member.can_manage())),
+        Err(ModelError::EntityNotFound) => Ok(true),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Deletes a message for everyone, for good, with its photo, reactions and
+/// notices. The sender may delete it while it has no replies; owners and
+/// admins who are in the conversation may delete any, and a parent's
+/// replies go with it. A message already gone is 404, as one that never
+/// existed: nothing is kept to tell them apart.
+#[debug_handler]
+async fn destroy(
+    member: CurrentMember,
+    State(ctx): State<AppContext>,
+    Path((id, message_id)): Path<(i64, i64)>,
+) -> Result<Response> {
+    member.require_own_membership()?;
+    let conversation =
+        conversations::Model::find_for_member(&ctx.db, member.org.id, id, member.user.id).await?;
+    let message = messages::Model::find_in_conversation(&ctx.db, &conversation, message_id).await?;
+    let manager = member.can_manage();
+    if !messages::may_delete(message.user_id, member.user.id, manager)
+        || !photo_file_allows(&ctx, &member, &message).await?
+    {
+        return Err(forbidden(
+            "Only the person who sent a message, owners and admins can delete it.",
+        ));
+    }
+    let had_photo = message.photo_file().is_some();
+    let (conversation_id, author_id, parent_id) =
+        (message.conversation_id, message.user_id, message.parent_id);
+    let deleted = match message.delete_message(&ctx, manager).await {
+        Ok(deleted) => deleted,
+        Err(err) => {
+            // The photo may have gone before the rest failed: open pages
+            // must stop showing it.
+            if had_photo {
+                photo_removed_after_failure(&ctx, &conversation, message_id).await;
+            }
+            return Err(match err {
+                ModelError::Message(text) if text == messages::HAS_REPLIES => forbidden(&text),
+                err => err.into(),
+            });
+        }
+    };
+    tracing::info!(
+        org_id = member.org.id,
+        conversation_id,
+        message_id,
+        parent_id,
+        actor_id = member.user.id,
+        by_manager = author_id != member.user.id,
+        had_photo,
+        replies = deleted.replies,
+        "chat message deleted"
+    );
+    // Saved; tell open pages, but a failed broadcast must not undo the answer.
+    if let Err(err) = super::chat_ws::publish_message_deleted(
+        &ctx,
+        member.org.id,
+        conversation_id,
+        message_id,
+        parent_id,
+    )
+    .await
+    {
+        tracing::error!(error = %err, message_id, "could not broadcast a deleted message");
+    }
+    super::notifications::refresh_badges(&ctx, member.org.id, &deleted.notified);
+    format::render().empty()
+}
+
+/// After a failed message delete: if its photo is gone, says so to open
+/// pages, as a photo delete would. Logged, never raised: the delete's own
+/// error is the answer.
+async fn photo_removed_after_failure(
+    ctx: &AppContext,
+    conversation: &conversations::Model,
+    message_id: i64,
+) {
+    match messages::Model::find_in_conversation(&ctx.db, conversation, message_id).await {
+        Ok(message) if message.photo_removed() => {
+            if let Err(err) = super::chat_ws::publish_photo_removed(ctx, &message) {
+                tracing::error!(error = %err, message_id, "could not broadcast a removed photo");
+            }
+        }
+        Ok(_) | Err(ModelError::EntityNotFound) => {}
+        Err(err) => {
+            tracing::error!(error = %err, message_id, "could not re-read a message after a failed delete");
+        }
+    }
 }
 
 /// A refusal as an error toast, with the text in the body for `fetch` callers.
@@ -1049,19 +1161,36 @@ async fn actions(
     let rows = reaction_rows(&ctx, member.org.id, &[message.id], &names).await?;
     let mut view = MessageView::new(&message, &names, me, member.tz());
     view.set_reactions(rows.get(&message.id).map_or(&[], Vec::as_slice), me);
-    view.allow_photo_delete(me, member.can_manage());
+    // A reply has no thread of its own.
+    let line = if message.parent_id.is_none() {
+        let stats = messages::Model::thread_stats(&ctx.db, member.org.id, &[message.id]).await?;
+        stats
+            .get(&message.id)
+            .and_then(|s| thread_line(conversation.id, message.id, s, &names, member.tz()))
+    } else {
+        None
+    };
+    let replies = line.as_ref().map_or(0, |l| l.count);
+    view.allow_delete(me, member.can_manage(), replies.unsigned_abs());
     view.can_reply = view.can_reply && query.thread.is_none();
     if view.can_reply {
-        let stats = messages::Model::thread_stats(&ctx.db, member.org.id, &[message.id]).await?;
-        view.thread = stats
-            .get(&message.id)
-            .and_then(|s| thread_line(conversation.id, message.id, s, &names, member.tz()));
+        view.thread = line;
     }
+    let members = conversation.member_ids(&ctx.db).await?;
     let reaction_total: usize = view.reactions.iter().map(|c| c.count).sum();
     format::render().view(
         &v,
         "chat/_actions.html",
-        member.fragment(data!({ "message": view, "reaction_total": reaction_total })),
+        member.fragment(data!({
+            "message": view,
+            "reaction_total": reaction_total,
+            "replies": replies,
+            "has_replies": messages::HAS_REPLIES,
+            "conversation": {
+                "kind": conversation.kind,
+                "label": label(&conversation, &members, &names, me),
+            },
+        })),
     )
 }
 
@@ -1080,11 +1209,17 @@ async fn thread_feed_data(
         .chain(replies.iter().map(|m| m.id))
         .collect();
     let reactions = reaction_rows(ctx, member.org.id, &ids, names).await?;
+    // The true total: the page shows only the latest replies.
+    let count: i64 = messages::Model::thread_stats(&ctx.db, member.org.id, &[parent.id])
+        .await?
+        .get(&parent.id)
+        .map_or(0, |stats| stats.iter().map(|s| s.replies).sum());
     let view = |m: &messages::Model| {
         let mut view = MessageView::new(m, names, me, tz);
         view.can_reply = false;
-        // Only the parent can have a photo.
-        view.allow_photo_delete(me, member.can_manage());
+        // Only the parent has replies, and only it can have a photo.
+        let replies = if m.id == parent.id { count } else { 0 };
+        view.allow_delete(me, member.can_manage(), replies.unsigned_abs());
         if let Some(rows) = reactions.get(&m.id) {
             view.set_reactions(rows, me);
         }
@@ -1092,11 +1227,6 @@ async fn thread_feed_data(
     };
     let mut reply_views: Vec<MessageView> = replies.iter().map(view).collect();
     mark_runs(&mut reply_views);
-    // The true total: the page shows only the latest replies.
-    let count: i64 = messages::Model::thread_stats(&ctx.db, member.org.id, &[parent.id])
-        .await?
-        .get(&parent.id)
-        .map_or(0, |stats| stats.iter().map(|s| s.replies).sum());
     // Who the empty thread says will be told: the parent's author, if that
     // is someone else still on the team.
     let notify = (parent.user_id != me)
@@ -1218,7 +1348,8 @@ async fn reply(
         )),
         Ok(reply) => {
             let names = names(&ctx, member.org.id).await?;
-            let view = MessageView::new(&reply, &names, member.user.id, member.tz());
+            let mut view = MessageView::new(&reply, &names, member.user.id, member.tz());
+            view.allow_delete(member.user.id, member.can_manage(), 0);
             format::render().view(
                 &v,
                 "chat/_message.html",
@@ -1339,6 +1470,7 @@ pub fn routes() -> Routes {
         .add("/chat/{id}/photos/{message_id}/delete", post(delete_photo))
         .add("/chat/{id}/feed", get(feed))
         .add("/chat/{id}/messages/{message_id}/reactions", post(react))
+        .add("/chat/{id}/messages/{message_id}/delete", post(destroy))
         .add("/chat/{id}/messages/{message_id}/actions", get(actions))
         .add("/chat/{id}/threads/{message_id}", get(thread))
         .add("/chat/{id}/threads/{message_id}/feed", get(thread_feed))

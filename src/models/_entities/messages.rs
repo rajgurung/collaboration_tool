@@ -53,6 +53,8 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     SelfRef,
+    #[sea_orm(has_many = "super::notifications::Entity")]
+    Notifications,
     #[sea_orm(
         belongs_to = "super::organisations::Entity",
         from = "Column::OrganisationId",
@@ -82,6 +84,12 @@ impl Related<super::conversations::Entity> for Entity {
 impl Related<super::documents::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Documents.def()
+    }
+}
+
+impl Related<super::notifications::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Notifications.def()
     }
 }
 

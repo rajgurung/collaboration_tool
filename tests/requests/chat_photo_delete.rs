@@ -8,11 +8,7 @@ use std::path::Path;
 use collab::{
     app::App,
     data::chat_hub::{ChatEvent, ChatHub},
-    models::{
-        conversations, documents, folders,
-        memberships::{self, role},
-        messages,
-    },
+    models::{conversations, documents, folders, memberships, messages},
 };
 use loco_rs::{app::AppContext, testing::prelude::*, TestServer};
 use sea_orm::{ActiveModelTrait, ActiveValue, EntityTrait, IntoActiveModel, PaginatorTrait};
@@ -20,75 +16,16 @@ use serial_test::serial;
 use tokio::sync::broadcast::Receiver;
 
 use super::{
-    chat::user_id,
     chat_photos::{
         group_of, latest_message, leaks, open_photo, page, photo_path, secret_png, send_photo,
         stored_chat_files,
     },
     documents::PDF,
-    prepare_data::{
-        approve_as_owner, join, login, sign_up_member, AsMember, TestMember, USER_PASSWORD,
-    },
+    juniper::juniper,
+    prepare_data::{join, login, sign_up_member, AsMember, TestMember, USER_PASSWORD},
 };
 
 const REFUSED: &str = "Only the person who sent a photo, owners and admins can delete it.";
-
-/// Juniper Tea Co: Ana (owner), Maya (admin), Tom and Leo (members). #finance
-/// is Ana's group with Maya and Tom; Leo is not in it.
-struct Team {
-    org_id: i64,
-    ana: TestMember,
-    maya: TestMember,
-    tom: TestMember,
-    leo: TestMember,
-    ana_id: i64,
-    maya_id: i64,
-    tom_id: i64,
-    leo_id: i64,
-    general: conversations::Model,
-    finance: conversations::Model,
-}
-
-async fn juniper(request: &TestServer, ctx: &AppContext) -> Team {
-    let ana = sign_up_member(request, "Juniper Tea Co", "ana", "ana@example.com").await;
-    let org_id = ana.org_id;
-    let mut people = Vec::new();
-    for name in ["maya", "tom", "leo"] {
-        let email = format!("{name}@example.com");
-        let who = join(request, ctx, &ana.slug, name, &email).await;
-        let id = user_id(ctx, &email).await;
-        let pending = memberships::Model::default_for_user(&ctx.db, id)
-            .await
-            .unwrap()
-            .unwrap();
-        let approved = approve_as_owner(ctx, &pending).await;
-        if name == "maya" {
-            let mut admin = approved.into_active_model();
-            admin.role = ActiveValue::Set(role::ADMIN.to_string());
-            admin.update(&ctx.db).await.unwrap();
-        }
-        people.push((who, id));
-    }
-    let [(maya, maya_id), (tom, tom_id), (leo, leo_id)] = people.try_into().unwrap();
-    let ana_id = user_id(ctx, "ana@example.com").await;
-    let general = conversations::Model::find_general(&ctx.db, org_id)
-        .await
-        .unwrap();
-    let finance = group_of(ctx, org_id, ana_id, "finance", vec![maya_id, tom_id]).await;
-    Team {
-        org_id,
-        ana,
-        maya,
-        tom,
-        leo,
-        ana_id,
-        maya_id,
-        tom_id,
-        leo_id,
-        general,
-        finance,
-    }
-}
 
 /// `who` posts a photo whose bytes end in the secret, and gets its message.
 async fn post_photo(
@@ -287,13 +224,15 @@ async fn a_member_cannot_delete_someone_elses_photo() {
         let feed = page(&request, &team.leo, &format!("/chat/{general}")).await;
         assert!(feed.contains(&format!(r#"id="photo-{}""#, photo.id)));
         assert!(!feed.contains("data-delete-url"), "{feed}");
+        // The sheet deletes the whole message; "Delete photo" is the viewer's.
         let leos = sheet(&request, &team.leo, general, photo.id, "").await;
         assert!(!leos.contains("Delete photo"), "{leos}");
+        assert!(!leos.contains("Delete message"), "{leos}");
         for who in [&team.tom, &team.maya, &team.ana] {
             let html = sheet(&request, who, general, photo.id, "").await;
-            assert!(html.contains("Delete photo"), "{html}");
+            assert!(!html.contains("Delete photo"), "{html}");
             assert!(
-                html.contains(&format!(r#"data-photo-delete="{}""#, photo.id)),
+                html.contains(&format!(r#"data-message-delete="{}""#, photo.id)),
                 "{html}"
             );
         }
@@ -680,7 +619,8 @@ async fn a_thread_under_a_removed_photo_still_opens() {
         .await
         .unwrap();
         let html = sheet(&request, &team.tom, finance, photo.id, "?thread=1").await;
-        assert!(html.contains("Delete photo"), "the parent's sheet: {html}");
+        assert!(!html.contains("Delete photo"), "the parent's sheet: {html}");
+        assert!(html.contains(messages::HAS_REPLIES), "{html}");
 
         let res = delete(&request, &team.tom, finance, photo.id).await;
         assert_eq!(res.status_code(), 200);

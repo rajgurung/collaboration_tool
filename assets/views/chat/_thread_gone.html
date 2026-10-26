@@ -1,0 +1,2 @@
+{# A thread page whose parent was deleted while it was open. On a reload the page is thread_missing.html. #}
+<div class="center-state" data-thread-gone>{{<icon name="messages-square" class="h-9 w-9"/>}}<h2>This thread was deleted</h2><a href="{{ org_url(path="/chat/" ~ (conversation_id)) }}" class="btn btn-secondary">Back to chat</a></div>

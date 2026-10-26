@@ -1988,9 +1988,9 @@ window.addEventListener("popstate", () => {
   if (dialog?.open && history.state?.chatPhoto !== viewerOpen) dialog.close();
 });
 
-// Deleting a chat photo, from the message sheet or the viewer. One confirm
-// (#photo-delete) serves both, filled from the photo link's data-* as text.
-// The socket swaps #photo-N for "Photo removed" on every open page.
+// Deleting a chat photo, from the full-screen viewer. Its confirm
+// (#photo-delete) is filled from the photo link's data-* as text. The
+// socket swaps #photo-N for "Photo removed" on every open page.
 const DELETE_FAILED = "Couldn't delete the photo. Check your connection and try again.";
 // The message this tab is deleting, so syncViewer leaves its viewer to the answer.
 let deletingPhoto = "";
@@ -2001,25 +2001,34 @@ function photoLink(id: string): HTMLAnchorElement | null {
   return el instanceof HTMLAnchorElement && el.hasAttribute("data-photo-view") ? el : null;
 }
 
+// The parts every delete confirm has, named data-{prefix}-alert and so on.
+type ConfirmPrefix = "photo-delete" | "message-delete";
+function confirmParts(dialog: HTMLDialogElement, prefix: ConfirmPrefix) {
+  const q = <T extends Element>(part: string) => dialog.querySelector<T>(`[data-${prefix}-${part}]`);
+  return {
+    alert: q<HTMLElement>("alert"),
+    error: q<HTMLElement>("error"),
+    confirm: q<HTMLButtonElement>("confirm"),
+    cancel: q<HTMLButtonElement>("cancel"),
+    spin: q<HTMLElement>("spin"),
+    label: q<HTMLElement>("label"),
+  };
+}
+
 function photoDeleteParts(dialog: HTMLDialogElement) {
   const q = <T extends Element>(selector: string) => dialog.querySelector<T>(selector);
   return {
+    ...confirmParts(dialog, "photo-delete"),
     avatar: q<HTMLElement>("[data-photo-delete-avatar]"),
     name: q<HTMLElement>("[data-photo-delete-name]"),
     at: q<HTMLElement>("[data-photo-delete-at]"),
     text: q<HTMLElement>("[data-photo-delete-text]"),
-    alert: q<HTMLElement>("[data-photo-delete-alert]"),
-    error: q<HTMLElement>("[data-photo-delete-error]"),
-    confirm: q<HTMLButtonElement>("[data-photo-delete-confirm]"),
-    cancel: q<HTMLButtonElement>("[data-photo-delete-cancel]"),
-    spin: q<HTMLElement>("[data-photo-delete-spin]"),
-    label: q<HTMLElement>("[data-photo-delete-label]"),
   };
 }
 
 // While deleting, both buttons lock and nothing dismisses the confirm.
-function photoDeleteBusy(dialog: HTMLDialogElement, busy: boolean) {
-  const p = photoDeleteParts(dialog);
+function confirmBusy(dialog: HTMLDialogElement, prefix: ConfirmPrefix, busy: boolean) {
+  const p = confirmParts(dialog, prefix);
   dialog.toggleAttribute("data-busy", busy);
   if (p.confirm) {
     p.confirm.disabled = busy;
@@ -2030,7 +2039,7 @@ function photoDeleteBusy(dialog: HTMLDialogElement, busy: boolean) {
   if (p.label) p.label.textContent = busy ? "Deleting..." : "Delete";
 }
 
-function openPhotoDelete(link: HTMLAnchorElement, from: "sheet" | "viewer") {
+function openPhotoDelete(link: HTMLAnchorElement) {
   const dialog = document.querySelector<HTMLDialogElement>("#photo-delete");
   const url = link.dataset.deleteUrl;
   if (!dialog || !url || dialog.hasAttribute("data-busy")) return;
@@ -2042,105 +2051,274 @@ function openPhotoDelete(link: HTMLAnchorElement, from: "sheet" | "viewer") {
   if (p.at) p.at.textContent = link.dataset.at ?? "";
   if (p.text) p.text.textContent = caption ? `Photo · ${caption}` : "Photo";
   if (p.alert) p.alert.hidden = true;
-  photoDeleteBusy(dialog, false);
+  confirmBusy(dialog, "photo-delete", false);
   dialog.dataset.url = url;
   dialog.dataset.message = link.dataset.message ?? "";
-  dialog.dataset.from = from;
-  // One sheet at a time. From the viewer, the confirm opens over it, and
-  // Cancel goes back to the photo.
-  if (from === "sheet") document.querySelector<HTMLDialogElement>("#chat-dialog")?.close();
+  dialog.dataset.from = "viewer";
+  // It opens over the viewer, and Cancel goes back to the photo.
   dialog.showModal();
+}
+
+// The confirm may be gone by the time an answer comes (Back, a stale-tab
+// move), so a failure then says so in a toast.
+function confirmFailed(dialog: HTMLDialogElement, prefix: ConfirmPrefix, message: string) {
+  const p = confirmParts(dialog, prefix);
+  if (dialog.open && p.alert && p.error) {
+    p.error.textContent = message;
+    p.alert.hidden = false;
+  } else showToast({ kind: "error", message });
+}
+
+// The socket swaps the bubble; if it hasn't, reload the feed.
+function reloadFeedUnless(done: () => boolean) {
+  const feedUrl = document.querySelector<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;
+  window.setTimeout(() => {
+    if (feedUrl && !done()) void htmx.ajax("GET", feedUrl, { target: "#chat-feed", swap: "innerHTML" });
+  }, 1500);
 }
 
 async function deletePhoto(dialog: HTMLDialogElement) {
   const url = dialog.dataset.url;
   const id = dialog.dataset.message ?? "";
   if (!url || dialog.hasAttribute("data-busy")) return;
-  // The confirm may be gone by the time the answer comes (Back, a stale-tab
-  // move), so a failure then says so in a toast.
-  const failed = (message: string) => {
-    const p = photoDeleteParts(dialog);
-    if (dialog.open && p.alert && p.error) {
-      p.error.textContent = message;
-      p.alert.hidden = false;
-    } else showToast({ kind: "error", message });
-  };
-  photoDeleteBusy(dialog, true);
+  confirmBusy(dialog, "photo-delete", true);
   deletingPhoto = id;
   try {
     const res = await fetch(url, { method: "POST", headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" });
-    photoDeleteBusy(dialog, false);
+    confirmBusy(dialog, "photo-delete", false);
     if (staleRefusal(res)) {
       dialog.close();
       return;
     }
     if (!res.ok) {
-      failed((await fetchRefusalText(res)) ?? DELETE_FAILED);
+      confirmFailed(dialog, "photo-delete", (await fetchRefusalText(res)) ?? DELETE_FAILED);
       return;
     }
     dialog.close();
     const viewer = document.querySelector<HTMLDialogElement>("#photo-viewer");
     if (viewer?.open && viewer.dataset.message === id) viewer.close();
     showToast({ kind: "success", message: "Photo deleted" });
-    // The socket swaps the bubble; if it hasn't, reload the feed.
-    const feedUrl = document.querySelector<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;
-    window.setTimeout(() => {
-      if (feedUrl && photoLink(id)) void htmx.ajax("GET", feedUrl, { target: "#chat-feed", swap: "innerHTML" });
-    }, 1500);
+    reloadFeedUnless(() => !photoLink(id));
   } catch {
-    photoDeleteBusy(dialog, false);
-    failed(DELETE_FAILED);
+    confirmBusy(dialog, "photo-delete", false);
+    confirmFailed(dialog, "photo-delete", DELETE_FAILED);
   } finally {
     deletingPhoto = "";
   }
 }
 
+// Deleting a chat message, from its sheet. The server draws the confirm's
+// body into the sheet's <template>, escaped; it is moved into
+// #message-delete as it is. The socket removes the bubble on every open page.
+const MESSAGE_DELETE_FAILED = "Couldn't delete the message. Check your connection and try again.";
+// The message this tab is deleting, so the sync below leaves it to the answer.
+let deletingMessage = "";
+
+const messageOnPage = (id: string) => !!id && !!document.getElementById(`message-${id}`);
+
+// The quote of a message that is gone, in a sheet or the confirm.
+function quoteGone(quote: HTMLElement | null) {
+  if (!quote) return;
+  quote.textContent = "Message deleted";
+  quote.classList.add("excerpt-deleted");
+}
+
+// Someone else got there first: say so, and offer only Close.
+function showMessageGone(dialog: HTMLDialogElement) {
+  const p = confirmParts(dialog, "message-delete");
+  quoteGone(dialog.querySelector<HTMLElement>(".quote p"));
+  if (p.error) p.error.textContent = "This message was already deleted.";
+  if (p.alert) p.alert.hidden = false;
+  const buttons = dialog.querySelector<HTMLElement>("[data-message-delete-buttons]");
+  const gone = dialog.querySelector<HTMLElement>("[data-message-delete-gone]");
+  if (buttons) buttons.hidden = true;
+  if (gone) gone.hidden = false;
+}
+
+// The sheet of a message deleted while it was open. It never says who did it.
+function showSheetGone(sheet: HTMLDialogElement) {
+  const actions = sheet.querySelector<HTMLElement>(".msg-actions");
+  if (!actions || actions.hasAttribute("data-gone")) return;
+  actions.setAttribute("data-gone", "");
+  quoteGone(actions.querySelector<HTMLElement>(".quote p"));
+  // Its confirm, with the message's text, can no longer open.
+  actions.querySelector("template[data-message-delete-body]")?.remove();
+  for (const el of Array.from(actions.children)) {
+    if (el instanceof HTMLElement && !el.matches(".quote, .sr-only")) el.hidden = !el.hasAttribute("data-sheet-gone");
+  }
+}
+
+function openMessageDelete(row: HTMLElement) {
+  const id = row.dataset.messageDelete ?? "";
+  const sheet = document.querySelector<HTMLDialogElement>("#chat-dialog");
+  const dialog = document.querySelector<HTMLDialogElement>("#message-delete");
+  const slot = dialog?.querySelector("[data-message-delete-slot]");
+  const body = row.closest(".msg-actions")?.querySelector<HTMLTemplateElement>("template[data-message-delete-body]");
+  if (!dialog || !slot || !body || dialog.hasAttribute("data-busy")) return;
+  if (!messageOnPage(id)) {
+    if (sheet) showSheetGone(sheet);
+    return;
+  }
+  slot.replaceChildren(document.importNode(body.content, true));
+  dialog.dataset.message = id;
+  dialog.dataset.tried = "";
+  // One sheet at a time.
+  sheet?.close();
+  dialog.showModal();
+}
+
+async function deleteMessage(dialog: HTMLDialogElement) {
+  const url = confirmParts(dialog, "message-delete").confirm?.dataset.url;
+  const id = dialog.dataset.message ?? "";
+  if (!url || dialog.hasAttribute("data-busy")) return;
+  const deleted = () => {
+    dialog.close();
+    showToast({ kind: "success", message: "Message deleted" });
+    reloadFeedUnless(() => !messageOnPage(id));
+  };
+  confirmBusy(dialog, "message-delete", true);
+  deletingMessage = id;
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "HX-Request": "true", ...orgHeaders() }, credentials: "same-origin" });
+    confirmBusy(dialog, "message-delete", false);
+    if (staleRefusal(res)) {
+      dialog.close();
+      return;
+    }
+    // A 404 after this confirm's own failed or lost attempt: that one landed.
+    if (res.ok || (res.status === 404 && dialog.dataset.tried)) return deleted();
+    if (res.status === 404) return showMessageGone(dialog);
+    const refusal = await fetchRefusalText(res);
+    if (refusal) return confirmFailed(dialog, "message-delete", refusal);
+    // A lock timeout or a failure after the photo went: Delete is the retry.
+    dialog.dataset.tried = "1";
+    confirmFailed(dialog, "message-delete", MESSAGE_DELETE_FAILED);
+  } catch {
+    confirmBusy(dialog, "message-delete", false);
+    dialog.dataset.tried = "1";
+    confirmFailed(dialog, "message-delete", MESSAGE_DELETE_FAILED);
+  } finally {
+    deletingMessage = "";
+  }
+}
+
 document.addEventListener("click", (event) => {
   const target = event.target as Element | null;
-  const row = target?.closest<HTMLElement>("[data-photo-delete]");
-  if (row) {
-    const link = photoLink(row.dataset.photoDelete ?? "");
-    if (link?.dataset.deleteUrl) openPhotoDelete(link, "sheet");
-    else {
-      // Removed while the sheet was open.
-      document.querySelector<HTMLDialogElement>("#chat-dialog")?.close();
-      showToast({ message: "That photo was already removed." });
-    }
-    return;
-  }
+  const row = target?.closest<HTMLElement>("[data-message-delete]");
+  if (row) return openMessageDelete(row);
   if (target?.closest("[data-viewer-delete]")) {
     const link = photoLink(document.querySelector<HTMLDialogElement>("#photo-viewer")?.dataset.message ?? "");
-    if (link) openPhotoDelete(link, "viewer");
+    if (link) openPhotoDelete(link);
     return;
   }
-  const confirm = target?.closest("[data-photo-delete-confirm]")?.closest("dialog");
-  if (confirm) void deletePhoto(confirm);
+  const photoConfirm = target?.closest("[data-photo-delete-confirm]")?.closest("dialog");
+  if (photoConfirm) return void deletePhoto(photoConfirm);
+  const messageConfirm = target?.closest("[data-message-delete-confirm]")?.closest("dialog");
+  if (messageConfirm) void deleteMessage(messageConfirm);
+});
+
+// A closed confirm keeps none of the message's text in the page.
+document.querySelector<HTMLDialogElement>("#message-delete")?.addEventListener("close", (event) => {
+  (event.currentTarget as HTMLElement).querySelector("[data-message-delete-slot]")?.replaceChildren();
 });
 
 // Escape does nothing while deleting.
-document.querySelector<HTMLDialogElement>("#photo-delete")?.addEventListener("cancel", (event) => {
-  if ((event.currentTarget as HTMLElement).hasAttribute("data-busy")) event.preventDefault();
-});
+for (const id of ["#photo-delete", "#message-delete"]) {
+  document.querySelector<HTMLDialogElement>(id)?.addEventListener("cancel", (event) => {
+    if ((event.currentTarget as HTMLElement).hasAttribute("data-busy")) event.preventDefault();
+  });
+}
 
-// Someone else deleted the photo this viewer shows: say so, and stop
-// showing it. Download and Delete go; the caption stays, as in the bubble.
+// Someone else deleted the photo this viewer shows, or its whole message:
+// say so, and stop showing it. Download and Delete go. The caption stays
+// with the message, as in the bubble, and goes with it.
 function syncViewer() {
   const dialog = document.querySelector<HTMLDialogElement>("#photo-viewer");
   const id = dialog?.dataset.message ?? "";
-  if (!dialog?.open || !id || id === deletingPhoto) return;
-  if (!document.getElementById(`message-${id}`) || photoLink(id)) return;
+  if (!dialog?.open || !id || id === deletingPhoto || id === deletingMessage) return;
+  const gone = !messageOnPage(id);
+  if (!gone && photoLink(id)) return;
   const p = viewerParts(dialog);
   p.img?.removeAttribute("src");
   for (const el of [p.img, p.loading, p.error, p.download, p.del]) if (el) el.hidden = true;
   if (p.removed) p.removed.hidden = false;
+  if (gone && p.caption) p.caption.hidden = true;
 }
-document.body.addEventListener("htmx:wsAfterMessage", syncViewer);
+
+// Open sheets and confirms on a message someone else just deleted. A thread
+// page whose parent went closes them: the page itself says so.
+function syncDeleted() {
+  const sheet = document.querySelector<HTMLDialogElement>("#chat-dialog");
+  const confirm = document.querySelector<HTMLDialogElement>("#message-delete");
+  const photoConfirm = document.querySelector<HTMLDialogElement>("#photo-delete");
+  if (document.querySelector("#chat-feed [data-thread-gone]")) {
+    for (const dialog of [sheet, confirm, photoConfirm]) if (dialog?.open && !dialog.hasAttribute("data-busy")) dialog.close();
+    document.querySelector<HTMLDialogElement>("#photo-viewer")?.close();
+    return;
+  }
+  const confirmed = confirm?.dataset.message ?? "";
+  if (confirm?.open && !confirm.hasAttribute("data-busy") && confirmed !== deletingMessage && !messageOnPage(confirmed)) showMessageGone(confirm);
+  const shown = sheet?.querySelector<HTMLElement>(".msg-actions")?.dataset.message ?? "";
+  if (sheet?.open && shown && !messageOnPage(shown)) showSheetGone(sheet);
+}
+
+// Regrouping after a removal, as the server's mark_runs does, but only for
+// the two messages either side of the one that went: a run starts where the
+// author changes, and the avatar shows on a run's last message. A message
+// that came over the socket (data-live) always starts a run, as it did when
+// it arrived, and a non-message element (the thread divider, the empty
+// state) is a break.
+const isMsg = (el: Element | null): el is HTMLElement => el instanceof HTMLElement && el.classList.contains("msg");
+
+function setRunStart(msg: HTMLElement, start: boolean) {
+  msg.classList.toggle("msg-start", start);
+  const body = msg.querySelector<HTMLElement>(":scope > .msg-body");
+  const name = body?.querySelector(":scope > .msg-name");
+  if (!start) name?.remove();
+  else if (!name && body && !msg.classList.contains("msg-own")) {
+    const label = document.createElement("span");
+    label.className = "msg-name";
+    label.textContent = msg.dataset.author ?? "";
+    body.prepend(label);
+  }
+}
+
+function regroup(prev: Element | null, next: Element | null) {
+  if (isMsg(next) && !next.hasAttribute("data-live")) {
+    const joined = isMsg(prev) && prev.nextElementSibling === next && prev.dataset.authorId === next.dataset.authorId;
+    setRunStart(next, !joined);
+  }
+  if (isMsg(prev)) {
+    const after = prev.nextElementSibling;
+    const continues = isMsg(after) && !after.classList.contains("msg-start") && after.dataset.authorId === prev.dataset.authorId;
+    const avatar = prev.querySelector(":scope > .msg-av");
+    avatar?.classList.toggle("visible", !continues);
+    avatar?.classList.toggle("invisible", continues);
+  }
+}
+
+// Only a delete swaps a whole message (hx-swap-oob="delete" on #message-N):
+// note its neighbours before it goes, and regroup them once the socket's
+// message is swapped in.
+const removedBetween: Array<[Element | null, Element | null]> = [];
+document.body.addEventListener("htmx:oobBeforeSwap", (event) => {
+  const target = (event as CustomEvent<{ target: Element }>).detail.target;
+  if (isMsg(target) && target.parentElement?.id === "chat-feed") removedBetween.push([target.previousElementSibling, target.nextElementSibling]);
+});
+document.body.addEventListener("htmx:wsAfterMessage", () => {
+  for (const [prev, next] of removedBetween.splice(0)) regroup(prev, next);
+  syncDeleted();
+  syncViewer();
+});
 document.body.addEventListener("htmx:afterSwap", (event) => {
-  if ((event as CustomEvent<{ target: Element }>).detail.target.id === "chat-feed") syncViewer();
+  if ((event as CustomEvent<{ target: Element }>).detail.target.id !== "chat-feed") return;
+  syncDeleted();
+  syncViewer();
 });
 
 // A chat page restored from the back-forward cache missed what happened
-// while it was away, deleted photos included: draw the feed again.
+// while it was away, deleted photos and messages included: draw the feed
+// again.
 window.addEventListener("pageshow", (event) => {
   if (!event.persisted || !document.getElementById("chat-feed")) return;
   const url = document.querySelector<HTMLElement>("[data-chat-feed-url]")?.dataset.chatFeedUrl;

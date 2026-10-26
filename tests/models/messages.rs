@@ -793,3 +793,619 @@ mod own_photos {
         assert_eq!(stored_chat_files(ctx, org_id).await.len(), 1);
     }
 }
+
+/// Deleting a message for good. The row goes, and the database takes its
+/// reactions, its notices and, for a thread parent, its replies. Saves that
+/// race a delete wait on the message's row lock, so whichever comes second
+/// sees the other's result.
+mod deleting {
+    use std::{path::Path, time::Duration};
+
+    use collab::{
+        app::App,
+        controllers::notifications::message_sent,
+        models::{
+            conversation_members,
+            conversations::{self, GroupParams},
+            documents, messages, notifications,
+            organisations::{self, SignupParams},
+            reactions,
+            users::{self, RegisterParams},
+        },
+    };
+    use loco_rs::{app::AppContext, prelude::ModelError, testing::prelude::*};
+    use sea_orm::{
+        ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
+        EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    };
+    use serial_test::serial;
+
+    use crate::locks::{hold, waiting_locks};
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+    /// Acme: alice (the owner) and bob, both in #general and a group.
+    struct Acme {
+        org_id: i64,
+        alice: users::Model,
+        bob: users::Model,
+        general: conversations::Model,
+        group: conversations::Model,
+    }
+
+    async fn acme(ctx: &AppContext) -> Acme {
+        let (alice, org) = organisations::Model::sign_up(
+            &ctx.db,
+            &SignupParams {
+                organisation_name: "Acme".to_string(),
+                name: "alice".to_string(),
+                email: "alice@example.com".to_string(),
+                password: "correct-horse".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let bob = users::Model::create_with_password(
+            &ctx.db,
+            &RegisterParams {
+                email: "bob@example.com".to_string(),
+                password: "correct-horse".to_string(),
+                name: "bob".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let general = conversations::Model::find_general(&ctx.db, org.id)
+            .await
+            .unwrap();
+        let group = conversations::Model::create_group(
+            &ctx.db,
+            org.id,
+            alice.id,
+            &GroupParams {
+                name: "finance".to_string(),
+                member_ids: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        for conversation in [&general, &group] {
+            conversation_members::Model::add(&ctx.db, conversation, bob.id)
+                .await
+                .unwrap();
+        }
+        Acme {
+            org_id: org.id,
+            alice,
+            bob,
+            general,
+            group,
+        }
+    }
+
+    async fn say(
+        ctx: &AppContext,
+        conversation: &conversations::Model,
+        who: i64,
+        body: &str,
+    ) -> messages::Model {
+        messages::Model::create(
+            &ctx.db,
+            conversation,
+            who,
+            &messages::MessageParams {
+                body: body.to_string(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn answer(
+        db: &DatabaseConnection,
+        conversation: &conversations::Model,
+        parent: &messages::Model,
+        who: i64,
+        body: &str,
+    ) -> Result<messages::Model, ModelError> {
+        messages::Model::create_reply(
+            db,
+            conversation,
+            parent,
+            who,
+            &messages::MessageParams {
+                body: body.to_string(),
+            },
+        )
+        .await
+    }
+
+    async fn photo(
+        ctx: &AppContext,
+        conversation: &conversations::Model,
+        who: i64,
+    ) -> messages::Model {
+        messages::Model::create_photo(
+            ctx,
+            conversation,
+            who,
+            "Courier invoice from Tuesday, £18.40",
+            "invoice.png",
+            bytes::Bytes::from_static(PNG),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn find(ctx: &AppContext, id: i64) -> Option<messages::Model> {
+        messages::Entity::find_by_id(id).one(&ctx.db).await.unwrap()
+    }
+
+    async fn notices_about(ctx: &AppContext, ids: &[i64]) -> u64 {
+        notifications::Entity::find()
+            .filter(notifications::Column::MessageId.is_in(ids.to_vec()))
+            .count(&ctx.db)
+            .await
+            .unwrap()
+    }
+
+    async fn reactions_on(ctx: &AppContext, ids: &[i64]) -> u64 {
+        reactions::Entity::find()
+            .filter(reactions::Column::MessageId.is_in(ids.to_vec()))
+            .count(&ctx.db)
+            .await
+            .unwrap()
+    }
+
+    /// The spawned side has not finished, and Postgres says it is waiting.
+    async fn assert_waiting<T>(task: &tokio::task::JoinHandle<T>, conn: &DatabaseConnection) {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!task.is_finished(), "it waits for the lock");
+        assert!(waiting_locks(conn).await > 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_removes_the_row_reactions_and_notices() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = say(
+            ctx,
+            &acme.general,
+            acme.bob.id,
+            "@alice I quoted Leeds £4.20 a tin by mistake",
+        )
+        .await;
+        let kept = say(ctx, &acme.general, acme.bob.id, "Morning all").await;
+        message_sent(ctx, acme.org_id, &acme.general, &message)
+            .await
+            .unwrap();
+        assert_eq!(notices_about(ctx, &[message.id]).await, 1);
+        reactions::Model::set(&ctx.db, &message, acme.alice.id, "👀", true)
+            .await
+            .unwrap();
+        reactions::Model::set(&ctx.db, &kept, acme.alice.id, "👍", true)
+            .await
+            .unwrap();
+
+        let deleted = message.clone().delete_message(ctx, false).await.unwrap();
+        assert_eq!(deleted.replies, 0);
+        assert_eq!(deleted.notified, vec![acme.alice.id]);
+        assert_eq!(find(ctx, message.id).await, None);
+        assert_eq!(reactions_on(ctx, &[message.id]).await, 0);
+        assert_eq!(notices_about(ctx, &[message.id]).await, 0);
+        assert_eq!(find(ctx, kept.id).await, Some(kept.clone()));
+        assert_eq!(reactions_on(ctx, &[kept.id]).await, 1);
+
+        assert!(matches!(
+            message.delete_message(ctx, true).await,
+            Err(ModelError::EntityNotFound)
+        ));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_a_parent_cascades_its_replies() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(
+            ctx,
+            &acme.general,
+            acme.bob.id,
+            "Who can do the stall from 7 to 10 on Saturday?",
+        )
+        .await;
+        let mut ids = vec![parent.id];
+        for body in ["I can do 7 to 8", "@bob me after 8", "Same"] {
+            let reply = answer(&ctx.db, &acme.general, &parent, acme.alice.id, body)
+                .await
+                .unwrap();
+            reactions::Model::set(&ctx.db, &reply, acme.bob.id, "✅", true)
+                .await
+                .unwrap();
+            notifications::Model::notify(
+                &ctx.db,
+                acme.org_id,
+                acme.alice.id,
+                &[acme.bob.id],
+                &notifications::Notice {
+                    kind: notifications::kind::REPLY,
+                    body: "replied to your message\nSame".to_string(),
+                    link: format!("/chat/{}/threads/{}", acme.general.id, parent.id),
+                    message_id: Some(reply.id),
+                },
+            )
+            .await
+            .unwrap();
+            ids.push(reply.id);
+        }
+        let other = say(ctx, &acme.general, acme.bob.id, "Van booked").await;
+
+        let deleted = parent.delete_message(ctx, true).await.unwrap();
+        assert_eq!(deleted.replies, 3);
+        assert_eq!(deleted.notified, vec![acme.bob.id]);
+        for id in &ids {
+            assert_eq!(find(ctx, *id).await, None);
+        }
+        assert_eq!(reactions_on(ctx, &ids).await, 0);
+        assert_eq!(notices_about(ctx, &ids).await, 0);
+        assert!(find(ctx, other.id).await.is_some());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn the_sender_cannot_delete_a_message_with_replies() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = photo(ctx, &acme.group, acme.bob.id).await;
+        answer(&ctx.db, &acme.group, &parent, acme.alice.id, "Paid")
+            .await
+            .unwrap();
+        let key = parent.photo_key.clone().unwrap();
+
+        let err = parent.clone().delete_message(ctx, false).await.unwrap_err();
+        assert!(
+            matches!(&err, ModelError::Message(text) if text == messages::HAS_REPLIES),
+            "{err:?}"
+        );
+        assert_eq!(
+            find(ctx, parent.id).await,
+            Some(parent.clone()),
+            "the photo too"
+        );
+        assert!(ctx
+            .storage
+            .download::<Vec<u8>>(Path::new(&key))
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_a_group_photo_message_removes_the_bytes() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = photo(ctx, &acme.group, acme.bob.id).await;
+        let key = message.photo_key.clone().unwrap();
+        message.clone().delete_message(ctx, false).await.unwrap();
+        assert!(ctx
+            .storage
+            .download::<Vec<u8>>(Path::new(&key))
+            .await
+            .is_err());
+        assert_eq!(find(ctx, message.id).await, None);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn deleting_a_general_photo_message_deletes_its_documents_file() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = photo(ctx, &acme.general, acme.bob.id).await;
+        let file =
+            documents::Model::find_in_org(&ctx.db, acme.org_id, message.document_id.unwrap())
+                .await
+                .unwrap();
+        message.clone().delete_message(ctx, false).await.unwrap();
+        assert!(matches!(
+            documents::Model::find_in_org(&ctx.db, acme.org_id, file.id).await,
+            Err(ModelError::EntityNotFound)
+        ));
+        assert!(ctx
+            .storage
+            .download::<Vec<u8>>(Path::new(&file.storage_key))
+            .await
+            .is_err());
+        assert_eq!(find(ctx, message.id).await, None);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_general_file_that_is_no_longer_a_photo_is_left_in_documents() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = photo(ctx, &acme.general, acme.bob.id).await;
+        let file =
+            documents::Model::find_in_org(&ctx.db, acme.org_id, message.document_id.unwrap())
+                .await
+                .unwrap();
+        let mut row = file.clone().into_active_model();
+        row.content_type = ActiveValue::Set("application/pdf".to_string());
+        row.update(&ctx.db).await.unwrap();
+
+        message.clone().delete_message(ctx, false).await.unwrap();
+        assert_eq!(find(ctx, message.id).await, None);
+        assert!(documents::Model::find_in_org(&ctx.db, acme.org_id, file.id)
+            .await
+            .is_ok());
+        assert!(ctx
+            .storage
+            .download::<Vec<u8>>(Path::new(&file.storage_key))
+            .await
+            .is_ok());
+    }
+
+    /// The photo goes first; if the transaction then fails, the message
+    /// stays as "Photo removed" with its caption, and a retry finishes.
+    #[tokio::test]
+    #[serial]
+    async fn a_failed_transaction_after_the_photo_keeps_the_message() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = photo(ctx, &acme.group, acme.bob.id).await;
+        let key = message.photo_key.clone().unwrap();
+        // KEY SHARE lets the photo's update through and stops the delete's
+        // FOR UPDATE, as a reaction's foreign key check would.
+        let (_conn, txn) = hold(ctx, message.id, "FOR KEY SHARE").await;
+
+        let err = message
+            .clone()
+            .delete_message(ctx, false)
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("lock timeout"), "{err:?}");
+        assert!(ctx
+            .storage
+            .download::<Vec<u8>>(Path::new(&key))
+            .await
+            .is_err());
+        let kept = find(ctx, message.id).await.unwrap();
+        assert!(kept.photo_removed());
+        assert_eq!(kept.body, "Courier invoice from Tuesday, £18.40");
+
+        txn.rollback().await.unwrap();
+        kept.delete_message(ctx, false).await.unwrap();
+        assert_eq!(find(ctx, message.id).await, None);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_reply_waiting_on_a_delete_is_refused() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
+        let (conn, txn) = hold(ctx, parent.id, "FOR UPDATE").await;
+        txn.execute_unprepared(&format!("DELETE FROM messages WHERE id = {}", parent.id))
+            .await
+            .unwrap();
+
+        let (db, general, waiting_parent, alice) = (
+            ctx.db.clone(),
+            acme.general.clone(),
+            parent.clone(),
+            acme.alice.id,
+        );
+        let reply =
+            tokio::spawn(
+                async move { answer(&db, &general, &waiting_parent, alice, "I can").await },
+            );
+        assert_waiting(&reply, &conn).await;
+        txn.commit().await.unwrap();
+        assert!(matches!(
+            reply.await.unwrap(),
+            Err(ModelError::EntityNotFound)
+        ));
+        assert_eq!(messages::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_reply_in_flight_stops_the_senders_delete() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
+        // What create_reply does, held open: the parent locked FOR SHARE and
+        // the reply inserted but not committed.
+        let (conn, txn) = hold(ctx, parent.id, "FOR SHARE").await;
+        messages::ActiveModel {
+            body: ActiveValue::Set("I can".to_string()),
+            conversation_id: ActiveValue::Set(acme.general.id),
+            user_id: ActiveValue::Set(acme.alice.id),
+            parent_id: ActiveValue::Set(Some(parent.id)),
+            organisation_id: ActiveValue::Set(acme.org_id),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .unwrap();
+
+        let (task_ctx, sent) = (ctx.clone(), parent.clone());
+        let delete = tokio::spawn(async move { sent.delete_message(&task_ctx, false).await });
+        assert_waiting(&delete, &conn).await;
+        txn.commit().await.unwrap();
+        let err = delete.await.unwrap().unwrap_err();
+        assert!(
+            matches!(&err, ModelError::Message(text) if text == messages::HAS_REPLIES),
+            "{err:?}"
+        );
+        assert!(find(ctx, parent.id).await.is_some());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_reaction_waiting_on_a_delete_is_refused() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = say(ctx, &acme.general, acme.bob.id, "Leeds £4.20").await;
+        let (conn, txn) = hold(ctx, message.id, "FOR UPDATE").await;
+        txn.execute_unprepared(&format!("DELETE FROM messages WHERE id = {}", message.id))
+            .await
+            .unwrap();
+
+        let (db, reacted, alice) = (ctx.db.clone(), message.clone(), acme.alice.id);
+        let reaction =
+            tokio::spawn(
+                async move { reactions::Model::set(&db, &reacted, alice, "👍", true).await },
+            );
+        assert_waiting(&reaction, &conn).await;
+        txn.commit().await.unwrap();
+        assert!(matches!(
+            reaction.await.unwrap(),
+            Err(ModelError::EntityNotFound)
+        ));
+        assert_eq!(reactions::Entity::find().count(&ctx.db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_notice_waiting_on_a_delete_is_skipped() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let message = say(ctx, &acme.general, acme.bob.id, "@alice Leeds £4.20").await;
+        let (conn, txn) = hold(ctx, message.id, "FOR UPDATE").await;
+        txn.execute_unprepared(&format!("DELETE FROM messages WHERE id = {}", message.id))
+            .await
+            .unwrap();
+
+        let (task_ctx, general, sent, org_id) = (
+            ctx.clone(),
+            acme.general.clone(),
+            message.clone(),
+            acme.org_id,
+        );
+        let notice =
+            tokio::spawn(async move { message_sent(&task_ctx, org_id, &general, &sent).await });
+        assert_waiting(&notice, &conn).await;
+        txn.commit().await.unwrap();
+        notice.await.unwrap().unwrap();
+        assert_eq!(
+            notifications::Entity::find().count(&ctx.db).await.unwrap(),
+            0
+        );
+    }
+
+    /// A notice and a reaction saving on a reply hold FOR SHARE on that
+    /// reply. Its parent's delete waits for them, then takes them with it,
+    /// and counts the notice's reader among the badges to refresh.
+    #[tokio::test]
+    #[serial]
+    async fn saves_on_a_reply_during_its_parents_delete_go_with_it() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
+        let reply = answer(&ctx.db, &acme.general, &parent, acme.alice.id, "I can")
+            .await
+            .unwrap();
+        // What reply_sent and reactions::set do, held open.
+        let (conn, txn) = hold(ctx, reply.id, "FOR SHARE").await;
+        notifications::Model::notify(
+            &txn,
+            acme.org_id,
+            acme.alice.id,
+            &[acme.bob.id],
+            &notifications::Notice {
+                kind: notifications::kind::REPLY,
+                body: "replied to your message\nI can".to_string(),
+                link: format!("/chat/{}/threads/{}", acme.general.id, parent.id),
+                message_id: Some(reply.id),
+            },
+        )
+        .await
+        .unwrap();
+        reactions::ActiveModel {
+            emoji: ActiveValue::Set("👍".to_string()),
+            message_id: ActiveValue::Set(reply.id),
+            user_id: ActiveValue::Set(acme.bob.id),
+            organisation_id: ActiveValue::Set(acme.org_id),
+            ..Default::default()
+        }
+        .insert(&txn)
+        .await
+        .unwrap();
+
+        let (task_ctx, deleting) = (ctx.clone(), parent.clone());
+        let delete = tokio::spawn(async move { deleting.delete_message(&task_ctx, true).await });
+        assert_waiting(&delete, &conn).await;
+        txn.commit().await.unwrap();
+        let deleted = delete.await.unwrap().unwrap();
+        assert_eq!(deleted.replies, 1);
+        assert_eq!(deleted.notified, vec![acme.bob.id], "the badge to refresh");
+        assert_eq!(find(ctx, reply.id).await, None);
+        assert_eq!(notices_about(ctx, &[reply.id]).await, 0);
+        assert_eq!(reactions_on(ctx, &[reply.id]).await, 0);
+        assert_eq!(
+            notifications::Entity::find().count(&ctx.db).await.unwrap(),
+            0
+        );
+    }
+
+    /// If a reply ever carried a photo, the cascade would delete its row
+    /// and leave its stored bytes behind, so the delete refuses.
+    #[tokio::test]
+    #[serial]
+    async fn a_reply_with_a_photo_stops_the_delete() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = say(ctx, &acme.general, acme.bob.id, "Who can do the stall?").await;
+        let reply = answer(&ctx.db, &acme.general, &parent, acme.alice.id, "I can")
+            .await
+            .unwrap();
+        ctx.db
+            .execute_unprepared(&format!(
+                "UPDATE messages SET has_photo = true WHERE id = {}",
+                reply.id
+            ))
+            .await
+            .unwrap();
+        let err = parent.clone().delete_message(ctx, true).await.unwrap_err();
+        assert!(
+            matches!(&err, ModelError::Message(text) if text == messages::REPLY_HAS_PHOTO),
+            "{err:?}"
+        );
+        assert!(find(ctx, parent.id).await.is_some());
+        assert!(find(ctx, reply.id).await.is_some());
+    }
+
+    /// The cascade deletes replies without looking for photos: only a
+    /// top-level message can have one.
+    #[tokio::test]
+    #[serial]
+    async fn replies_never_carry_photos() {
+        let boot = boot_test::<App>().await.unwrap();
+        let ctx = &boot.app_context;
+        let acme = acme(ctx).await;
+        let parent = photo(ctx, &acme.group, acme.bob.id).await;
+        let reply = answer(&ctx.db, &acme.group, &parent, acme.alice.id, "Paid")
+            .await
+            .unwrap();
+        assert!(!reply.has_photo);
+        assert_eq!(reply.document_id, None);
+        assert_eq!(reply.photo_key, None);
+        assert_eq!(reply.photo_type, None);
+        assert_eq!(reply.photo_size, None);
+        assert_eq!(reply.photo_name, None);
+    }
+}

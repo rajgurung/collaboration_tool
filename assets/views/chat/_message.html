@@ -1,4 +1,5 @@
-<div class="msg {% if message.own %}msg-own{% endif %} {% if message.start %}msg-start{% endif %}" id="message-{{ message.id }}">
+{# data-author-id and data-author let frontend/app.ts regroup the neighbours of a deleted message. data-live marks one that came over the socket: it always starts a run. #}
+<div class="msg {% if message.own %}msg-own{% endif %} {% if message.start %}msg-start{% endif %}" id="message-{{ message.id }}" data-author-id="{{ message.author_id }}" data-author="{{ message.author }}"{% if live | default(value=false) %} data-live{% endif %}>
   {% if not message.own %}
   <span class="msg-av {% if message.show_time %}visible{% else %}invisible{% endif %}">{{<avatar name={message.author} color={message.color} size="sm"/>}}</span>
   {% endif %}

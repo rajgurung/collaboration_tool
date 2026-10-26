@@ -55,6 +55,20 @@ pub enum ChatEvent {
         conversation_id: i64,
         message_id: i64,
     },
+    /// A message was deleted, and with a parent its replies. Main-feed sockets
+    /// remove a top-level message, or update a parent's reply line when a
+    /// reply went. A thread socket shows "This thread was deleted" for its
+    /// parent, or removes a reply and updates the count. Ids and counts only:
+    /// no text.
+    MessageDeleted {
+        conversation_id: i64,
+        message_id: i64,
+        parent_id: Option<i64>,
+        /// After a reply's delete: the parent's new reply line (`None` when
+        /// no replies are left) and how many replies remain.
+        line: Option<Box<ThreadLine>>,
+        count: i64,
+    },
     /// Some of a person's sockets close: every one on sign out everywhere, a
     /// password reset or a lock (`Account`); those in one organisation on
     /// removal (`Org`). See [`CloseScope`].

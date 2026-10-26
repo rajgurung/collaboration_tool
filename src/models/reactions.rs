@@ -32,12 +32,15 @@ impl ActiveModelBehavior for ActiveModel {
 impl Model {
     /// Sets whether `user_id` has reacted to `message` with `emoji`. The client
     /// sends the state it wants, so a retry or a double tap changes nothing.
-    /// The caller must already know the person can see the message.
+    /// The caller must already know the person can see the message. A new
+    /// reaction is saved under a lock on the message, so it never lands on
+    /// one being deleted.
     ///
     /// # Errors
-    /// A field error for an emoji outside [`EMOJI`], or database errors.
-    pub async fn set<C: ConnectionTrait>(
-        db: &C,
+    /// `EntityNotFound` for a message deleted meanwhile; a field error for an
+    /// emoji outside [`EMOJI`], or database errors.
+    pub async fn set(
+        db: &DatabaseConnection,
         message: &messages::Model,
         user_id: i64,
         emoji: &str,
@@ -54,12 +57,21 @@ impl Model {
                 ..Default::default()
             }
             .set_tenant(message.organisation_id)?;
+            let txn = db.begin().await?;
+            if messages::Model::lock_live(&txn, message.organisation_id, message.id)
+                .await?
+                .is_none()
+            {
+                // Dropping `txn` rolls it back.
+                return Err(ModelError::EntityNotFound);
+            }
             // `on_conflict_do_nothing_on` treats a conflict as success; a plain
             // `on_conflict(.. do_nothing ..)` returns `RecordNotInserted`.
             Entity::insert(row)
                 .on_conflict_do_nothing_on([Column::MessageId, Column::UserId, Column::Emoji])
-                .exec(db)
+                .exec(&txn)
                 .await?;
+            txn.commit().await?;
         } else {
             Entity::delete_many()
                 .filter(Column::OrganisationId.eq(message.organisation_id))
