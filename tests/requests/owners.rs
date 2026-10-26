@@ -132,8 +132,8 @@ async fn repeated_ids_save_once_and_one_outsider_refuses_the_list() {
     .await;
 }
 
-/// S1: only admins and the project's owners change its owners. Anyone else's
-/// edit saves, with the owners left as they were.
+/// S1: only admins and the project's owners change its owners. Anyone else
+/// can't edit the project at all.
 #[tokio::test]
 #[serial]
 async fn only_admins_and_owners_change_owners() {
@@ -142,8 +142,8 @@ async fn only_admins_and_owners_change_owners() {
         let website = juniper_project(&ctx, "Website").await;
         own(&ctx, &website, &[t.ana_id, t.leo_id]).await;
 
-        // Tom, not an owner, ticks himself: the edit saves, the owners don't.
-        assert_eq!(save(&request, &t.tom, &website, &[t.tom_id]).await, 200);
+        // Tom, not an owner, ticks himself: refused.
+        assert_eq!(save(&request, &t.tom, &website, &[t.tom_id]).await, 403);
         assert_eq!(owners(&ctx, &website).await, vec![t.ana_id, t.leo_id]);
         assert!(inbox(&ctx, t.tom_id).await.is_empty());
         let close = request
@@ -155,15 +155,15 @@ async fn only_admins_and_owners_change_owners() {
         assert!(close
             .text()
             .contains("Only this project's owners and admins can do that."));
-        // His sheet shows the owners, but can't change them.
+        // Nor does he get the sheet.
         let sheet = request
             .get(&t.tom.at(&format!("/roadmap/projects/{}/edit", website.id)))
             .as_member(&t.tom)
-            .await
-            .text();
-        assert!(sheet.contains("Only this project's owners and admins can change owners."));
-        assert!(sheet.contains("disabled"));
-        assert!(!sheet.contains("Mark project done"));
+            .await;
+        assert_eq!(sheet.status_code(), 403);
+        assert!(sheet
+            .text()
+            .contains("Only admins and this project's owners can change it."));
 
         // Leo, an owner, can.
         assert_eq!(
@@ -180,15 +180,15 @@ async fn only_admins_and_owners_change_owners() {
 
         // A project with no owners: a member can't set them, an admin can.
         let shop = juniper_project(&ctx, "Instagram shop").await;
-        save(&request, &t.tom, &shop, &[t.tom_id]).await;
+        assert_eq!(save(&request, &t.tom, &shop, &[t.tom_id]).await, 403);
         assert!(owners(&ctx, &shop).await.is_empty());
         save(&request, &t.maya, &shop, &[t.maya_id]).await;
         assert_eq!(owners(&ctx, &shop).await, vec![t.maya_id]);
 
-        // A new project's maker picks its owners.
+        // A new project's maker (an admin) picks its owners.
         let res = request
-            .post(&t.tom.at("/roadmap/projects"))
-            .as_member(&t.tom)
+            .post(&t.maya.at("/roadmap/projects"))
+            .as_member(&t.maya)
             .add_header("HX-Request", "true")
             .content_type("application/x-www-form-urlencoded")
             .bytes(project_body("Tea tasting evenings", &[t.tom_id, t.leo_id]))
@@ -253,11 +253,10 @@ async fn a_super_admin_acting_cant_change_owners() {
     .await;
 }
 
-/// A non-owner's edit that fails shows the saved owners again, not the
-/// ticks the server ignored.
+/// A non-owner's edit is refused before it is checked, even an invalid one.
 #[tokio::test]
 #[serial]
-async fn a_failed_edit_shows_the_saved_owners_to_a_non_owner() {
+async fn a_non_owners_edit_is_refused() {
     request::<App, _, _>(|request, ctx| async move {
         let t = juniper(&request, &ctx).await;
         let website = juniper_project(&ctx, "Website").await;
@@ -269,13 +268,7 @@ async fn a_failed_edit_shows_the_saved_owners_to_a_non_owner() {
             .content_type("application/x-www-form-urlencoded")
             .bytes(project_body("", &[]))
             .await;
-        assert_eq!(res.status_code(), 422);
-        let html = res.text();
-        assert!(html.contains("Give the project a name"));
-        assert!(
-            html.contains(&format!(r#"name="owner_ids" value="{}" checked"#, t.leo_id)),
-            "{html}"
-        );
+        assert_eq!(res.status_code(), 403);
         assert_eq!(owners(&ctx, &website).await, vec![t.leo_id]);
     })
     .await;
@@ -303,7 +296,8 @@ async fn more_than_fifty_owners_are_refused() {
     .await;
 }
 
-/// Every owner can close and reopen, and hears about it once.
+/// Every owner can close and reopen, and hears about it once. Leo is a
+/// member, so his close leaves Ana's tasks open.
 #[tokio::test]
 #[serial]
 async fn every_owner_can_close_and_each_hears_once() {
@@ -354,7 +348,7 @@ async fn every_owner_can_close_and_each_hears_once() {
         );
         assert!(ana.contains(&(
             "closed".to_string(),
-            "marked Website done\n2 of your tasks closed".to_string()
+            "marked Website done\n2 of your tasks left open".to_string()
         )));
         assert!(inbox(&ctx, t.tom_id).await.is_empty());
 
@@ -513,4 +507,269 @@ fn nothing_names_the_dropped_owner_id() {
         }
     }
     assert!(offenders.is_empty(), "{offenders:#?}");
+}
+
+/// Roadmap rights: managers plan the roadmap; a project's owners edit and
+/// close it; everyone else only looks.
+async fn post(
+    request: &TestServer,
+    who: &TestMember,
+    path: &str,
+    body: &[(&str, &str)],
+) -> (u16, String) {
+    let mut form = url::form_urlencoded::Serializer::new(String::new());
+    form.extend_pairs(body.iter().copied());
+    let res = request
+        .post(&who.at(path))
+        .as_member(who)
+        .add_header("HX-Request", "true")
+        .content_type("application/x-www-form-urlencoded")
+        .bytes(axum::body::Bytes::from(form.finish()))
+        .await;
+    (res.status_code().as_u16(), res.text())
+}
+
+async fn page(request: &TestServer, who: &TestMember, path: &str) -> (u16, String) {
+    let res = request.get(&who.at(path)).as_member(who).await;
+    (res.status_code().as_u16(), res.text())
+}
+
+async fn reload(ctx: &AppContext, project: &projects::Model) -> projects::Model {
+    projects::Entity::find_by_id(project.id)
+        .one(&ctx.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+#[tokio::test]
+#[serial]
+async fn a_member_who_does_not_own_it_cannot_change_the_roadmap() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = juniper_project(&ctx, "Website").await;
+        own(&ctx, &website, &[t.leo_id]).await;
+        let id = website.id;
+        let tom = &t.tom;
+
+        let (status, text) = page(&request, tom, "/roadmap/projects/new").await;
+        assert_eq!(status, 403);
+        assert!(text.contains("Only admins can add projects."), "{text}");
+        let (status, _) = post(
+            &request,
+            tom,
+            "/roadmap/projects",
+            &[
+                ("name", "Tea tasting"),
+                ("lane", "now"),
+                ("status", "Planned"),
+                ("accent", "#72e5b4"),
+            ],
+        )
+        .await;
+        assert_eq!(status, 403);
+        let made = projects::Entity::find()
+            .filter(projects::Column::Name.eq("Tea tasting"))
+            .one(&ctx.db)
+            .await
+            .unwrap();
+        assert!(made.is_none());
+
+        let (status, _) = page(&request, tom, &format!("/roadmap/projects/{id}/edit")).await;
+        assert_eq!(status, 403);
+        for (path, body) in [
+            (
+                format!("/roadmap/projects/{id}"),
+                vec![
+                    ("name", "Mine now"),
+                    ("lane", "later"),
+                    ("status", "Active"),
+                    ("accent", "#72e5b4"),
+                ],
+            ),
+            (format!("/roadmap/projects/{id}/delete"), vec![]),
+            (
+                format!("/roadmap/projects/{id}/move"),
+                vec![("lane", "later")],
+            ),
+            (
+                format!("/roadmap/projects/{id}/lane"),
+                vec![("lane", "later")],
+            ),
+            (format!("/roadmap/projects/{id}/close"), vec![]),
+        ] {
+            let (status, _) = post(&request, tom, &path, &body).await;
+            assert_eq!(status, 403, "{path}");
+        }
+        assert_eq!(reload(&ctx, &website).await, website, "nothing changed");
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn a_member_owner_edits_and_closes_but_does_not_plan() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = juniper_project(&ctx, "Website").await;
+        own(&ctx, &website, &[t.leo_id]).await;
+        let id = website.id;
+        let leo = &t.leo;
+
+        let (status, sheet) = page(&request, leo, &format!("/roadmap/projects/{id}/edit")).await;
+        assert_eq!(status, 200);
+        assert!(
+            sheet.contains(r#"<select name="lane" class="input" disabled>"#),
+            "{sheet}"
+        );
+        assert!(sheet.contains(r#"<input type="hidden" name="lane" value="now">"#));
+        assert!(sheet.contains("Only admins can change the lane."));
+        assert!(sheet.contains("Mark project done"));
+        assert!(!sheet.contains("Delete project"));
+
+        // A posted lane is ignored; the rest saves.
+        let (status, _) = post(
+            &request,
+            leo,
+            &format!("/roadmap/projects/{id}"),
+            &[
+                ("name", "Website 2"),
+                ("lane", "later"),
+                ("status", "Testing"),
+                ("accent", "#72e5b4"),
+                ("summary", "New shop"),
+                ("owner_ids", &t.leo_id.to_string()),
+            ],
+        )
+        .await;
+        assert_eq!(status, 200);
+        let saved = reload(&ctx, &website).await;
+        assert_eq!(saved.name, "Website 2");
+        assert_eq!(saved.status, "Testing");
+        assert_eq!(saved.summary, "New shop");
+        assert_eq!(saved.lane, "now", "the lane is an admin's call");
+        assert_eq!(saved.sort_order, website.sort_order);
+
+        for (path, body) in [
+            (
+                format!("/roadmap/projects/{id}/move"),
+                vec![("lane", "later")],
+            ),
+            (
+                format!("/roadmap/projects/{id}/lane"),
+                vec![("lane", "later")],
+            ),
+            (format!("/roadmap/projects/{id}/delete"), vec![]),
+        ] {
+            let (status, text) = post(&request, leo, &path, &body).await;
+            assert_eq!(status, 403, "{path}");
+            if path.ends_with("/move") {
+                assert!(
+                    text.contains("Only admins can move projects between lanes."),
+                    "{text}"
+                );
+            }
+        }
+        assert_eq!(reload(&ctx, &website).await.lane, "now");
+
+        let (status, _) = post(&request, leo, &format!("/roadmap/projects/{id}/close"), &[]).await;
+        assert_eq!(status, 200);
+        assert!(reload(&ctx, &website).await.is_closed());
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn managers_plan_the_roadmap_as_before() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = juniper_project(&ctx, "Website").await;
+        let id = website.id;
+        let maya = &t.maya;
+
+        let (status, sheet) = page(&request, maya, &format!("/roadmap/projects/{id}/edit")).await;
+        assert_eq!(status, 200);
+        assert!(
+            sheet.contains(r#"<select name="lane" class="input" >"#),
+            "{sheet}"
+        );
+        assert!(!sheet.contains("Only admins can change the lane."));
+        let (status, _) = post(
+            &request,
+            maya,
+            &format!("/roadmap/projects/{id}"),
+            &[
+                ("name", "Website"),
+                ("lane", "next"),
+                ("status", "Active"),
+                ("accent", "#72e5b4"),
+            ],
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(reload(&ctx, &website).await.lane, "next");
+        let (status, _) = post(
+            &request,
+            maya,
+            &format!("/roadmap/projects/{id}/move"),
+            &[("lane", "later")],
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(reload(&ctx, &website).await.lane, "later");
+        let (status, _) = post(
+            &request,
+            maya,
+            "/roadmap/projects",
+            &[
+                ("name", "Tea tasting"),
+                ("lane", "now"),
+                ("status", "Planned"),
+                ("accent", "#72e5b4"),
+            ],
+        )
+        .await;
+        assert_eq!(status, 200);
+    })
+    .await;
+}
+
+#[tokio::test]
+#[serial]
+async fn the_roadmap_shows_only_the_controls_you_can_use() {
+    request::<App, _, _>(|request, ctx| async move {
+        let t = juniper(&request, &ctx).await;
+        let website = juniper_project(&ctx, "Website").await;
+        juniper_project(&ctx, "Instagram shop").await;
+        own(&ctx, &website, &[t.leo_id]).await;
+        let new = "/roadmap/projects/new";
+
+        let (_, maya) = page(&request, &t.maya, "/roadmap").await;
+        assert!(maya.contains(new));
+        assert!(maya.contains(r#"data-reorder-start="roadmap""#));
+        assert_eq!(maya.matches(r#"draggable="true""#).count(), 2);
+        assert!(maya.contains(r#"aria-label="Edit Website""#));
+        assert!(maya.contains(r#"aria-label="Edit Instagram shop""#));
+
+        let (_, leo) = page(&request, &t.leo, "/roadmap").await;
+        assert!(!leo.contains(new));
+        assert!(
+            !leo.contains(r#"data-reorder-start="roadmap""#),
+            "neither desktop nor phone"
+        );
+        assert!(!leo.contains("draggable"));
+        assert!(leo.contains(r#"aria-label="Edit Website""#), "his project");
+        assert!(!leo.contains(r#"aria-label="Edit Instagram shop""#));
+
+        let (_, tom) = page(&request, &t.tom, "/roadmap").await;
+        assert!(!tom.contains(new));
+        assert!(!tom.contains("draggable"));
+        assert!(!tom.contains(r#"aria-label="Edit "#));
+        // The lane refresh draws the same.
+        let (_, partial) = page(&request, &t.tom, "/roadmap/list?lane=now").await;
+        assert!(!partial.contains("draggable"));
+        assert!(!partial.contains(r#"aria-label="Edit "#));
+    })
+    .await;
 }

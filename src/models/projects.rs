@@ -529,7 +529,8 @@ impl Model {
     /// Saves an edit and, when `rights` allow it, the owners, together. The
     /// project row is locked first, so the owners read here are the ones
     /// the rule is checked against. Without the right, the posted owners
-    /// are ignored, not checked.
+    /// are ignored, not checked. Likewise the posted lane, unless
+    /// `may_move` (managers only: planning lanes is theirs).
     ///
     /// # Errors
     /// Validation errors, `EntityNotFound` when it is gone, or database
@@ -539,6 +540,7 @@ impl Model {
         db: &DatabaseConnection,
         params: &ProjectParams,
         rights: OwnerRights,
+        may_move: bool,
     ) -> ModelResult<Saved> {
         ValidatorTrait::validate(params)?;
         let org_id = self.organisation_id;
@@ -550,14 +552,20 @@ impl Model {
             .await?
             .ok_or(ModelError::EntityNotFound)?;
         let owners_before = project_owners::Model::for_project(&txn, org_id, current.id).await?;
+        let lane = if may_move {
+            params.lane.clone()
+        } else {
+            current.lane.clone()
+        };
         // A new lane puts it at the bottom of that lane.
-        let bottom = if current.lane == params.lane {
+        let bottom = if current.lane == lane {
             None
         } else {
             Some(next_sort(&txn, org_id).await?)
         };
         let mut project = current.into_active_model();
         apply(&mut project, params);
+        project.lane = ActiveValue::Set(lane);
         if let Some(n) = bottom {
             project.sort_order = ActiveValue::Set(n);
         }

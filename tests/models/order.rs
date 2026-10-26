@@ -434,6 +434,7 @@ async fn other_lane_changes_go_to_the_bottom() {
             &ctx.db,
             &project_params("Instagram shop", "now"),
             OwnerRights::Any,
+            true,
         )
         .await
         .unwrap();
@@ -457,6 +458,7 @@ async fn other_lane_changes_go_to_the_bottom() {
             &ctx.db,
             &project_params("Instagram shop 2", "now"),
             OwnerRights::Any,
+            true,
         )
         .await
         .unwrap();

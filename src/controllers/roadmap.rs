@@ -33,6 +33,9 @@ use crate::{
 /// beside it. A refused save re-renders both.
 const FORM_ID: &str = "project-sheet";
 
+const ADD_REFUSAL: &str = "Only admins can add projects.";
+const MOVE_REFUSAL: &str = "Only admins can move projects between lanes.";
+
 #[derive(Debug, Default, Deserialize)]
 struct LaneQuery {
     lane: Option<String>,
@@ -72,6 +75,8 @@ struct Card {
     blocked: usize,
     /// Dropping it on Done opens the close confirm only for those allowed.
     can_close: bool,
+    /// The edit pencil shows only for those allowed ([`can_edit`]).
+    can_edit: bool,
 }
 
 /// A card's owner stack: up to three avatars, then "+N".
@@ -118,6 +123,28 @@ fn lane_or_default(lane: Option<&str>) -> &str {
     match lane {
         Some(l) if LANES.contains(&l) || l == DONE => l,
         _ => "now",
+    }
+}
+
+/// Who may open a project's edit sheet and save it: owners, admins and the
+/// project's owners (`owners`). A project owner who isn't a manager can't
+/// change its lane ([`projects::Model::update_from`]).
+fn can_edit(member: &CurrentMember, owners: &[i64]) -> bool {
+    member.can_manage() || owners.contains(&member.user.id)
+}
+
+/// The 403 for an edit by someone [`can_edit`] refuses.
+fn not_editable() -> Error {
+    forbidden("Only admins and this project's owners can change it.")
+}
+
+/// Adding, deleting, reordering and changing lanes are for owners and
+/// admins: they plan the roadmap.
+fn require_planner(member: &CurrentMember, refusal: &str) -> Result<()> {
+    if member.can_manage() {
+        Ok(())
+    } else {
+        Err(forbidden(refusal))
     }
 }
 
@@ -180,6 +207,7 @@ async fn lane_data(
                         owners: owners_of(owners_for(p.id), &people),
                         blocked: own_tasks.filter(|t| t.status == "blocked").count(),
                         can_close: can_close(member, owners_for(p.id)),
+                        can_edit: can_edit(member, owners_for(p.id)),
                     }
                 })
                 .collect();
@@ -247,7 +275,13 @@ async fn lane_data(
         "shown": DONE_SHOWN,
         "show_all": show_all,
     }));
-    Ok(serde_json::json!({ "lane": lane, "lanes": lanes, "show_all": show_all }))
+    Ok(serde_json::json!({
+        "lane": lane,
+        "lanes": lanes,
+        "show_all": show_all,
+        // "+ Project", Reorder and card drags are for those who plan.
+        "can_plan": member.can_manage(),
+    }))
 }
 
 #[debug_handler]
@@ -259,7 +293,7 @@ async fn index(
 ) -> Result<Response> {
     let lane = lane_or_default(query.lane.as_deref());
     let mut data = lane_data(&ctx, &member, lane, query.all.is_some()).await?;
-    data["reordering"] = serde_json::json!(query.reorder.is_some());
+    data["reordering"] = serde_json::json!(query.reorder.is_some() && member.can_manage());
     format::render().view(&v, "roadmap/index.html", member.page("roadmap", data))
 }
 
@@ -359,6 +393,8 @@ async fn form_data(
 ) -> Result<serde_json::Value> {
     // A new project's maker picks its owners, unless a super admin acting.
     let mut owners_locked = member.acting;
+    // Only owners and admins move a project between lanes.
+    let mut lane_locked = false;
     // For the edit form's delete confirm and "Made with Claude" line. Only a
     // bool about Claude reaches the template, never the grant.
     let project = match project_id {
@@ -366,6 +402,7 @@ async fn form_data(
             let project = projects::Model::find_in_org(&ctx.db, member.org.id, id).await?;
             let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
             owners_locked = !owner_rights(member).allows(&owners);
+            lane_locked = !member.can_manage();
             let close = if can_close(member, &owners) {
                 Some(close_data(ctx, member, &project, &owners).await?)
             } else {
@@ -389,6 +426,7 @@ async fn form_data(
             "form": values,
             "errors": errors,
             "owners_locked": owners_locked,
+            "lane_locked": lane_locked,
             "team": team(ctx, member.org.id).await?,
             "lanes": LANES,
             "accents": ACCENTS,
@@ -402,6 +440,7 @@ async fn new(
     State(ctx): State<AppContext>,
     ViewEngine(v): ViewEngine<TeraView>,
 ) -> Result<Response> {
+    require_planner(&member, ADD_REFUSAL)?;
     let data = form_data(
         &ctx,
         &member,
@@ -425,6 +464,9 @@ async fn edit(
         return closed_refused(&project);
     }
     let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+    if !can_edit(&member, &owners) {
+        return Err(not_editable());
+    }
     let values = form_values(None, Some((&project, &owners)));
     let data = form_data(&ctx, &member, Some(id), values, &Default::default()).await?;
     format::render().view(&v, "roadmap/_form.html", member.fragment(data))
@@ -438,6 +480,7 @@ async fn create(
     headers: HeaderMap,
     axum_extra::extract::Form(mut params): axum_extra::extract::Form<ProjectParams>,
 ) -> Result<Response> {
+    require_planner(&member, ADD_REFUSAL)?;
     // A super admin acting here makes the project, but not its owners, as
     // with an edit.
     if member.acting {
@@ -477,8 +520,14 @@ async fn update(
     if project.is_closed() {
         return closed_refused(&project);
     }
+    // As for a close, checked before the save. The save locks the row and
+    // reads the owners again for the owner list; the lane stays a manager's.
+    let owners = project_owners::Model::for_project(&ctx.db, member.org.id, id).await?;
+    if !can_edit(&member, &owners) {
+        return Err(not_editable());
+    }
     let result = project
-        .update_from(&ctx.db, &params, owner_rights(&member))
+        .update_from(&ctx.db, &params, owner_rights(&member), member.can_manage())
         .await;
     if let Ok(saved) = &result {
         super::notifications::project_saved(
@@ -515,8 +564,8 @@ struct MoveForm {
     after: Option<i64>,
 }
 
-/// Puts a project at a spot in a lane. Any member can, as with a lane
-/// change. No toast and no notices: a lane change never sent any.
+/// Puts a project at a spot in a lane. Owners and admins only. No toast and
+/// no notices: a lane change never sent any.
 #[debug_handler]
 async fn move_project(
     member: CurrentMember,
@@ -525,6 +574,7 @@ async fn move_project(
     Path(id): Path<i64>,
     Form(form): Form<MoveForm>,
 ) -> Result<Response> {
+    require_planner(&member, MOVE_REFUSAL)?;
     let place = super::tasks::move_place(form.before, form.after)?;
     let project =
         match projects::Model::move_to(&ctx.db, member.org.id, id, &form.lane, place).await {
@@ -546,9 +596,9 @@ struct LaneForm {
     to: String,
 }
 
-/// Moves a project to another lane, from a drag on the roadmap. Anyone who
-/// can edit it can move it; Done is not a lane, so a drop there goes through
-/// the close confirm instead.
+/// Moves a project to another lane, from a drag on the roadmap. Owners and
+/// admins only; Done is not a lane, so a
+/// drop there goes through the close confirm instead.
 #[debug_handler]
 async fn move_lane(
     member: CurrentMember,
@@ -557,6 +607,7 @@ async fn move_lane(
     Path(id): Path<i64>,
     Form(form): Form<LaneForm>,
 ) -> Result<Response> {
+    require_planner(&member, MOVE_REFUSAL)?;
     if !LANES.contains(&form.to.as_str()) {
         return Err(Error::BadRequest("Choose now, next or later.".to_string()));
     }

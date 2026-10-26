@@ -14,9 +14,13 @@
   <div class="grid gap-4 sm:grid-cols-2">
     <label class="field">
       <span class="field-label">Lane</span>
-      <select name="lane" class="input">
+      {# Only admins move a project between lanes; the server ignores anyone
+         else's lane. A disabled select posts nothing, so the hidden field
+         keeps the form whole. #}
+      <select name="lane" class="input" {% if lane_locked %}disabled{% endif %}>
         {% for lane in lanes %}<option value="{{ lane }}" {% if form.lane == lane %}selected{% endif %}>{{ lane | capitalize }}</option>{% endfor %}
       </select>
+      {% if lane_locked %}<input type="hidden" name="lane" value="{{ form.lane }}"><span class="meta text-sm">Only admins can change the lane.</span>{% endif %}
       {% if errors.lane %}<span class="field-error">{{ errors.lane }}</span>{% endif %}
     </label>
     {{<text_field name="status" label="Status" value={form.status} error={errors.status | default(value="")}/>}}

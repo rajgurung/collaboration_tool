@@ -627,7 +627,7 @@ async fn the_box_and_reopen_show_only_to_those_allowed() {
         let shop = owned_by(&ctx, &shop, tom_id).await;
         close(&ctx, &ana, &shop).await;
 
-        for (who, allowed) in [(&ana, true), (&maya, true), (&tom, true), (&leo, false)] {
+        for (who, allowed) in [(&ana, true), (&maya, true), (&tom, true)] {
             let sheet = get(
                 &request,
                 who,
@@ -640,6 +640,14 @@ async fn the_box_and_reopen_show_only_to_those_allowed() {
             assert_eq!(done_column(&roadmap).contains("data-reopen"), allowed);
             assert!(done_column(&roadmap).contains("Shop till upgrade"));
         }
+        // Leo can't open the sheet at all, nor reopen.
+        let sheet = request
+            .get(&leo.at(&format!("/roadmap/projects/{}/edit", website.id)))
+            .as_member(&leo)
+            .await;
+        assert_eq!(sheet.status_code(), 403);
+        let roadmap = get(&request, &leo, "/roadmap").await;
+        assert!(!done_column(&roadmap).contains("data-reopen"));
     })
     .await;
 }
@@ -1359,8 +1367,11 @@ async fn dragging_a_card_moves_it_to_that_lane() {
         let (tom_member, _) = teammate(&request, &ctx, "tom", memberships::role::MEMBER).await;
         let website = project_in(&ctx, ORG, "Website").await;
 
-        // Any member can move it, as with the edit sheet.
-        let (status, trigger) = drag(&request, &tom_member, &website, "next").await;
+        // Only owners and admins move it.
+        let (status, _) = drag(&request, &tom_member, &website, "next").await;
+        assert_eq!(status, 403);
+        assert!(find(&ctx, &website).await.in_lane("now"));
+        let (status, trigger) = drag(&request, &ana, &website, "next").await;
         assert_eq!(status, 200);
         assert!(trigger.contains("Website moved to Next."), "{trigger}");
         assert!(trigger.contains("roadmap-changed"));
