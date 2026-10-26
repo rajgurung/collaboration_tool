@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card order and several project owners · mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<style>
+/* ---------- Tokens: copied from frontend/styles/app.css ----------
+   Scoped to [data-theme] on any element so light and dark copies sit side by side. */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f3ef; --side: #eceae4; --surface: #ffffff; --lane: #f8f7f4; --line: #e2dfd7; --line-soft: #eceae4;
+  --chip: #e9e7e0; --text: #1a1814; --muted: #625e57; --link: #8a5300; --accent: #f2a93b; --accent-hover: #f6b858;
+  --on-accent: #1a1814; --active-bg: #fbebd0; --scrim: rgba(20, 18, 15, 0.45);
+  --todo: #8a867d; --progress: #3b6fe0; --blocked: #d4552f; --blocked-bg: #fce9e2; --done: #2f9e6b; --danger: #c2410c; --on-danger: #ffffff;
+  --shadow: 0 1px 2px rgba(23, 20, 15, 0.08);
+  --shadow-1: 0 1px 2px rgba(23, 20, 15, 0.06), 0 2px 6px rgba(23, 20, 15, 0.04);
+  --shadow-lift: 0 14px 30px rgba(23, 20, 15, 0.16), 0 2px 6px rgba(23, 20, 15, 0.08);
+  --canvas: #e4e1d9;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121214; --side: #17171a; --surface: #1f1f23; --lane: #18181c; --line: #2c2c32; --line-soft: #29292f;
+  --chip: #26262b; --text: #edece8; --muted: #a6a29b; --link: #ffc77a; --accent: #ffb454; --accent-hover: #ffc475;
+  --on-accent: #1b1300; --active-bg: #4a3618; --scrim: rgba(0, 0, 0, 0.6);
+  --todo: #a6a29b; --progress: #7c9dff; --blocked: #ff8466; --blocked-bg: #3a2019; --done: #4cc38a; --danger: #ff8466; --on-danger: #1b1300;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45); --shadow-lift: 0 14px 30px rgba(0, 0, 0, 0.55);
+  --canvas: #0b0b0c;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--canvas); color: var(--text); font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; cursor: pointer; color: inherit; }
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ic { flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.meta { font-size: 13px; color: var(--muted); }
+.truncate-1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tnum { font-variant-numeric: tabular-nums; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ---------- Mockup chrome (not part of the app) ---------- */
+.mock-bar { position: sticky; top: 0; z-index: 100; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 32px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.mock-bar h1 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; min-width: 260px; }
+.mock-bar nav { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; font-weight: 600; color: var(--link); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--chip); }
+.seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.section { padding: 36px 32px 48px; border-bottom: 1px solid var(--line); }
+.section > h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+.section > p.lead { margin: 0 0 24px; max-width: 860px; color: var(--muted); }
+.shots { display: flex; flex-wrap: wrap; gap: 36px 32px; align-items: flex-start; }
+.shot { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.shot-wide { flex-basis: 100%; }
+.shot-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.ann { width: 360px; padding: 16px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; }
+.ann-wide { width: auto; max-width: 860px; }
+.ann h3 { margin: 0 0 8px; font-size: 15px; }
+.ann ol, .ann ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ann p + p, .ann p + ul, .ann ul + p, .ann ol + h3, .ann ul + h3, .ann p + h3, .ann table + p { margin-top: 10px; }
+.ann code, .lead code { font-size: 12.5px; padding: 1px 4px; border-radius: 4px; background: var(--chip); }
+.ann table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ann th, .ann td { padding: 6px 8px 6px 0; text-align: left; vertical-align: top; border-top: 1px solid var(--line-soft); }
+.ann th { font-weight: 700; color: var(--muted); }
+.q { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--active-bg); color: var(--text); font-size: 13.5px; }
+.q b { display: block; margin-bottom: 2px; }
+
+.pair { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.pair.stack { flex-direction: column; flex-wrap: nowrap; width: 100%; }
+.th { color: var(--text); }
+body[data-mode="light"] .th-dark, body[data-mode="dark"] .th-light { display: none; }
+body[data-view="phone"] .shot-desk, body[data-view="desktop"] .shot-phone { display: none; }
+.desk-holder { position: relative; overflow: hidden; border-radius: 12px; box-shadow: var(--shadow-lift); }
+.specimen { padding: 16px; border-radius: 16px; background: var(--bg); border: 1px solid var(--line); }
+.spec-label { margin: 0 0 8px; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ---------- Device frames ---------- */
+.frame-phone { box-sizing: content-box; position: relative; display: flex; flex-direction: column; width: 390px; height: 844px; overflow: hidden; border: 10px solid #0e0e10; border-radius: 48px; background: var(--bg); box-shadow: var(--shadow-lift); }
+.statusbar { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 6px 30px 0; font-size: 15px; font-weight: 700; background: var(--bg); }
+.home-ind { position: absolute; left: 50%; bottom: 8px; z-index: 60; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: var(--text); opacity: 0.85; }
+.phone-body { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.frame-desk { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); width: 1440px; height: 900px; overflow: hidden; background: var(--bg); transform-origin: top left; }
+
+/* ---------- App components, copied from app.css ---------- */
+.avatar { display: inline-grid; place-items: center; flex-shrink: 0; border-radius: 999px; color: #1b1a18; font-weight: 600; }
+.avatar-xs { width: 22px; height: 22px; font-size: 10px; font-weight: 700; }
+.avatar-sm { width: 28px; height: 28px; font-size: 12px; }
+.avatar-md { width: 36px; height: 36px; font-size: 14px; }
+.avatar-stack { display: inline-flex; }
+.avatar-stack > .avatar { box-shadow: 0 0 0 2px var(--surface); }
+.avatar-stack > .avatar + .avatar { margin-left: -6px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-tall { min-height: 44px; }
+.btn-text-danger { background: none; border: 0; padding: 8px 0; color: var(--danger); font-weight: 600; font-size: 14px; }
+.icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; color: var(--text); flex-shrink: 0; }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; box-shadow: var(--shadow-1); }
+.list { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-1); }
+.list-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 14px; }
+.list > * + * { border-top: 1px solid var(--line-soft); }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-head h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.section-head a { color: var(--link); font-size: 15px; padding: 10px 0; }
+.empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 15px; }
+.text-link { color: var(--link); font-weight: 600; background: none; border: 0; padding: 0; }
+.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; }
+.pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 10px; background: var(--chip); font-size: 12px; font-weight: 600; }
+.pill-muted { font-weight: 500; color: var(--muted); }
+.pill-blocked { background: var(--blocked-bg); color: var(--blocked); }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--dot) 14%, transparent); font-size: 12.5px; font-weight: 600; }
+.status-pill .dot { background: var(--dot); }
+.dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; background: var(--dot, var(--muted)); }
+.dot-ring { width: 10px; height: 10px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 18%, transparent); }
+.bar { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 3px; background: var(--bar, var(--accent)); }
+.field { display: grid; gap: 6px; }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.field-error { display: flex; align-items: flex-start; gap: 5px; font-size: 13px; color: var(--danger); }
+.input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); padding: 10px 12px; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+.alert { padding: 12px 14px; border-radius: 12px; font-size: 14px; border: 1px solid var(--line); display: flex; gap: 8px; align-items: flex-start; }
+.alert-error { background: var(--blocked-bg); color: var(--blocked); border-color: transparent; }
+.status-todo { color: var(--todo); } .status-progress { color: var(--progress); } .status-blocked { color: var(--blocked); } .status-done { color: var(--done); }
+.toast { max-width: 420px; padding: 10px 16px; border-radius: 12px; background: var(--text); color: var(--bg); font-size: 14px; font-weight: 500; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); }
+.toast-error { background: var(--danger); color: var(--on-danger); }
+.toast-region { position: absolute; z-index: 80; display: grid; gap: 8px; pointer-events: none; }
+.phone-body .toast-region { left: 16px; right: 16px; bottom: 96px; justify-items: center; }
+.frame-desk .toast-region { right: 24px; bottom: 24px; justify-items: end; }
+
+/* Shell */
+.sidebar { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--side); }
+.org-switch { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 16px; padding: 0 8px; }
+.logo { display: inline-grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-size: 14px; font-weight: 700; }
+.side-link { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--muted); font-weight: 500; }
+.side-link[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow); }
+.side-link[aria-current="page"] .ic { color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; padding: 12px 8px 0; border-top: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 0 8px 0 16px; background: var(--bg); }
+.topbar h1 { flex: 1; min-width: 0; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.frame-desk .topbar { padding: 16px 32px 4px; gap: 8px; }
+.bell-btn { position: relative; }
+.bell-dot { position: absolute; top: 10px; right: 11px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+.tabbar { position: absolute; inset: auto 0 0 0; z-index: 40; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 8px 8px 26px; background: var(--surface); border-top: 1px solid var(--line); }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.tab-icon { display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.tab[aria-current="page"] { color: var(--text); font-weight: 600; }
+.tab[aria-current="page"] .tab-icon { background: var(--active-bg); }
+.page { padding: 4px 16px 110px; display: flex; flex-direction: column; gap: 12px; }
+.d-main { min-width: 0; display: flex; flex-direction: column; }
+.d-page { padding: 8px 32px 48px; display: flex; flex-direction: column; gap: 24px; }
+
+/* Home (as today) */
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.frame-desk .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat { display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.phone-body .stat { gap: 10px; padding: 12px; }
+.stat > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.stat-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 11px; background: color-mix(in srgb, var(--dot) 12%, transparent); }
+.phone-body .stat-icon { width: 30px; height: 30px; border-radius: 9px; }
+.stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.project-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.project-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.home-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 28px; align-items: start; }
+.cards-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.decision { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* Roadmap (as today) */
+.segmented { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 4px; padding: 4px; border-radius: 12px; background: var(--chip); }
+.segmented > * { min-height: 40px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; display: grid; place-items: center; }
+.segmented > [aria-current="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.roadmap-col { display: flex; flex-direction: column; gap: 12px; }
+.roadmap-cards { display: grid; gap: 12px; }
+.roadmap-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px 16px 16px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.roadmap-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent-bar); }
+.roadmap-empty { padding: 28px 16px; border: 1.5px dashed var(--line); border-radius: 14px; text-align: center; color: var(--muted); font-size: 14px; }
+.frame-desk .roadmap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.frame-desk .roadmap-col { padding: 14px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--lane); }
+.roadmap-col-head { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 4px; }
+.roadmap-col-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
+
+/* Sheet */
+.m-scrim { position: absolute; inset: 0; z-index: 45; background: var(--scrim); }
+.m-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; flex-direction: column; max-height: calc(100% - 48px); border-radius: 20px 20px 0 0; background: var(--surface); }
+.sheet-handle { display: grid; place-items: center; padding-top: 8px; flex-shrink: 0; }
+.sheet-handle::before { content: ""; width: 36px; height: 5px; border-radius: 3px; background: var(--line); }
+.m-sheet .sheet-body { min-height: 0; overflow-y: auto; padding: 8px 20px 34px; }
+.d-modal { position: absolute; z-index: 50; left: calc(248px + (100% - 248px) / 2); top: 50%; transform: translate(-50%, -50%); width: 560px; border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-lift); }
+.d-modal .sheet-body { padding: 20px 24px 24px; }
+.form { display: grid; gap: 16px; }
+.form h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.m-sheet .grid-3 { grid-template-columns: 1fr; }
+.swatches { display: flex; gap: 12px; }
+.swatch { width: 36px; height: 36px; border-radius: 50%; }
+.swatch.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+.form-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.form-foot .btn-text-danger { margin-right: auto; }
+.textarea { min-height: 72px; align-items: flex-start; font-size: 16px; line-height: 1.45; }
+
+/* ---------- Built in roadmap-done, now in app.css ---------- */
+
+/* 1. Four roadmap columns on desktop (app.css: repeat(3) becomes repeat(4)). */
+.frame-desk .roadmap.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* 2. Lane switcher: the count gets its own span so it can be quieter, and can
+      drop under the label on very narrow screens. */
+.seg-count { margin-left: 5px; color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 600; }
+.segmented > [aria-current="true"] .seg-count { color: var(--muted); }
+.segmented > * > span.seg-in { display: inline-flex; align-items: baseline; white-space: nowrap; }
+.segmented.narrow > * > span.seg-in { flex-direction: column; align-items: center; line-height: 1.15; }
+.segmented.narrow .seg-count { margin-left: 0; font-size: 11.5px; }
+.segmented.narrow > * { min-height: 44px; }
+
+/* 3. A closed project's card: same card, quieter. No shadow, no progress bar,
+      the project colour faded, a "Done" badge that looks nothing like the grey status pill. */
+.roadmap-card.is-closed { box-shadow: none; gap: 10px; }
+.roadmap-card.is-closed::before { background: color-mix(in srgb, var(--accent-bar) 40%, var(--surface)); }
+.closed-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px 3px 5px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); background: color-mix(in srgb, var(--done) 10%, var(--surface)); font-size: 12px; font-weight: 700; color: var(--text); }
+.closed-badge .ic { color: var(--done); }
+.closed-foot { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-bottom: -6px; }
+.closed-foot .meta { flex: 1; min-width: 0; }
+.reopen { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; margin-right: -6px; padding: 0 6px; border: 0; border-radius: 8px; background: none; color: var(--link); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.reopen:hover { background: var(--chip); }
+.reopen:disabled { color: var(--muted); cursor: default; }
+.phone-body .reopen, .specimen .reopen { min-height: 44px; }
+.roadmap-more { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border-radius: 12px; font-size: 14px; font-weight: 600; color: var(--link); }
+.roadmap-more:hover { background: var(--chip); }
+
+/* 4. "Mark project done" in the edit sheet. */
+.close-row { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--lane); }
+.close-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.close-row-text b { font-size: 15px; }
+.m-sheet .close-row { flex-direction: column; align-items: stretch; }
+.m-sheet .close-row .btn { min-height: 44px; }
+.btn .ic.done { color: var(--done); }
+
+/* Board, as in app.css */
+.board-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 4px; }
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.chip { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.chip[aria-current="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.board-search { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 14px; width: 220px; }
+.segmented-sm { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; }
+.segmented-sm > * { min-height: 30px; padding: 0 12px; border-radius: 7px; font-size: 13px; }
+.board-head, .lane-cells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.board-head { padding: 14px 14px 4px; }
+.board-col-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
+.board-col-head .meta { font-weight: 500; }
+.lane { margin-top: 10px; border: 1px solid var(--line-soft); border-radius: 16px; background: var(--lane); }
+.lane-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; font-size: 14px; }
+.lane-chevron { color: var(--muted); transform: rotate(90deg); }
+.lane-mark { width: 14px; height: 14px; border-radius: 4px; background: var(--dot); }
+.lane-name { font-weight: 700; }
+.lane-progress { margin-left: auto; width: 120px; height: 6px; border-radius: 999px; background: var(--chip); overflow: hidden; }
+.lane-progress > span { display: block; height: 100%; border-radius: 999px; }
+.lane-cells { padding: 0 14px 14px; }
+.cell { position: relative; display: flex; flex-direction: column; gap: 8px; min-height: 72px; padding: 6px; margin: -6px; border-radius: 12px; }
+.cell-more { padding: 2px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.task-card { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-1); }
+.task-card.is-dragging { opacity: 0.45; }
+.task-card-project { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.task-card-title { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.task-card-meta { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+.prio { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+.prio i { width: 3px; border-radius: 1px; background: var(--line); }
+.prio i:nth-child(1) { height: 5px; } .prio i:nth-child(2) { height: 8px; } .prio i:nth-child(3) { height: 11px; }
+.prio-low i:nth-child(1), .prio-medium i:nth-child(-n + 2) { background: var(--muted); }
+.prio-high i { background: var(--blocked); }
+.due { padding: 2px 7px; border-radius: 6px; background: var(--chip); font-weight: 600; }
+.section-label { margin: 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.person-toggle { position: relative; display: block; }
+.person-toggle > span { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 14px 4px 5px; border: 1.5px solid var(--line); border-radius: 999px; font-size: 14px; font-weight: 500; color: var(--muted); }
+.person-toggle > span .avatar { opacity: 0.5; }
+.person-toggle.on > span { border-color: var(--progress); color: var(--text); font-weight: 700; background: color-mix(in srgb, var(--progress) 8%, var(--surface)); }
+.person-toggle.on > span .avatar { opacity: 1; }
+.m-sheet .person-toggle > span { min-height: 44px; }
+
+/* ======================= NEW in this feature ======================= */
+
+/* 1. Drop marker: an amber line with a ring at its start, in the gap where the card will land.
+      The card being moved stays in place at 45% (as today); the browser's drag image follows the pointer. */
+.drop-line { position: relative; height: 3px; margin: -2px 2px; border-radius: 2px; background: var(--accent); }
+.drop-line::before { content: ""; position: absolute; left: -4px; top: -4px; width: 11px; height: 11px; box-sizing: border-box; border-radius: 50%; border: 3px solid var(--accent); background: var(--lane); }
+.ghost { position: absolute; z-index: 30; pointer-events: none; transform: rotate(1.5deg); box-shadow: var(--shadow-lift) !important; }
+/* Done takes a drop as a whole (it lands at the top): the cell outline, no line.
+   Changed from today's blue to amber, since blue means "in progress". */
+.cell.is-drop-target, .roadmap-cards.is-drop-target { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+.drop-note { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.col-order { font-weight: 500; font-size: 12.5px; color: var(--muted); }
+
+/* 2. The Reorder button and the bar that replaces the filters while reordering. */
+.reorder-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px 0 11px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; position: relative; }
+.reorder-btn::after { content: ""; position: absolute; inset: -4px 0; } /* 44px tall hit area on phones */
+.chips-row { display: flex; align-items: center; gap: 8px; }
+.chips-row .chips { flex: 1; min-width: 0; }
+.reorder-bar { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 6px 6px 14px; border-radius: 14px; background: var(--active-bg); }
+.reorder-bar > div { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.reorder-bar b { font-size: 15px; }
+.reorder-bar .meta { color: var(--text); opacity: 0.75; }
+.reorder-bar .btn { min-height: 44px; padding: 0 20px; }
+.frame-desk .reorder-bar { min-height: 48px; padding: 6px 6px 6px 16px; flex-direction: row; }
+.frame-desk .reorder-bar > div { flex-direction: row; align-items: baseline; gap: 10px; }
+.frame-desk .reorder-bar .btn { min-height: 36px; }
+
+/* 3. Up and down arrows. 44px on phones, 32px on the desktop board. The missing
+      arrow keeps its space so every row's arrows line up. */
+.move { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.move-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); }
+.move-btn.none { visibility: hidden; }
+.move-sm .move-btn { width: 32px; height: 32px; border-radius: 9px; }
+.list-row.is-reorder { gap: 10px; padding-right: 8px; cursor: default; }
+.list-row.is-reorder .row-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+.is-moved { background: color-mix(in srgb, var(--accent) 14%, var(--surface)) !important; }
+.task-card.is-reorder { cursor: default; }
+.task-card.is-reorder .task-card-top { display: flex; align-items: flex-start; gap: 8px; }
+.task-card.is-reorder .task-card-top .task-card-title { flex: 1; min-width: 0; }
+/* Roadmap cards fold to one line while reordering, so a lane fits on a phone screen. */
+.rm-compact { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 10px 8px 10px 18px; border: 1px solid var(--line-soft); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); }
+.rm-compact::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--accent-bar); }
+.rm-compact > .rm-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rm-compact b { font-size: 15px; line-height: 1.3; }
+
+/* 4. Owners: up to three avatars, then "+N" in the same circle. */
+.avatar-more { background: var(--chip) !important; color: var(--muted) !important; font-size: 11px !important; font-weight: 700; }
+.owners-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+
+/* Phone task list rows */
+.row-title { font-size: 15px; font-weight: 500; }
+.status-ic { width: 20px; height: 20px; }
+</style>
+</head>
+<body data-view="both" data-mode="light">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-list-todo" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><rect x="3" y="4" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></symbol>
+  <symbol id="i-meetings" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-sun-moon" viewBox="0 0 24 24"><path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/></symbol>
+  <symbol id="i-log-out" viewBox="0 0 24 24"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></symbol>
+  <symbol id="i-chevrons-up-down" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-at-sign" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
+  <symbol id="i-user-round" viewBox="0 0 24 24"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></symbol>
+  <symbol id="i-status-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-status-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+  <symbol id="i-status-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="i-status-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+  <symbol id="i-arrow-up-down" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+</svg>
+
+<header class="mock-bar">
+  <h1>Card order and several project owners · mockup</h1>
+  <nav aria-label="Sections">
+    <a href="#drag">1 Drag on the board</a><a href="#roadmap-drag">2 Drag on the roadmap</a><a href="#reorder-tasks">3 Reorder: tasks</a><a href="#reorder-roadmap">4 Reorder: roadmap</a><a href="#done">5 Done columns</a><a href="#owners">6 Owners</a><a href="#roles">7 Roles</a><a href="#fit">8 Do arrows fit at 390?</a>
+  </nav>
+  <div class="seg" role="group" aria-label="Theme"><button type="button" data-mode-set="light" aria-pressed="true">Light</button><button type="button" data-mode-set="dark" aria-pressed="false">Dark</button><button type="button" data-mode-set="both" aria-pressed="false">Light and dark</button></div>
+  <div class="seg" role="group" aria-label="Frames"><button type="button" data-view-set="both" aria-pressed="true">Both</button><button type="button" data-view-set="phone" aria-pressed="false">Phone 390</button><button type="button" data-view-set="desktop" aria-pressed="false">Desktop 1440</button></div>
+</header>
+
+<!-- 1 -->
+<section class="section" id="drag">
+  <h2>1. Desktop board: drag to a spot</h2>
+  <p class="lead">Ana drags "Order tins" to the top of To do in Website. An amber line shows where it lands. The card stays faded in its old place until the drop. Nothing else on the board changes.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Ana, dragging within To do</span><div id="d-board-drag"></div></div>
+    <div class="shot"><span class="shot-label">Into another column, between two cards</span><div id="s-cross"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>The line sits in the gap between cards, with a ring at its start. That is the usual "it goes here" sign.</li>
+        <li>Amber, the app's one accent. Today's blue drop outline becomes amber too, because blue means "in progress".</li>
+        <li>No column outline while the line shows. The line is the only signal, so it never says two things at once.</li>
+        <li>Over a card, the line goes above or below it by which half the pointer is in.</li>
+        <li>No toast after a drop. If the save fails: error toast "Couldn't move Order tins. The board is back as it was." and the column refreshes.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="section" id="roadmap-drag">
+  <h2>2. Desktop roadmap: drag to a spot</h2>
+  <p class="lead">Leo drags "Spring blend" above "Gift box redesign" in Next. Same line, same rules. Cards now show their owners: Website has Ana and Leo; Wholesale catalogue has all four, so it shows three and "+1".</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · Leo, dragging within Next</span><div id="d-roadmap-drag"></div></div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="section" id="reorder-tasks">
+  <h2>3. Reorder mode: tasks</h2>
+  <p class="lead">Phones have no board, only the list grouped by status. "Reorder" sits at the end of the filter row. Tapping it swaps the filters for an amber bar with "Done", and gives each row up and down arrows. Rows stop opening while it is on.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · before · All</span><div id="p-tasks"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · reordering · "Order tins" just moved up</span><div id="p-tasks-reorder"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · the save failed</span><div id="p-tasks-error"></div></div>
+    <div class="ann">
+      <h3>How it behaves</h3>
+      <ol>
+        <li>The top row in each group has no up arrow; the last has no down arrow. A group of one has neither. The gap stays, so arrows line up.</li>
+        <li>Arrows move a task within its status group only. Moving to another status is still done in the task sheet.</li>
+        <li>The moved row tints amber for a moment and stays on screen. A screen reader hears "Order tins, 2 of 7 in To do".</li>
+        <li>Each tap saves straight away, with no spinner: the move shows at once. If it fails, the toast says so and the list goes back.</li>
+        <li>Tapping Done, leaving the page, or changing filter ends reorder mode. There is nothing to save at the end.</li>
+        <li>The Done filter has no Reorder button. Done stays newest first.</li>
+        <li>With "Mine" or a search on, arrows move past the visible rows only. Hidden tasks keep their place.</li>
+      </ol>
+    </div>
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · reordering on the board (the keyboard route; drag still works)</span><div id="d-board-reorder"></div></div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section class="section" id="reorder-roadmap">
+  <h2>4. Reorder mode: roadmap</h2>
+  <p class="lead">Leo opens Next and taps Reorder. While reordering, cards fold to one line (colour, name, status) so a whole lane fits on the screen and the arrows have room. He taps up on "Spring blend" and it moves above "Gift box redesign". Done brings back the full cards.</p>
+  <div class="shots">
+    <div class="shot shot-phone"><span class="shot-label">Phone · before · Next</span><div id="p-rm"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · reordering · Spring blend moved up</span><div id="p-rm-reorder"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Reorder goes next to the lane hint, not the top bar. The top bar already holds the title, "Project" and the bell.</li>
+        <li>Folded cards, because full cards are about 170px tall: only three fit on screen, and a move can push the card out of view.</li>
+        <li>The lane switcher stays, so Leo can reorder Now next without leaving the mode.</li>
+        <li>On desktop the four columns get the same folded cards with 32px arrows.</li>
+        <li>Home's "Roadmap: now" and the task form's project list follow this order. They don't change in looks.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="section" id="done">
+  <h2>5. Done columns can't be reordered</h2>
+  <p class="lead">Done keeps newest first, and says so in its header. No line appears between done cards, and no arrows in reorder mode. A task can still be dropped on Done: the whole column lights up and the card lands at the top.</p>
+  <div class="shots">
+    <div class="shot"><span class="shot-label">Board · dragging over Done</span><div id="s-done-drop"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · roadmap Done lane: no Reorder</span><div id="p-rm-done"></div></div>
+    <div class="ann">
+      <h3>Notes</h3>
+      <ol>
+        <li>"Newest first" sits after the count in the board's Done header and in the roadmap's Done hint.</li>
+        <li>Dropping a project on the roadmap's Done still opens the "Mark project done" confirm, as today. No outline there, since nothing lands until it is confirmed.</li>
+        <li>The phone's Done lane shows "Newest first" where Reorder would be, so the missing button reads as on purpose.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="section" id="owners">
+  <h2>6. Several owners</h2>
+  <p class="lead">In the project form, "Owner" becomes "Owners": the same tap-to-add people pills as a task's assignees, on their own row. Raj ticks Ana and Leo and saves. Each gets "Raj made you owner of Website". There is no separate project page today, so owners show on the card and in this form.</p>
+  <div class="shots">
+    <div class="shot shot-desk shot-wide"><span class="shot-label">Desktop · 1440 · edit Website, Raj (admin)</span><div id="d-form"></div></div>
+    <div class="shot shot-phone"><span class="shot-label">Phone · edit Website sheet</span><div id="p-form"></div></div>
+    <div class="shot"><span class="shot-label">Cards: no owner, one, two, four</span><div id="s-owner-cards"></div></div>
+    <div class="ann">
+      <h3>Decisions</h3>
+      <ol>
+        <li>Owners moves out of the Lane / Status / Owner row onto its own row, as Assignees does in the task form. Pills don't fit in a third of the row.</li>
+        <li>No owners is allowed and shows no avatars, as an unowned project does today.</li>
+        <li>Owners move from the title row to the end of the pill row. In four desktop columns, three avatars beside the name cut "Wholesale catalogue" to "Whole…". Up to three 28px avatars, then a "+1" circle the same size. The stack's label reads "Owners: Tom, Ana, Leo and Maya".</li>
+        <li>The form's lead line changes from "with one owner" to "A workstream on the roadmap. Owners can mark it done."</li>
+        <li>Done cards show the same stack.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="section" id="roles">
+  <h2>7. What each person sees</h2>
+  <p class="lead">Reordering is the same for every approved member. Owners only change who can mark a project done.</p>
+  <div class="shots">
+    <div class="shot" style="flex-basis:100%"><div id="s-roles"></div></div>
+    <div class="ann ann-wide">
+      <table>
+        <tr><th>Who</th><th>Drag and Reorder</th><th>"Mark project done" / Reopen on Website</th></tr>
+        <tr><td>Raj, organisation owner</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Maya, admin</td><td>Yes</td><td>Yes</td></tr>
+        <tr><td>Leo, member, owner of Website</td><td>Yes</td><td>Yes (new: before, only Ana could)</td></tr>
+        <tr><td>Tom, member, not an owner</td><td>Yes</td><td>No box in the form, no Reopen. Dropping on Done: toast "Only this project's owners and admins can mark it done."</td></tr>
+        <tr><td>Someone waiting for approval</td><td colspan="2">Sees none of this, as today.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 8 -->
+<section class="section" id="fit">
+  <h2>8. Do the arrows fit on a 390px task row?</h2>
+  <p class="lead">Yes, if the row drops its avatars and note count while reordering, and the title may wrap to two lines.</p>
+  <div class="shots">
+    <div class="ann ann-wide">
+      <table>
+        <tr><th>Part</th><th>Width</th></tr>
+        <tr><td>Screen less page padding (16 + 16)</td><td>358</td></tr>
+        <tr><td>Row padding (14 left, 8 right)</td><td>-22</td></tr>
+        <tr><td>Status icon + gap</td><td>-30</td></tr>
+        <tr><td>Two 44px arrows + 4px between + 10px gap</td><td>-102</td></tr>
+        <tr><td>Left for title and project line</td><td><b>204px</b>, about 26 characters a line</td></tr>
+      </table>
+      <p>With avatars kept (three at 28px, about 70px) the title would get about 130px: too tight. Stacking the two arrows in one 44px column would make each 22px tall: below the 44px rule. So: hide the extras, wrap the title to two lines, keep full-size arrows. On the desktop board (cards about 265px) 32px arrows leave the title about 170px, also wrapping.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+const COLORS = { Ana: "#c9d76a", Maya: "#6cb6ff", Tom: "#72e5b4", Leo: "#ffb454", Raj: "#df85ff" };
+const ic = (name, size = 18, cls = "") => `<svg class="ic ${cls}" width="${size}" height="${size}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+const av = (n, size = "sm") => `<span class="avatar avatar-${size}" style="background:${COLORS[n] || "#e8dfce"}" aria-hidden="true">${n[0]}</span>`;
+const owners = (list, size = "sm") => {
+  if (!list || !list.length) return "";
+  const shown = list.slice(0, 3).map((n) => av(n, size)).join("");
+  const more = list.length > 3 ? `<span class="avatar avatar-${size} avatar-more" aria-hidden="true">+${list.length - 3}</span>` : "";
+  return `<span class="avatar-stack" role="img" aria-label="Owners: ${list.join(", ")}">${shown}${more}</span>`;
+};
+function both(html, stack = false) {
+  return `<div class="pair${stack ? " stack" : ""}"><div class="th th-light" data-theme="light">${html}</div><div class="th th-dark" data-theme="dark">${html}</div></div>`;
+}
+const put = (id, html) => { document.getElementById(id).innerHTML = both(html); };
+const putDesk = (id, html) => { document.getElementById(id).innerHTML = both(`<div class="desk-holder">${html}</div>`, true); };
+
+/* ---------- Shell ---------- */
+function sidebar(active, me) {
+  const links = [["house", "Home"], ["bell", "Notifications"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["map", "Roadmap"], ["meetings", "Meetings"], ["folder", "Documents"], ["users", "Members"]];
+  return `<nav class="sidebar"><div class="org-switch"><span class="logo">J</span><strong class="truncate-1" style="flex:1;font-size:15px">Juniper Tea Co</strong><span class="meta">${ic("chevrons-up-down", 16)}</span></div>${links.map(([i, l]) => `<a class="side-link"${l === active ? ' aria-current="page"' : ""}>${ic(i, 20)}<span style="flex:1">${l}</span>${l === "Chat" ? '<span class="badge">2</span>' : ""}</a>`).join("")}<div class="side-foot">${av(me, "md")}<span class="truncate-1" style="flex:1;font-size:14px;font-weight:500">${me}</span><span class="icon-btn">${ic("sun-moon", 20)}</span><span class="icon-btn">${ic("log-out", 20)}</span></div></nav>`;
+}
+const desk = (active, main, me, overlay = "") => `<div class="frame-desk">${sidebar(active, me)}<div class="d-main">${main}</div>${overlay}</div>`;
+const phone = (inner) => `<div class="frame-phone"><div class="statusbar"><span>9:41</span><span style="font-size:13px">●●● ▮</span></div><div class="phone-body">${inner}</div><span class="home-ind"></span></div>`;
+const tabbar = (cur) => `<nav class="tabbar">${[["house", "Home"], ["list-todo", "Tasks"], ["message-circle", "Chat"], ["ellipsis", "More"]].map(([i, l]) => `<a class="tab"${l === cur ? ' aria-current="page"' : ""}><span class="tab-icon">${ic(i, 22)}</span>${l}</a>`).join("")}</nav>`;
+const bell = `<a class="icon-btn bell-btn" aria-label="Notifications">${ic("bell", 22)}</a>`;
+const toast = (msg, cls = "") => `<div class="toast-region" role="status"><div class="toast ${cls}">${msg}</div></div>`;
+const sheet = (body) => `<div class="m-scrim"></div><div class="m-sheet" role="dialog"><div class="sheet-handle"></div><div class="sheet-body">${body}</div></div>`;
+const modal = (body) => `<div class="m-scrim"></div><div class="d-modal" role="dialog"><div class="sheet-body">${body}</div></div>`;
+const moveBtns = (up, down, sm = false, name = "") => `<span class="move${sm ? " move-sm" : ""}"><button class="move-btn${up ? "" : " none"}" aria-label="Move ${name} up"${up ? "" : ' tabindex="-1" aria-hidden="true"'}>${ic("arrow-up", sm ? 16 : 20)}</button><button class="move-btn${down ? "" : " none"}" aria-label="Move ${name} down"${down ? "" : ' tabindex="-1" aria-hidden="true"'}>${ic("arrow-down", sm ? 16 : 20)}</button></span>`;
+const reorderBar = (what) => `<div class="reorder-bar" role="region" aria-label="Reordering"><div><b>Reordering</b><span class="meta">Move ${what} with the arrows.</span></div><button class="btn btn-primary">Done</button></div>`;
+const reorderBtn = `<button class="reorder-btn">${ic("arrow-up-down", 16)}Reorder</button>`;
+
+/* ---------- Data: Juniper Tea Co ---------- */
+const P = {
+  web: { name: "Website", accent: "#6cb6ff" },
+  whole: { name: "Wholesale catalogue", accent: "#ffb454" },
+};
+// Board, swimlanes by project. Each card: title, people, prio, due, notes.
+const T = (title, people, prio = "medium", due = "", notes = 0, project = "") => ({ title, people, prio, due, notes, project });
+const WEB = {
+  todo: [T("Book the courier", ["Tom"], "medium", "30 Oct"), T("Write the shipping page", ["Ana"], "low"), T("Order tins", ["Maya"], "high", "28 Oct", 2)],
+  progress: [T("Product photos for the shop", ["Leo"], "medium", "", 3), T("Checkout testing", ["Ana", "Tom"], "high", "29 Oct")],
+  blocked: [T("Payment provider sign-up", ["Ana"], "high", "", 1)],
+  done: [T("Domain and email", ["Ana"], "low"), T("Pick a shop theme", ["Maya", "Ana"], "medium")],
+};
+const WHOLE = {
+  todo: [T("Price list for cafés", ["Tom"], "high", "1 Nov"), T("Price the 100g pouches", ["Tom", "Leo"], "medium")],
+  progress: [T("Tasting sample packs", ["Leo"], "medium", "", 1), T("Café contact list", ["Tom"], "low")],
+  blocked: [],
+  done: [T("Wholesale terms", ["Tom"], "medium"), T("Pick 20 cafés", ["Tom", "Ana"], "low"), T("Sample tins", ["Maya"], "low")],
+};
+const COLS = [["todo", "To do", "var(--todo)"], ["progress", "In progress", "var(--progress)"], ["blocked", "Blocked", "var(--blocked)"], ["done", "Done", "var(--done)"]];
+
+function taskCard(c, o = {}) {
+  const meta = `<span class="task-card-meta"><span class="prio prio-${c.prio}"><i></i><i></i><i></i></span>${c.due ? `<span class="due">${c.due}</span>` : ""}${c.notes ? `<span style="display:flex;align-items:center;gap:4px">${ic("message-circle", 14)}${c.notes}</span>` : ""}<span class="avatar-stack" style="margin-left:auto">${c.people.map((p) => av(p, "xs")).join("")}</span></span>`;
+  if (o.reorder) {
+    return `<div class="task-card is-reorder${o.moved ? " is-moved" : ""}"><div class="task-card-top"><span class="task-card-title">${c.title}</span>${o.done ? "" : moveBtns(o.up, o.down, true, c.title)}</div>${meta}</div>`;
+  }
+  return `<div class="task-card${o.dragging ? " is-dragging" : ""}"${o.style ? ` style="${o.style}"` : ""}><span class="task-card-title">${c.title}</span>${meta}</div>`;
+}
+function cellHtml(key, cards, o = {}) {
+  const done = key === "done";
+  let inner = cards.map((c, i) => {
+    let h = "";
+    if (o.lineAt === i) h += `<div class="drop-line" aria-hidden="true"></div>`;
+    h += taskCard(c, { reorder: o.reorder, done, up: i > 0, down: i < cards.length - 1, dragging: o.dragging === i, moved: o.moved === i });
+    return h;
+  }).join("");
+  if (o.lineAt === cards.length) inner += `<div class="drop-line" aria-hidden="true"></div>`;
+  if (done && o.more) inner += `<a class="cell-more">All done tasks</a>`;
+  return `<div class="cell${o.target ? " is-drop-target" : ""}">${o.target ? `<span class="drop-note">${ic("arrow-up", 14)}Lands at the top</span>` : ""}${inner}</div>`;
+}
+function lane(p, data, o = {}) {
+  const total = Object.values(data).flat().length, done = data.done.length, pct = Math.round((done / total) * 100);
+  return `<section class="lane"><div class="lane-head">${ic("chevron-right", 16, "lane-chevron")}<span class="lane-mark" style="--dot:${p.accent}"></span><span class="lane-name">${p.name}</span><span class="meta">${total} tasks · ${done} done</span><span class="lane-progress"><span style="width:${pct}%;background:${p.accent}"></span></span><span class="meta tnum" style="width:36px;text-align:right">${pct}%</span></div>
+    <div class="lane-cells">${COLS.map(([k]) => cellHtml(k, data[k], (o.cells || {})[k] || { reorder: o.reorder, more: k === "done" })).join("")}</div></section>`;
+}
+function boardMain(lanes, o = {}) {
+  const toolbar = o.reorder
+    ? reorderBar("tasks")
+    : `<div class="board-toolbar"><nav class="chips"><a class="chip" aria-current="true">All</a><a class="chip">Mine</a></nav><span class="board-search">${ic("search", 16)}Search tasks</span>${reorderBtn}<div style="margin-left:auto;display:flex;align-items:center;gap:8px"><span class="meta">Swimlanes</span><nav class="segmented segmented-sm"><a aria-current="true">Project</a><a>Person</a><a>None</a></nav></div></div>`;
+  const head = `<div class="board-head">${COLS.map(([k, l, c]) => `<div class="board-col-head"><span class="dot dot-ring" style="--dot:${c}"></span>${l}<span class="meta">${k === "todo" ? 5 : k === "progress" ? 4 : k === "blocked" ? 1 : 5}</span>${k === "done" ? '<span class="col-order">· Newest first</span>' : ""}</div>`).join("")}</div>`;
+  return `<header class="topbar"><h1>Tasks</h1><nav class="segmented segmented-sm" style="margin-right:8px"><a aria-current="true">Board</a><a>List</a></nav><button class="btn btn-primary">${ic("plus", 16)}New task</button></header>
+    <div class="d-page" style="gap:4px;position:relative">${toolbar}${head}${lanes}${o.extra || ""}</div>`;
+}
+
+/* 1. Board drag */
+putDesk("d-board-drag", desk("Tasks", boardMain(
+  lane(P.web, WEB, { cells: { todo: { lineAt: 0, dragging: 2 }, done: { more: true } } }) + lane(P.whole, WHOLE, { cells: { done: { more: true } } }),
+  { extra: `<div class="ghost task-card" style="left:56px;top:178px;width:250px"><span class="task-card-title">Order tins</span><span class="task-card-meta"><span class="prio prio-high"><i></i><i></i><i></i></span><span class="due">28 Oct</span><span style="display:flex;align-items:center;gap:4px">${ic("message-circle", 14)}2</span><span class="avatar-stack" style="margin-left:auto">${av("Maya", "xs")}</span></span></div>` }
+), "Ana"));
+
+put("s-cross", `<div class="specimen" style="background:var(--lane);width:560px"><p class="spec-label">Wholesale catalogue · To do → In progress</p><div style="position:relative;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:6px">
+  ${cellHtml("todo", WHOLE.todo, { dragging: 1 })}${cellHtml("progress", WHOLE.progress, { lineAt: 1 })}
+  <div class="ghost task-card" style="left:300px;top:58px;width:250px"><span class="task-card-title">Price the 100g pouches</span><span class="task-card-meta"><span class="prio prio-medium"><i></i><i></i><i></i></span><span class="avatar-stack" style="margin-left:auto">${av("Tom", "xs")}${av("Leo", "xs")}</span></span></div>
+</div></div>`);
+
+/* Roadmap */
+const RM = {
+  now: [
+    { name: "Website", accent: "#6cb6ff", owners: ["Ana", "Leo"], status: "Active", summary: "New shop site with the spring range and online ordering.", done: 8, total: 12, blocked: 1 },
+    { name: "Wholesale catalogue", accent: "#ffb454", owners: ["Tom", "Ana", "Leo", "Maya"], status: "In review", summary: "Price list and tasting samples for 20 cafés.", done: 9, total: 16, blocked: 0 },
+    { name: "Instagram shop", accent: "#df85ff", owners: ["Maya"], status: "Active", summary: "Tag products in posts and stories.", done: 3, total: 5, blocked: 0 },
+  ],
+  next: [
+    { name: "Tea tasting evenings", accent: "#72e5b4", owners: ["Leo"], status: "Planned", summary: "Monthly tastings in the shop, ticketed.", done: 0, total: 6, blocked: 0 },
+    { name: "Gift box redesign", accent: "#ff758f", owners: ["Maya", "Ana"], status: "Planned", summary: "Recyclable boxes for the winter range.", done: 2, total: 5, blocked: 0 },
+    { name: "Spring blend", accent: "#c9d76a", owners: ["Leo", "Maya"], status: "Planned", summary: "A new green tea with elderflower for March.", done: 1, total: 4, blocked: 0 },
+  ],
+  later: [
+    { name: "Ship to Europe", accent: "#6cb6ff", owners: [], status: "Idea", summary: "Customs, couriers and prices in euros.", done: 0, total: 0, blocked: 0 },
+    { name: "Subscription box", accent: "#ffb454", owners: ["Leo"], status: "Idea", summary: "", done: 0, total: 3, blocked: 0 },
+  ],
+  done: [
+    { name: "Autumn photo shoot", accent: "#ff758f", owners: ["Maya", "Leo"], summary: "Product shots for the autumn blends.", date: "21 Oct", by: "Maya", tasks: 7 },
+    { name: "Shop till upgrade", accent: "#c9d76a", owners: ["Ana"], summary: "New card reader and stock sync.", date: "14 Oct", by: "Ana", tasks: 4 },
+  ],
+};
+function openCard(p, o = {}) {
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  return `<article class="roadmap-card${o.dragging ? " is-dragging" : ""}${o.cls || ""}" style="--accent-bar:${p.accent};${o.style || ""}">
+    <div style="display:flex;align-items:center;gap:10px"><h3 class="truncate-1" style="margin:0;flex:1;font-size:16px;font-weight:700">${p.name}</h3><span class="icon-btn meta" style="width:36px;height:36px;margin:-8px -8px -8px 0">${ic("pencil", 16)}</span></div>
+    ${p.summary ? `<p style="font-size:14px;line-height:1.6;color:var(--muted)">${p.summary}</p>` : ""}
+    <div style="display:flex;align-items:center;gap:10px"><span class="bar" style="flex:1;--bar:${p.accent}"><span style="width:${pct}%"></span></span><span class="tnum" style="width:36px;text-align:right;font-size:13px;font-weight:600">${pct}%</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px"><span class="pill">${p.status}</span><span class="pill pill-muted">${p.total ? `${p.done} of ${p.total} tasks done` : "No tasks yet"}</span>${p.blocked ? `<span class="pill pill-blocked">${p.blocked} blocked</span>` : ""}<span style="margin-left:auto">${owners(p.owners)}</span></div>
+  </article>`;
+}
+function closedCard(p, o = {}) {
+  return `<article class="roadmap-card is-closed" style="--accent-bar:${p.accent}">
+    <div style="display:flex;align-items:center;gap:10px"><h3 class="truncate-1" style="margin:0;flex:1;font-size:16px;font-weight:700">${p.name}</h3></div>
+    ${p.summary ? `<p class="truncate-1" style="font-size:14px;color:var(--muted)">${p.summary}</p>` : ""}
+    <div style="display:flex;flex-wrap:wrap;gap:8px"><span class="closed-badge">${ic("status-done", 15)}Done ${p.date}</span><span class="pill pill-muted">${p.tasks} tasks done</span></div>
+    <div class="closed-foot">${owners(p.owners)}<span class="meta truncate-1">By ${p.by}</span>${o.reopen === false ? "" : `<button class="reopen">${ic("rotate-ccw", 15)}Reopen</button>`}</div>
+  </article>`;
+}
+const compactCard = (p, up, down, moved) => `<div class="rm-compact${moved ? " is-moved" : ""}" style="--accent-bar:${p.accent}"><span class="rm-text"><b>${p.name}</b><span class="meta">${p.status}</span></span>${moveBtns(up, down, false, p.name)}</div>`;
+const LANES = [["now", "Now", "Being worked on"], ["next", "Next", "Up after the current work"], ["later", "Later", "Ideas and someday"], ["done", "Done", "Finished projects · newest first"]];
+
+function roadmapDesk(o = {}) {
+  const cols = LANES.map(([k, l, hint]) => {
+    let cards;
+    if (k === "done") cards = RM.done.map((p) => closedCard(p)).join("");
+    else if (k === "next" && o.drag) {
+      const [a, b, c] = RM.next;
+      cards = openCard(a) + `<div class="drop-line" aria-hidden="true"></div>` + openCard(b) + openCard(c, { dragging: true });
+    } else cards = RM[k].map((p) => openCard(p)).join("");
+    return `<section class="roadmap-col"><header class="roadmap-col-head"><span style="display:flex;align-items:center;gap:8px"><h2>${l}</h2><span class="meta tnum">${k === "done" ? 9 : RM[k].length}</span></span><span class="meta" style="font-size:13px">${hint}</span></header><div class="roadmap-cards">${cards}</div></section>`;
+  }).join("");
+  const ghost = o.drag ? `<div class="ghost roadmap-card" style="--accent-bar:#c9d76a;position:absolute;left:${16 + 2 * (1128 / 4) + 2 * 0 - 250}px;top:208px;width:250px;gap:8px;padding:14px"><div style="display:flex;align-items:center;gap:10px"><h3 style="margin:0;flex:1;font-size:16px;font-weight:700">Spring blend</h3>${owners(["Leo", "Maya"])}</div><span class="meta">Planned · 1 of 4 tasks done</span></div>` : "";
+  return `<header class="topbar"><h1>Roadmap</h1>${reorderBtn}<button class="btn btn-primary">${ic("plus", 16)}Project</button></header>
+    <div class="d-page" style="position:relative"><div class="roadmap four">${cols}</div>${ghost}</div>`;
+}
+putDesk("d-roadmap-drag", desk("Roadmap", roadmapDesk({ drag: true }), "Leo"));
+
+/* 3. Phone tasks */
+const ROWS = {
+  blocked: [{ t: "Payment provider sign-up", p: "Website", c: "#6cb6ff", s: "blocked", who: ["Ana"] }],
+  progress: [
+    { t: "Product photos for the shop", p: "Website", c: "#6cb6ff", s: "progress", who: ["Leo"] },
+    { t: "Checkout testing", p: "Website", c: "#6cb6ff", s: "progress", who: ["Ana", "Tom"] },
+    { t: "Tasting sample packs", p: "Wholesale catalogue", c: "#ffb454", s: "progress", who: ["Leo"] },
+  ],
+  todo: [
+    { t: "Book the courier", p: "Website · Due 30 Oct", c: "#6cb6ff", s: "todo", who: ["Tom"] },
+    { t: "Order tins", p: "Website · Due 28 Oct", c: "#6cb6ff", s: "todo", who: ["Maya"] },
+    { t: "Write the shipping page", p: "Website", c: "#6cb6ff", s: "todo", who: ["Ana"] },
+    { t: "Price list for cafés", p: "Wholesale catalogue · Due 1 Nov", c: "#ffb454", s: "todo", who: ["Tom"] },
+    { t: "Price the 100g pouches", p: "Wholesale catalogue", c: "#ffb454", s: "todo", who: ["Tom", "Leo"] },
+    { t: "Ask three tea estates for autumn flush samples", p: "Spring blend", c: "#c9d76a", s: "todo", who: ["Leo"] },
+    { t: "Clean the tasting room", p: "Chore", c: "var(--muted)", s: "todo", who: ["Maya"] },
+  ],
+};
+const GROUPS = [["blocked", "Blocked"], ["progress", "In progress"], ["todo", "To do"]];
+function phoneTasks(o = {}) {
+  const rows = (k) => ROWS[o.swap && k === "todo" ? "todoSwapped" : k];
+  const list = GROUPS.map(([k, l]) => {
+    const rs = rows(k);
+    return `<section style="display:flex;flex-direction:column;gap:8px"><h2 class="section-label">${l} · ${rs.length}</h2><div class="list">${rs.map((r, i) => {
+      const moved = o.moved && k === "todo" && r.t === "Order tins";
+      const icon = `<svg class="ic status-ic status-${r.s}" width="20" height="20" aria-hidden="true"><use href="#i-status-${r.s}"/></svg>`;
+      const text = `<span style="display:flex;min-width:0;flex:1;flex-direction:column"><span class="row-title${o.reorder ? "" : " truncate-1"}">${r.t}</span><span class="meta truncate-1" style="display:flex;align-items:center;gap:6px"><span class="dot" style="--dot:${r.c}"></span>${r.p}</span></span>`;
+      return o.reorder
+        ? `<div class="list-row is-reorder${moved ? " is-moved" : ""}">${icon}${text}${moveBtns(i > 0, i < rs.length - 1, false, r.t)}</div>`
+        : `<a class="list-row">${icon}${text}<span class="avatar-stack">${r.who.map((p) => av(p)).join("")}</span></a>`;
+    }).join("")}</div></section>`;
+  }).join("");
+  const top = o.reorder ? reorderBar("tasks") : `<div class="chips-row"><nav class="chips"><a class="chip">Mine 4</a><a class="chip" aria-current="true">All 11</a><a class="chip"><span class="dot" style="--dot:var(--blocked)"></span>Blocked 1</a><a class="chip">Done 14</a></nav>${reorderBtn}</div>`;
+  return phone(`<header class="topbar"><h1>Tasks</h1><span class="icon-btn">${ic("search", 20)}</span><button class="btn btn-primary">${ic("plus", 16)}Task</button>${bell}</header>
+    <div class="page" style="gap:16px;${o.scroll ? `margin-top:-${o.scroll}px` : ""}">${top}${list}</div>${o.toast || ""}${tabbar("Tasks")}`);
+}
+ROWS.todoSwapped = [ROWS.todo[1], ROWS.todo[0], ...ROWS.todo.slice(2)];
+put("p-tasks", phoneTasks());
+put("p-tasks-reorder", phoneTasks({ reorder: true, swap: true, moved: true }));
+put("p-tasks-error", phoneTasks({ reorder: true, toast: toast("Couldn't move Order tins. The list is back as it was.", "toast-error") }));
+
+/* Desktop board in reorder mode */
+putDesk("d-board-reorder", desk("Tasks", boardMain(
+  lane(P.web, { ...WEB, todo: [WEB.todo[2], WEB.todo[0], WEB.todo[1]] }, { reorder: true, cells: { todo: { reorder: true, moved: 0 }, progress: { reorder: true }, blocked: { reorder: true }, done: { reorder: true, more: true } } }) + lane(P.whole, WHOLE, { reorder: true }),
+  { reorder: true }
+), "Ana"));
+
+/* 4. Phone roadmap */
+function phoneRoadmap(laneKey, o = {}) {
+  const info = LANES.find(([k]) => k === laneKey);
+  const seg = `<nav class="segmented">${LANES.map(([k, l]) => `<a${k === laneKey ? ' aria-current="true"' : ""}><span class="seg-in">${l}<span class="seg-count">${k === "done" ? 9 : RM[k].length}</span></span></a>`).join("")}</nav>`;
+  const hintRow = o.reorder ? reorderBar("projects")
+    : `<div style="display:flex;align-items:center;gap:8px;min-height:44px"><p class="meta" style="flex:1;padding:0 4px;font-size:14px">${laneKey === "done" ? "Finished projects" : info[2]}</p>${laneKey === "done" ? '<span class="meta" style="font-weight:600;padding-right:4px">Newest first</span>' : reorderBtn}</div>`;
+  let cards;
+  if (laneKey === "done") cards = RM.done.map((p) => closedCard(p, { reopen: false })).join("");
+  else if (o.reorder) {
+    const list = [RM.next[0], RM.next[2], RM.next[1]];
+    cards = list.map((p, i) => compactCard(p, i > 0, i < list.length - 1, i === 1)).join("");
+  } else cards = RM[laneKey].map((p) => openCard(p)).join("");
+  return phone(`<header class="topbar"><h1>Roadmap</h1><button class="btn btn-primary">${ic("plus", 16)}Project</button>${bell}</header>
+    <div class="page">${seg}${hintRow}<div class="roadmap-cards">${cards}</div></div>${tabbar("More")}`);
+}
+put("p-rm", phoneRoadmap("next"));
+put("p-rm-reorder", phoneRoadmap("next", { reorder: true }));
+put("p-rm-done", phoneRoadmap("done"));
+
+/* 5. Done drop specimen */
+put("s-done-drop", `<div class="specimen" style="background:var(--lane);width:560px"><p class="spec-label">Website · In progress → Done</p><div style="position:relative;display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:6px">
+  ${cellHtml("progress", WEB.progress, { dragging: 1 })}${cellHtml("done", WEB.done, { target: true })}
+  <div class="ghost task-card" style="left:300px;top:96px;width:250px"><span class="task-card-title">Checkout testing</span><span class="task-card-meta"><span class="prio prio-high"><i></i><i></i><i></i></span><span class="due">29 Oct</span><span class="avatar-stack" style="margin-left:auto">${av("Ana", "xs")}${av("Tom", "xs")}</span></span></div>
+</div></div>`);
+
+/* 6. Owners form */
+const TEAM = ["Raj", "Ana", "Maya", "Tom", "Leo"];
+function projectForm(o = {}) {
+  const on = o.on || ["Ana", "Leo"];
+  const close = o.close === false ? "" : `<div class="close-row"><div class="close-row-text"><b>Finished with this project?</b><span class="meta">8 of 12 tasks are done. You can reopen it later.</span></div><button class="btn btn-secondary">${ic("status-done", 17, "done")}Mark project done</button></div>`;
+  return `<div class="form">
+    <div><h2>Edit project</h2><p class="meta" style="margin-top:4px">A workstream on the roadmap. Owners can mark it done.</p></div>
+    <label class="field"><span class="field-label">Name</span><span class="input">Website</span></label>
+    <div class="grid-3" style="grid-template-columns:repeat(2,minmax(0,1fr))"><label class="field"><span class="field-label">Lane</span><span class="input">Now ${ic("chevron-down", 16)}</span></label><label class="field"><span class="field-label">Status</span><span class="input">Active</span></label></div>
+    <fieldset class="field" style="margin:0;border:0;padding:0"><legend class="field-label" style="margin-bottom:6px">Owners <span style="font-weight:400">· tap to add or remove</span></legend>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">${TEAM.map((n) => `<label class="person-toggle${on.includes(n) ? " on" : ""}"><span>${av(n, "xs")}${n}</span></label>`).join("")}</div></fieldset>
+    <fieldset class="field" style="margin:0;border:0;padding:0"><legend class="field-label" style="margin-bottom:6px">Colour</legend><div class="swatches">${["#6cb6ff", "#72e5b4", "#ffb454", "#df85ff", "#ff758f", "#c9d76a"].map((c, i) => `<span class="swatch${i === 0 ? " on" : ""}" style="background:${c}"></span>`).join("")}</div></fieldset>
+    ${o.short ? "" : `<label class="field"><span class="field-label">Summary</span><span class="input textarea">New shop site with the spring range and online ordering.</span></label>`}
+    ${close}
+    <div class="form-foot"><button class="btn-text-danger">Delete</button><button class="btn btn-secondary btn-tall">Cancel</button><button class="btn btn-primary btn-tall">Save</button></div>
+  </div>`;
+}
+putDesk("d-form", desk("Roadmap", roadmapDesk(), "Raj", modal(projectForm())));
+put("p-form", phone(`<header class="topbar"><h1>Roadmap</h1><button class="btn btn-primary">${ic("plus", 16)}Project</button>${bell}</header><div class="page"></div>${tabbar("More")}${sheet(projectForm({ short: true }))}`));
+
+put("s-owner-cards", `<div style="display:grid;grid-template-columns:repeat(2,300px);gap:12px">${[RM.later[0], RM.now[2], RM.now[0], RM.now[1]].map((p) => openCard(p)).join("")}</div>`);
+
+/* 7. Roles */
+document.getElementById("s-roles").innerHTML = both(`<div style="display:flex;flex-wrap:wrap;gap:16px">
+  <div class="specimen" style="width:440px;background:var(--surface)"><p class="spec-label">Leo · member, owner of Website</p>${projectForm({ short: true })}</div>
+  <div class="specimen" style="width:440px;background:var(--surface)"><p class="spec-label">Tom · member, not an owner</p>${projectForm({ short: true, close: false })}</div>
+</div>`);
+
+/* ---------- Desktop frames, scaled to fit ---------- */
+function renderDesk() {
+  document.querySelectorAll(".desk-holder").forEach((h) => {
+    const frame = h.firstElementChild;
+    const avail = h.closest(".shot").clientWidth;
+    const z = Math.min(1440, avail || 1440) / 1440;
+    h.style.width = `${1440 * z}px`;
+    h.style.height = `${900 * z}px`;
+    frame.style.transform = `scale(${z})`;
+  });
+}
+renderDesk();
+addEventListener("resize", renderDesk);
+document.querySelectorAll("[data-mode-set]").forEach((b) => b.addEventListener("click", () => {
+  const m = b.dataset.modeSet;
+  document.body.dataset.mode = m;
+  document.documentElement.dataset.theme = m === "dark" ? "dark" : "light";
+  document.querySelectorAll("[data-mode-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+document.querySelectorAll("[data-view-set]").forEach((b) => b.addEventListener("click", () => {
+  document.body.dataset.view = b.dataset.viewSet;
+  document.querySelectorAll("[data-view-set]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  renderDesk();
+}));
+</script>
+</body>
+</html>
