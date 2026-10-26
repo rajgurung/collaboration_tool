@@ -164,6 +164,10 @@ async fn members_cannot_approve_but_admins_can() {
             .add_header(bob.0.clone(), bob.1.clone())
             .await;
         assert!(!page.text().contains("carol@example.com"));
+        // He sees names and roles, and only his own email.
+        assert!(page.text().contains("alice"));
+        assert!(!page.text().contains("alice@example.com"));
+        assert!(page.text().contains("bob@example.com"));
         let denied = request
             .post(&bob.at(&format!("/members/{carol_id}/approve")))
             .as_member(&bob)
@@ -177,6 +181,12 @@ async fn members_cannot_approve_but_admins_can() {
             .form(&serde_json::json!({ "role": "admin" }))
             .await;
         assert_eq!(membership_of(&ctx, "bob@example.com").await.role, "admin");
+        let page = request
+            .get(&bob.at("/members"))
+            .add_header(bob.0.clone(), bob.1.clone())
+            .await
+            .text();
+        assert!(page.contains("alice@example.com"), "admins see every email");
         let ok = request
             .post(&bob.at(&format!("/members/{carol_id}/approve")))
             .as_member(&bob)

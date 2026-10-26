@@ -23,7 +23,8 @@ use crate::{
 struct MemberRow {
     id: i64,
     username: String,
-    email: String,
+    /// Owners and admins see everyone's; members only their own.
+    email: Option<String>,
     role: String,
     status: String,
     color: &'static str,
@@ -54,7 +55,7 @@ impl MemberRow {
         Self {
             id: membership.id,
             username: membership.username.clone(),
-            email: user.email.clone(),
+            email: (me.can_manage() || user.id == me.user.id).then(|| user.email.clone()),
             role: membership.role.clone(),
             status: membership.status.clone(),
             color: avatar_color(&membership.username),

@@ -3,7 +3,7 @@
   {{<avatar name={row.username} color={row.color} size="md"/>}}
   <div class="min-w-0 flex-1">
     <p class="truncate-1 m-0 font-medium">{{ row.username }}{% if row.is_me %} <span class="text-muted">(you)</span>{% endif %}</p>
-    <p class="meta truncate-1 m-0">{{ row.email }}</p>
+    {% if row.email %}<p class="meta truncate-1 m-0">{{ row.email }}</p>{% endif %}
   </div>
   {% if not role_form %}<span class="pill capitalize">{{ row.role }}</span>{% endif %}
   {% if role_form or row.can_remove %}
